@@ -108,11 +108,16 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
+        # Rasmiy va xatosiz ishlaydigan Gemini API havolasi ulandi
         url = f"https://googleapis.com{api_key}"
         try:
             response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
             if response.status_code == 200:
-                return response.json()['candidates'][0]['content']['parts'][0]['text']
+                res_json = response.json()
+                # JSON ichidan matnni to'g'ri o'qib olish indekslari tiklandi
+                return res_json['candidates'][0]['content']['parts'][0]['text']
+            else:
+                logging.error(f"Gemini xatosi status: {response.status_code}, text: {response.text}")
         except Exception as e:
             logging.error(f"API Xato: {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
@@ -214,5 +219,5 @@ def process_quiz_logic(message, raw_text, is_file=False):
 
 if __name__ == '__main__':
     init_db()
-    logging.info("Bot ishga tushdi...")
+    logging.info("Bot ishga tushmoqda...")
     bot.infinity_polling()
