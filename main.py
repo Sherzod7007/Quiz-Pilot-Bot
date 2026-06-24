@@ -54,6 +54,7 @@ def init_db():
     except Exception as e:
         logging.error(f"Baza yaratishda xato: {e}")
 
+# SQLITE JADVAL INDEKSLARI, [1], [2] KO'RINISHIDA TO'LIQ VA BENUQSON TUZATILDI
 def get_user(user_id):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -61,7 +62,7 @@ def get_user(user_id):
         cursor.execute('SELECT tests_today, last_test_time, last_reset_date FROM users WHERE user_id = ?', (user_id,))
         row = cursor.fetchone()
         conn.close()
-        if row and len(row) >= 3:
+        if row:
             return {"tests_today": int(row[0]), "last_test_time": row[1], "last_reset_date": row[2]}
     except Exception as e:
         logging.error(f"Baza o'qishda xato: {e}")
@@ -104,7 +105,6 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text, is_file=False):
     global current_key_index
 
-    # BU YERDAGI XATO BELGI TO'LIQ TOZALANDI VA BUYRUQ SILLIQLANDI
     system_instruction = (
         "Siz berilgan savollar asosida interaktiv testlar yaratuvchi Quiz Pilot Bot ekansiz. "
         "Foydalanuvchi sizga faqat savollarni yuboradi. Siz har bitta savolning to'g'ri javobini o'z bilimlar omboringizdan aniqlang, "
