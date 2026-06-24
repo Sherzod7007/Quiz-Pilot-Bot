@@ -10,6 +10,8 @@ import telebot
 from telebot import types
 from google import genai
 from google.genai import types as genai_types
+from pydantic import BaseModel, Field
+from typing import List
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -22,6 +24,12 @@ current_key_index = 0
 
 DB_PATH = 'quiz_bot.db'
 DOWNLOADS_DIR = 'downloads'
+
+# Pydantic sxemasi - Gemini faqat shu formatda toza ma'lumot qaytarishini kafolatlaydi
+class QuizItem(BaseModel):
+    question: str = Field(description="Savol matni")
+    options: List[str] = Field(description="4 ta variantdan iborat ro'yxat")
+    correct_index: int = Field(description="To'g'ri javobning indeksi (0 dan 3 gacha)")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -37,7 +45,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# BAZA BILAN BOG'LIQ ASOSIY XATO SHU YERDA TUZATILDI: row[0], row[1], row[2] indekslari qo'yildi
 def get_user(user_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -85,16 +92,8 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
 
     system_instruction = (
         "Siz faqat o'zbek tilida interaktiv testlar yaratuvchi Quiz Pilot Bot ekansiz. "
-        f"{context_instruction} qat'iy ravishda quyidagi JSON formatda 5 ta eng muhim test savolini qaytaring. "
-        "Hech qanday kirish-chiqish matnlari yoki ```json o'ramlarini yozmang, faqat toza JSON bo'lsin.\n"
-        "Format namunasi:\n"
-        "[\n"
-        "  {\n"
-        "    \"question\": \"Savol matni?\",\n"
-        "    \"options\": [\"A variant\", \"B variant\", \"C variant\", \"D variant\"],\n"
-        "    \"correct_index\": 0\n"
-        "  }\n"
-        "]"
+        f"{context_instruction} qat'iy ravishda berilgan sxemaga muvofiq 5 ta test savolini qaytaring. "
+        "Faqat o'zbek tilida yozing."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -111,25 +110,24 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
+                    response_schema=List[QuizItem], # Qat'iy sxema o'rnatildi
                     temperature=0.5
                 )
             )
             
             if response and response.text:
-                clean_json = response.text.replace("```json", "").replace("```", "").strip()
-                return clean_json
+                return response.text
         except Exception as e:
             logging.error(f"Gemini API xatoligi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-# TUGMA MATNI SIZ XO'HLAGANDEK /start GA O'ZGARTIRILDI
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_name = message.from_user.first_name
     
-    # Faqat toza /start yozilgan qulay tugmacha
+    # Faqat toza va qulay /start tugmasi
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     start_button = types.KeyboardButton('/start')
     markup.add(start_button)
@@ -176,7 +174,6 @@ def handle_docs(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    # Tugma bosilganda yoki foydalanuvchi /start deb yozganda ishlaydi
     if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
@@ -218,11 +215,17 @@ def process_quiz_logic(message, raw_text, is_file=False):
         bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         
         for q in quiz_data:
+            # Variantlar soni 4 tadan oshib ketmasligini ta'minlash
+            options = q['options'][:4]
+            correct_index = int(q['correct_index'])
+            if correct_index >= len(options):
+                correct_index = 0
+                
             bot.send_poll(
                 chat_id=message.chat.id,
                 question=q['question'],
-                options=q['options'],
-                correct_option_id=q['correct_index'],
+                options=options,
+                correct_option_id=correct_index,
                 type='quiz',
                 is_anonymous=False
             )
