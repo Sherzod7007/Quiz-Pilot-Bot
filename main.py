@@ -108,13 +108,23 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
-        # Rasmiy va xatosiz ishlaydigan Gemini API havolasi ulandi
-        url = f"https://googleapis.com{api_key}"
+        # Yangi AQ. kalitlari uchun rasmiy endpoint URL
+        url = "https://googleapis.com"
+        
+        # Kalitlarni xavfsiz HTTP Header va params orqali uzatamiz
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": api_key
+        }
+        params = {
+            "key": api_key
+        }
+        
         try:
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
+            response = requests.post(url, json=payload, headers=headers, params=params, timeout=20)
             if response.status_code == 200:
                 res_json = response.json()
-                # JSON ichidan matnni to'g'ri o'qib olish indekslari tiklandi
+                # To'g'ri JSON indekslari bilan matnni olish
                 return res_json['candidates'][0]['content']['parts'][0]['text']
             else:
                 logging.error(f"Gemini xatosi status: {response.status_code}, text: {response.text}")
