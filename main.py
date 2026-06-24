@@ -27,14 +27,12 @@ DOWNLOADS_DIR = 'downloads'
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
+    options: List[str] = Field(description="4 ta variant ro'yxati")
+    correct_index: int = Field(description="To'g'ri javob indeksi (0-3)")
 
 def get_main_keyboard():
-    """Tugmani doim o'z joyida saqlab turuvchi funksiya"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    start_button = types.KeyboardButton('/start')
-    markup.add(start_button)
+    markup.add(types.KeyboardButton('/start'))
     return markup
 
 def init_db():
@@ -52,9 +50,8 @@ def init_db():
         conn.commit()
         conn.close()
     except Exception as e:
-        logging.error(f"Baza yaratishda xato: {e}")
+        logging.error(f"Baza xatosi: {e}")
 
-# SQLITE JADVAL INDEKSLARI, [1], [2] KO'RINISHIDA TO'LIQ VA BENUQSON TUZATILDI
 def get_user(user_id):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -90,27 +87,22 @@ def read_pdf(file_path):
                 text += page.extract_text() + "\n"
         return text
     except Exception as e:
-        logging.error(f"PDF o'qishda xato: {e}")
         return ""
 
 def read_docx(file_path):
     try:
         doc = docx.Document(file_path)
-        text = [p.text for p in doc.paragraphs]
-        return "\n".join(text)
+        return "\n".join([p.text for p in doc.paragraphs])
     except Exception as e:
-        logging.error(f"DOCX o'qishda xato: {e}")
         return ""
 
-def generate_quiz_from_gemini(extracted_text, is_file=False):
+def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
     system_instruction = (
-        "Siz berilgan savollar asosida interaktiv testlar yaratuvchi Quiz Pilot Bot ekansiz. "
-        "Foydalanuvchi sizga faqat savollarni yuboradi. Siz har bitta savolning to'g'ri javobini o'z bilimlar omboringizdan aniqlang, "
-        "so'ngra unga qo'shimcha ravishda mantiqan mos keladigan 3 ta mutlaqo noto'g'ri variant to'qing. "
-        "Jami 4 ta variant (A, B, C, D) bo'lsin. Variantlar ichida to'g'ri javob har doim tasodifiy indeksda joylashsin. "
-        "Berilgan sxemaga qat'iy rioya qiling. Faqat o'zbek tilida javob bering."
+        "Siz berilgan savollar asosida faqat o'zbek tilida interaktiv testlar yaratuvchi botsiz. "
+        "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
+        "Jami 4 ta variant bo'lsin. Berilgan sxemaga qat'iy amal qiling."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -131,11 +123,10 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
                     temperature=0.7
                 )
             )
-            
             if response and response.text:
                 return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatoligi: {e}")
+            logging.error(f"Gemini API xatosi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
@@ -146,11 +137,11 @@ def send_welcome(message):
     bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
-        "🚀 Men **Quiz Pilot Bot** — sizning intellektual va super yordamchingizman.\n\n"
+        "🚀 Men **Quiz Pilot Bot** — sizning super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga istalgan savollarni matn ko'rinishida yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
-        "2️⃣ Menga savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darslik, konspekt yoki maqolalarni yuboring.\n\n"
-        "🎯 Men o'sha savollarga to'g'ri javobni o'zim topib, 4 ta variantli interaktiv viktorina test qilib beraman!",
+        "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
+        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n\n"
+        "🎯 Men to'g'ri javobni topib, 4 ta variantli interaktiv test qilib beraman!",
         reply_markup=get_main_keyboard()
     )
 
@@ -172,25 +163,25 @@ def handle_docs(message):
         elif file_name.endswith('.docx'):
             raw_text = read_docx(file_path)
         else:
-            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX (Word) fayllarni yuboring.", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
             return
 
         if not raw_text.strip():
-            bot.send_message(message.chat.id, "❌ Fayldan matnni o'qib bo'lmadi yoki fayl bo'sh.", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
             return
 
-        process_quiz_logic(message, raw_text, is_file=True)
+        process_quiz_logic(message, raw_text)
     except Exception as e:
-        logging.error(f"Fayl yuklashda xato: {e}")
+        logging.error(f"Fayl xatosi: {e}")
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
-    process_quiz_logic(message, message.text, is_file=False)
+    process_quiz_logic(message, message.text)
 
-def process_quiz_logic(message, raw_text, is_file=False):
+def process_quiz_logic(message, raw_text):
     user_id = message.from_user.id
     today_str = str(datetime.today().date())
     user_data = get_user(user_id)
@@ -200,26 +191,14 @@ def process_quiz_logic(message, raw_text, is_file=False):
         user_data["last_reset_date"] = today_str
 
     if user_data["tests_today"] >= 15:
-        bot.send_message(message.chat.id, "❌ Kunlik limitingiz (15 ta test) tugadi. Ertaga qayta urinib ko'ring.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Kunlik limitingiz (15 ta test) tugadi.", reply_markup=get_main_keyboard())
         return
 
-    if user_data["last_test_time"]:
-        try:
-            last_time = datetime.strptime(user_data["last_test_time"], "%Y-%m-%d %H:%M:%S")
-            if datetime.now() < last_time + timedelta(minutes=3):
-                remaining = (last_time + timedelta(minutes=3)) - datetime.now()
-                m, s = int(remaining.total_seconds() // 60), int(remaining.total_seconds() % 60)
-                bot.send_message(message.chat.id, f"⏳ Kutish vaqti faol. Keyingi testni {m}m {s}s dan keyin yaratishingiz mumkin.", reply_markup=get_main_keyboard())
-                return
-        except Exception as e:
-            logging.error(f"Vaqt xatosi: {e}")
-
-    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt savollarga to'g'ri javoblarni topib, variantlar tayyorlamoqda...", reply_markup=get_main_keyboard())
-    quiz_json_raw = generate_quiz_from_gemini(raw_text, is_file=is_file)
+    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
+    quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
     if not quiz_json_raw:
         bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
-        bot.send_message(message.chat.id, "Qayta urinib ko'rishingiz mumkin.", reply_markup=get_main_keyboard())
         return
 
     try:
@@ -242,4 +221,9 @@ def process_quiz_logic(message, raw_text, is_file=False):
             )
         update_user(user_id, user_data["tests_today"] + 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), today_str)
     except Exception as e:
-        logging.error(f"JSON xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Ma'lumotlarni o'qishda xatolik.", reply_markup=get_main_keyboard())
+
+if __name__ == '__main__':
+    init_db()
+    logging.info("Bot ishga tushmoqda...")
+    bot.infinity_polling()
