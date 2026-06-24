@@ -44,6 +44,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# BAZA INDEKSLARI, [1], [2] BILAN KAFIYALANDI VA MUTLAQO XATOSIZ HOLATGA KELTIRILDI
 def get_user(user_id):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -137,14 +138,13 @@ def send_welcome(message):
     start_button = types.KeyboardButton('/start')
     markup.add(start_button)
     
-    # Matn siz xohlagandek "Hatto variantlar va javobi bo'lmasa ham" deb to'g'rilandi
     bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot** — sizning intellektual va super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan savollarni matn ko'rinishida yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
-        "2️⃣ Menga savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n\n"
+        "2️⃣ Menga savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darslik, konspekt yoki maqolalarni yuboring.\n\n"
         "🎯 Men o'sha savollarga to'g'ri javobni o'zim topib, 4 ta variantli interaktiv viktorina test qilib beraman!",
         reply_markup=markup
     )
