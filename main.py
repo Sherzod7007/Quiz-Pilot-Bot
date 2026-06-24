@@ -94,7 +94,6 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text, is_file=False):
     global current_key_index
 
-    # BUYRUQ MUTLAQO YANGILANDI: Savollarga o'zing javob top va variantlar yarat deb buyurildi
     system_instruction = (
         "Siz berilgan savollar asosida interaktiv testlar yaratuvchi Quiz Pilot Bot ekansiz. "
         "Foydalanuvchi sizga faqat savollarni yuboradi. Siz har bitta savolning to'g'ri javobini o'z bilimlar omboringizdan aniqlang, "
@@ -118,7 +117,7 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=List[QuizItem],
-                    temperature=0.7 # Variantlar qiziqarliroq chiqishi uchun temperature biroz ko'tarildi
+                    temperature=0.7
                 )
             )
             
@@ -138,12 +137,13 @@ def send_welcome(message):
     start_button = types.KeyboardButton('/start')
     markup.add(start_button)
     
+    # Matn siz xohlagandek "Hatto variantlar va javobi bo'lmasa ham" deb to'g'rilandi
     bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot** — sizning intellektual va super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga istalgan savollarni matn ko'rinishida yuboring (Hatto variantlar yoki matni bo'lmasa ham)\n"
+        "1️⃣ Menga istalgan savollarni matn ko'rinishida yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
         "2️⃣ Menga savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n\n"
         "🎯 Men o'sha savollarga to'g'ri javobni o'zim topib, 4 ta variantli interaktiv viktorina test qilib beraman!",
         reply_markup=markup
@@ -226,7 +226,6 @@ def process_quiz_logic(message, raw_text, is_file=False):
             if correct_index >= len(options):
                 correct_index = 0
                 
-            # Interaktiv "Quiz" (viktorina) formati - to'g'ri bo'lsa yashil, noto'g'ri bo'lsa qizil yonadi
             bot.send_poll(
                 chat_id=message.chat.id,
                 question=q['question'],
