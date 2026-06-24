@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from pypdf import PdfReader
 import docx
 import telebot
+from telebot import types  # Tugmalar uchun kutubxona ulandi
 from google import genai
-from google.genai import types
+from google.genai import types as genai_types
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -101,36 +102,45 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
             continue
             
         try:
-            # Rasmiy Google GenAI mijozini ishga tushirish (URL havolalar mutlaqo kerak emas)
             client = genai.Client(api_key=api_key)
-            
             response = client.models.generate_content(
                 model='gemini-1.5-flash',
                 contents=extracted_text[:15000],
-                config=types.GenerateContentConfig(
+                config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     temperature=0.5
                 )
             )
-            if response.text:
-                return response.text
+            
+            if response and response.text:
+                clean_json = response.text.replace("```json", "").replace("```", "").strip()
+                return clean_json
         except Exception as e:
-            logging.error(f"Gemini API kutubxona xatosi: {e}")
+            logging.error(f"Gemini API xatoligi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
+# Ekran ostida katta /start tugmasini chiqarish mantiqi to'g'rilandi
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_name = message.from_user.first_name
-    bot.reply_to(message, 
+    
+    # Katta tugmacha yaratish
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    start_button = types.KeyboardButton('🚀 Botni ishga tushirish (/start)')
+    markup.add(start_button)
+    
+    bot.send_message(
+        message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot** — sizning intellektual yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan mavzuni matn ko'rinishida yuboring (Masalan: 'Biologiya odam anatomiyasi')\n"
         "2️⃣ Menga **PDF** yoki **Word (.docx)** formatidagi darslik, konspekt yoki maqolalarni yuboring.\n\n"
-        "📥 Qani boshladik, menga mavzu matnini yoki hujjat faylini yuboring!"
+        "📥 Botni yangilash uchun pastdagi tugmani bosishingiz, test yaratish uchun esa to'g'ridan-to'g'ri matn yoki fayl yuborishingiz mumkin!",
+        reply_markup=markup
     )
 
 @bot.message_handler(content_types=['document'])
@@ -164,6 +174,10 @@ def handle_docs(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
+    # Agar foydalanuvchi pastdagi tugmani bossa, unga start komandasi sifatida javob beramiz
+    if message.text == '🚀 Botni ishga tushirish (/start)' or message.text.startswith('/'):
+        send_welcome(message)
+        return
     process_quiz_logic(message, message.text, is_file=False)
 
 def process_quiz_logic(message, raw_text, is_file=False):
