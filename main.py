@@ -25,11 +25,10 @@ current_key_index = 0
 DB_PATH = 'quiz_bot.db'
 DOWNLOADS_DIR = 'downloads'
 
-# Pydantic sxemasi - Gemini faqat shu formatda toza ma'lumot qaytarishini kafolatlaydi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="4 ta variantdan iborat ro'yxat")
-    correct_index: int = Field(description="To'g'ri javobning indeksi (0 dan 3 gacha)")
+    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
+    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -46,24 +45,30 @@ def init_db():
     conn.close()
 
 def get_user(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT tests_today, last_test_time, last_reset_date FROM users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"tests_today": row[0], "last_test_time": row[1], "last_reset_date": row[2]}
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT tests_today, last_test_time, last_reset_date FROM users WHERE user_id = ?', (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and len(row) >= 3:
+            return {"tests_today": int(row[0]), "last_test_time": row[1], "last_reset_date": row[2]}
+    except Exception as e:
+        logging.error(f"Baza o'qishda xato: {e}")
     return {"tests_today": 0, "last_test_time": None, "last_reset_date": str(datetime.today().date())}
 
 def update_user(user_id, tests_today, last_test_time, last_reset_date):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO users (user_id, tests_today, last_test_time, last_reset_date)
-        VALUES (?, ?, ?, ?)
-    ''', (user_id, tests_today, last_test_time, last_reset_date))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO users (user_id, tests_today, last_test_time, last_reset_date)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, tests_today, last_test_time, last_reset_date))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Baza yozishda xato: {e}")
 
 def read_pdf(file_path):
     try:
@@ -88,12 +93,14 @@ def read_docx(file_path):
 
 def generate_quiz_from_gemini(extracted_text, is_file=False):
     global current_key_index
-    context_instruction = "Berilgan mavzu bo'yicha" if not is_file else "Quyidagi matn/hujjat ichidagi ma'lumotlarga asoslanib"
 
+    # BUYRUQ MUTLAQO YANGILANDI: Savollarga o'zing javob top va variantlar yarat deb buyurildi
     system_instruction = (
-        "Siz faqat o'zbek tilida interaktiv testlar yaratuvchi Quiz Pilot Bot ekansiz. "
-        f"{context_instruction} qat'iy ravishda berilgan sxemaga muvofiq 5 ta test savolini qaytaring. "
-        "Faqat o'zbek tilida yozing."
+        "Siz berilgan savollar asosida interaktiv testlar yaratuvchi Quiz Pilot Bot ekansiz. "
+        "Foydalanuvchi sizga faqat savollarni yuboradi. Siz har bitta savolning to'g'ri javobini o'z bilimlar omboringizdan aniqlang, "
+        "so'ngra unga qo'shimcha ravishda mantiqan mos keladigan 3 ta mutlaqo noto'g'ri variant to'qing. "
+        "Jami 4 ta variant (A, B, C, D) bo'lsin. Variantlar ichida to'g'ri javob har doim tasodifiy (random) indeksda joylashsin. "
+        "Berilgan sxemaga qat'iy rioya qiling. Faqat o'zbek tilida javob bering."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -110,8 +117,8 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
-                    response_schema=List[QuizItem], # Qat'iy sxema o'rnatildi
-                    temperature=0.5
+                    response_schema=List[QuizItem],
+                    temperature=0.7 # Variantlar qiziqarliroq chiqishi uchun temperature biroz ko'tarildi
                 )
             )
             
@@ -127,7 +134,6 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
 def send_welcome(message):
     user_name = message.from_user.first_name
     
-    # Faqat toza va qulay /start tugmasi
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     start_button = types.KeyboardButton('/start')
     markup.add(start_button)
@@ -135,11 +141,11 @@ def send_welcome(message):
     bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
-        "🚀 Men **Quiz Pilot Bot** — sizning intellektual yordamchingizman.\n\n"
+        "🚀 Men **Quiz Pilot Bot** — sizning intellektual va super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga istalgan mavzuni matn ko'rinishida yuboring (Masalan: 'Biologiya odam anatomiyasi')\n"
-        "2️⃣ Menga **PDF** yoki **Word (.docx)** formatidagi darslik, konspekt yoki maqolalarni yuboring.\n\n"
-        "📥 Botni yangilash uchun pastdagi **`/start`** tugmasini bosishingiz, test yaratish uchun esa to'g'ridan-to'g'ri matn yoki fayl yuborishingiz mumkin!",
+        "1️⃣ Menga istalgan savollarni matn ko'rinishida yuboring (Hatto variantlar yoki matni bo'lmasa ham)\n"
+        "2️⃣ Menga savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n\n"
+        "🎯 Men o'sha savollarga to'g'ri javobni o'zim topib, 4 ta variantli interaktiv viktorina test qilib beraman!",
         reply_markup=markup
     )
 
@@ -203,7 +209,7 @@ def process_quiz_logic(message, raw_text, is_file=False):
         except Exception as e:
             logging.error(f"Vaqt xatosi: {e}")
 
-    status_msg = bot.reply_to(message, "⏳ Sun'iy intellekt test savollarini tayyorlamoqda, iltimos kuting...")
+    status_msg = bot.reply_to(message, "⏳ Sun'iy intellekt savollarga to'g'ri javoblarni topib, variantlar tayyorlamoqda...")
     quiz_json_raw = generate_quiz_from_gemini(raw_text, is_file=is_file)
     
     if not quiz_json_raw:
@@ -215,12 +221,12 @@ def process_quiz_logic(message, raw_text, is_file=False):
         bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         
         for q in quiz_data:
-            # Variantlar soni 4 tadan oshib ketmasligini ta'minlash
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
             if correct_index >= len(options):
                 correct_index = 0
                 
+            # Interaktiv "Quiz" (viktorina) formati - to'g'ri bo'lsa yashil, noto'g'ri bo'lsa qizil yonadi
             bot.send_poll(
                 chat_id=message.chat.id,
                 question=q['question'],
