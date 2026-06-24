@@ -2,12 +2,13 @@
 import logging
 import sqlite3
 import json
-import requests
 import os
 from datetime import datetime, timedelta
 from pypdf import PdfReader
 import docx
 import telebot
+from google import genai
+from google.genai import types
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -93,43 +94,30 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
         "]"
     )
 
-    payload = {
-        "contents": [{"parts": [{"text": extracted_text[:15000]}]}],
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "temperature": 0.5
-        }
-    }
-
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
-        # Yangi AQ. kalitlari uchun rasmiy endpoint URL
-        url = "https://googleapis.com"
-        
-        # Kalitlarni xavfsiz HTTP Header va params orqali uzatamiz
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": api_key
-        }
-        params = {
-            "key": api_key
-        }
-        
         try:
-            response = requests.post(url, json=payload, headers=headers, params=params, timeout=20)
-            if response.status_code == 200:
-                res_json = response.json()
-                # To'g'ri JSON indekslari bilan matnni olish
-                return res_json['candidates'][0]['content']['parts'][0]['text']
-            else:
-                logging.error(f"Gemini xatosi status: {response.status_code}, text: {response.text}")
+            # Rasmiy Google GenAI mijozini ishga tushirish (URL havolalar mutlaqo kerak emas)
+            client = genai.Client(api_key=api_key)
+            
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=extracted_text[:15000],
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    temperature=0.5
+                )
+            )
+            if response.text:
+                return response.text
         except Exception as e:
-            logging.error(f"API Xato: {e}")
+            logging.error(f"Gemini API kutubxona xatosi: {e}")
+            
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
