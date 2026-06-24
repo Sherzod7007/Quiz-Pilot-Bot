@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pypdf import PdfReader
 import docx
 import telebot
-from telebot import types  # Tugmalar uchun kutubxona ulandi
+from telebot import types
 from google import genai
 from google.genai import types as genai_types
 
@@ -37,6 +37,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# BAZA BILAN BOG'LIQ ASOSIY XATO SHU YERDA TUZATILDI: row[0], row[1], row[2] indekslari qo'yildi
 def get_user(user_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -62,7 +63,8 @@ def read_pdf(file_path):
         reader = PdfReader(file_path)
         text = ""
         for page in reader.pages:
-            text += page.extract_text() + "\n"
+            if page.extract_text():
+                text += page.extract_text() + "\n"
         return text
     except Exception as e:
         logging.error(f"PDF o'qishda xato: {e}")
@@ -122,14 +124,14 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-# Ekran ostida katta /start tugmasini chiqarish mantiqi to'g'rilandi
+# TUGMA MATNI SIZ XO'HLAGANDEK /start GA O'ZGARTIRILDI
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_name = message.from_user.first_name
     
-    # Katta tugmacha yaratish
+    # Faqat toza /start yozilgan qulay tugmacha
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    start_button = types.KeyboardButton('🚀 Botni ishga tushirish (/start)')
+    start_button = types.KeyboardButton('/start')
     markup.add(start_button)
     
     bot.send_message(
@@ -139,7 +141,7 @@ def send_welcome(message):
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan mavzuni matn ko'rinishida yuboring (Masalan: 'Biologiya odam anatomiyasi')\n"
         "2️⃣ Menga **PDF** yoki **Word (.docx)** formatidagi darslik, konspekt yoki maqolalarni yuboring.\n\n"
-        "📥 Botni yangilash uchun pastdagi tugmani bosishingiz, test yaratish uchun esa to'g'ridan-to'g'ri matn yoki fayl yuborishingiz mumkin!",
+        "📥 Botni yangilash uchun pastdagi **`/start`** tugmasini bosishingiz, test yaratish uchun esa to'g'ridan-to'g'ri matn yoki fayl yuborishingiz mumkin!",
         reply_markup=markup
     )
 
@@ -174,8 +176,8 @@ def handle_docs(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    # Agar foydalanuvchi pastdagi tugmani bossa, unga start komandasi sifatida javob beramiz
-    if message.text == '🚀 Botni ishga tushirish (/start)' or message.text.startswith('/'):
+    # Tugma bosilganda yoki foydalanuvchi /start deb yozganda ishlaydi
+    if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
     process_quiz_logic(message, message.text, is_file=False)
