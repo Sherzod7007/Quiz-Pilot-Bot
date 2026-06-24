@@ -2,32 +2,19 @@
 import logging
 import sqlite3
 import json
-import re
 import requests
 import os
 from datetime import datetime, timedelta
 from pypdf import PdfReader
 import docx
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import telebot
 
-# Loggingni sozlash
+# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Dotenv orqali maxfiy kalitlarni yuklash
-from dotenv import load_dotenv
-load_dotenv()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAGwfHZUV5Jc_JUFu0uw08UB0IS4cFZ1ceQ")
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-# Bot obyektini Railway uchun toza va proksisiz yaratish
-application = (
-    Application.builder()
-    .token(TELEGRAM_BOT_TOKEN)
-    .build()
-)
-
-# Kalitlarni Railway'dan o'qiymiz
 GOOGLE_API_KEYS = os.getenv("GOOGLE_API_KEYS", "").split(",")
 current_key_index = 0
 
@@ -103,8 +90,7 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
         "    \"options\": [\"A variant\", \"B variant\", \"C variant\", \"D variant\"],\n"
         "    \"correct_index\": 0\n"
         "  }\n"
-        "]\n"
-        "Eslatma: options ichida maksimal 4 ta variant bo'lsin va correct_index to'g'ri javobning indeks raqami (0 dan 3 gacha) bo'lsin."
+        "]"
     )
 
     payload = {
@@ -127,16 +113,15 @@ def generate_quiz_from_gemini(extracted_text, is_file=False):
             response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=20)
             if response.status_code == 200:
                 return response.json()['candidates'][0]['content']['parts'][0]['text']
-            else:
-                logging.error(f"Gemini error status: {response.status_code}, response: {response.text}")
         except Exception as e:
             logging.error(f"API Xato: {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_name = update.effective_user.first_name
-    await update.message.reply_text(
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    user_name = message.from_user.first_name
+    bot.reply_to(message, 
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot** — sizning intellektual yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
@@ -145,37 +130,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📥 Qani boshladik, menga mavzu matnini yoki hujjat faylini yuboring!"
     )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    raw_text = update.message.text
-    await process_quiz_logic(update, context, raw_text, is_file=False)
+@bot.message_handler(content_types=['document'])
+def handle_docs(message):
+    try:
+        file_name = message.document.file_name
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        file_path = os.path.join(DOWNLOADS_DIR, file_name)
+        
+        with open(file_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    document = update.message.document
-    file_id = document.file_id
-    file_name = document.file_name
+        if file_name.endswith('.pdf'):
+            raw_text = read_pdf(file_path)
+        elif file_name.endswith('.docx'):
+            raw_text = read_docx(file_path)
+        else:
+            bot.reply_to(message, "❌ Faqat PDF yoki DOCX (Word) fayllarni yuboring.")
+            return
 
-    file = await context.bot.get_file(file_id)
-    file_path = os.path.join(DOWNLOADS_DIR, file_name)
+        if not raw_text.strip():
+            bot.reply_to(message, "❌ Fayldan matnni o'qib bo'lmadi yoki fayl bo'sh.")
+            return
 
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    await file.download_to_drive(file_path)
+        process_quiz_logic(message, raw_text, is_file=True)
+    except Exception as e:
+        logging.error(f"Fayl yuklashda xato: {e}")
 
-    if file_name.endswith('.pdf'):
-        raw_text = read_pdf(file_path)
-    elif file_name.endswith('.docx'):
-        raw_text = read_docx(file_path)
-    else:
-        await update.message.reply_text("❌ Faqat PDF yoki DOCX (Word) fayllarni yuboring.")
-        return
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    process_quiz_logic(message, message.text, is_file=False)
 
-    if not raw_text.strip():
-        await update.message.reply_text("❌ Fayldan matnni o'qib bo'lmadi yoki fayl bo'sh.")
-        return
-
-    await process_quiz_logic(update, context, raw_text, is_file=True)
-
-async def process_quiz_logic(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_text, is_file=False):
-    user_id = update.message.from_user.id
+def process_quiz_logic(message, raw_text, is_file=False):
+    user_id = message.from_user.id
     today_str = str(datetime.today().date())
     user_data = get_user(user_id)
 
@@ -184,7 +173,7 @@ async def process_quiz_logic(update: Update, context: ContextTypes.DEFAULT_TYPE,
         user_data["last_reset_date"] = today_str
 
     if user_data["tests_today"] >= 15:
-        await update.message.reply_text("❌ Kunlik limitingiz (15 ta test) tugadi. Ertaga qayta urinib ko'ring.")
+        bot.reply_to(message, "❌ Kunlik limitingiz (15 ta test) tugadi. Ertaga qayta urinib ko'ring.")
         return
 
     if user_data["last_test_time"]:
@@ -193,50 +182,37 @@ async def process_quiz_logic(update: Update, context: ContextTypes.DEFAULT_TYPE,
             if datetime.now() < last_time + timedelta(minutes=3):
                 remaining = (last_time + timedelta(minutes=3)) - datetime.now()
                 m, s = int(remaining.total_seconds() // 60), int(remaining.total_seconds() % 60)
-                await update.message.reply_text(f"⏳ Kutish vaqti faol. Keyingi testni {m}m {s}s dan keyin yaratishingiz mumkin.")
+                bot.reply_to(message, f"⏳ Kutish vaqti faol. Keyingi testni {m}m {s}s dan keyin yaratishingiz mumkin.")
                 return
         except Exception as e:
-            logging.error(f"Time parsing error: {e}")
+            logging.error(f"Vaqt xatosi: {e}")
 
-    status_message = await update.message.reply_text("⏳ Sun'iy intellekt test savollarini tayyorlamoqda, iltimos kuting...")
-    
+    status_msg = bot.reply_to(message, "⏳ Sun'iy intellekt test savollarini tayyorlamoqda, iltimos kuting...")
     quiz_json_raw = generate_quiz_from_gemini(raw_text, is_file=is_file)
     
     if not quiz_json_raw:
-        await status_message.edit_text("❌ Afsuski, test yaratishda xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring.")
+        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
         return
 
     try:
         quiz_data = json.loads(quiz_json_raw)
-        await status_message.delete()
+        bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         
         for q in quiz_data:
-            await update.message.reply_poll(
+            bot.send_poll(
+                chat_id=message.chat.id,
                 question=q['question'],
                 options=q['options'],
                 correct_option_id=q['correct_index'],
                 type='quiz',
                 is_anonymous=False
             )
-        
-        # Statistikani yangilash
         update_user(user_id, user_data["tests_today"] + 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), today_str)
-        
     except Exception as e:
-        logging.error(f"JSON yoki Poll xatosi: {e}")
-        await status_message.edit_text("❌ Test ma'lumotlarini o'qishda xatolik yuz berdi.")
-
-def main():
-    init_db()
-    
-    # Handlerlarni qo'shish
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    
-    # Botni ishga tushirish
-    logging.info("Bot ishga tushdi...")
-    application.run_polling()
+        logging.error(f"JSON xatosi: {e}")
+        bot.edit_message_text("❌ Test ma'lumotlarini o'qishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
 
 if __name__ == '__main__':
-    main()
+    init_db()
+    logging.info("Bot ishga tushdi...")
+    bot.infinity_polling()
