@@ -194,20 +194,12 @@ def process_quiz_logic(message, raw_text):
         bot.send_message(message.chat.id, "❌ Kunlik limitingiz (15 ta test) tugadi.", reply_markup=get_main_keyboard())
         return
 
-   ststus_msg = bot.send_message(
-       message.chat.id,
-       " Sun`iy intellekt javoblarni topib, test tayyorlamoqda...",
-       reply_markup=get_main_keyboard()
-   )
-
-quiz_json_raw = generate_quiz_from_gemini(raw_text)
-
-if not quiz_json_raw:
-    bot.send_message(
-        message.chat.id,
-        " Test yaratishda hatolik yuz berdi."
-    )
-    return
+    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
+    quiz_json_raw = generate_quiz_from_gemini(raw_text)
+    
+    if not quiz_json_raw:
+        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
+        return
 
     try:
         quiz_data = json.loads(quiz_json_raw)
