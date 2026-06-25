@@ -231,8 +231,7 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
         update_user(user_id, user_data["tests_today"] + 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), today_str)
-    except Exception as e:
-        bot.send_message(message.chat.id, "❌ Ma'lumotlarni o'qishda xatolik.", reply_markup=get_main_keyboard())
+   
         except Exception as e:
     print("GEMINI ERROR =", e)
     logging.error(f"Gemini API xatosi: {e}")
