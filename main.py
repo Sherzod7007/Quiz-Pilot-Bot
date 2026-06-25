@@ -197,20 +197,9 @@ def process_quiz_logic(message, raw_text):
     status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
-   if not quiz_json_raw:
-    try:
-        bot.delete_message(
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id
-        )
-    except:
-        pass
-
-    bot.send_message(
-        message.chat.id,
-        "❌ Test yaratishda xatolik yuz berdi."
-    )
-    return
+    if not quiz_json_raw:
+        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
+        return
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -231,10 +220,8 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
         update_user(user_id, user_data["tests_today"] + 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), today_str)
-   
-        except Exception as e:
-    print("GEMINI ERROR =", e)
-    logging.error(f"Gemini API xatosi: {e}")
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ Ma'lumotlarni o'qishda xatolik.", reply_markup=get_main_keyboard())
 
 if __name__ == '__main__':
     init_db()
