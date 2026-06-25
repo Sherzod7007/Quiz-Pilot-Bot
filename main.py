@@ -25,10 +25,14 @@ current_key_index = 0
 DB_PATH = 'quiz_bot.db'
 DOWNLOADS_DIR = 'downloads'
 
+# Model sxemalari yangilandi - xatoliklarning oldi olindi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob indeksi (0-3)")
+    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
+    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
+
+class QuizResponse(BaseModel):
+    quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
@@ -59,7 +63,7 @@ def get_user(user_id):
         cursor.execute('SELECT tests_today, last_test_time, last_reset_date FROM users WHERE user_id = ?', (user_id,))
         row = cursor.fetchone()
         conn.close()
-        if row:
+        if row and len(row) >= 3:
             return {"tests_today": int(row[0]), "last_test_time": row[1], "last_reset_date": row[2]}
     except Exception as e:
         logging.error(f"Baza o'qishda xato: {e}")
@@ -119,7 +123,7 @@ def generate_quiz_from_gemini(extracted_text):
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
-                    response_schema=List[QuizItem],
+                    response_schema=QuizResponse, # O'ralgan to'g'ri sxema ulandi
                     temperature=0.7
                 )
             )
@@ -140,7 +144,7 @@ def send_welcome(message):
         "🚀 Men **Quiz Pilot Bot** — sizning super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
-        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n\n"
+        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
         "🎯 Men to'g'ri javobni topib, 4 ta variantli interaktiv test qilib beraman!",
         reply_markup=get_main_keyboard()
     )
@@ -205,7 +209,10 @@ def process_quiz_logic(message, raw_text):
         quiz_data = json.loads(quiz_json_raw)
         bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         
-        for q in quiz_data:
+        # Yangi o'ralgan sxema bo'yicha "quizzes" kalitidan ma'lumotlarni olish
+        items = quiz_data.get("quizzes", [])
+        
+        for q in items:
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
             if correct_index >= len(options):
@@ -221,7 +228,8 @@ def process_quiz_logic(message, raw_text):
             )
         update_user(user_id, user_data["tests_today"] + 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), today_str)
     except Exception as e:
-        bot.send_message(message.chat.id, "❌ Ma'lumotlarni o'qishda xatolik.", reply_markup=get_main_keyboard())
+        logging.error(f"JSON yoki Poll xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
 
 if __name__ == '__main__':
     init_db()
