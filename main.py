@@ -5,6 +5,7 @@ import os
 import sqlite3
 import uuid
 import time
+import threading
 import telebot
 from telebot import types
 
@@ -21,7 +22,7 @@ import docx
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, num_threads=4)
 
 # ADMIN ID va API KALITLAR RO'YXATI
 ADMIN_ID = 324575351  
@@ -221,8 +222,8 @@ def admin_panel(message):
 
     admin_text = (
         "📊 **QUIZ PILOT BOT - ADMIN PANEL**\n\n"
-        f"👥 Jami foydalanuvchilar: **{total_users[0]} ta**\n"
-        f"📝 Jami yaratilgan testlar: **{total_quizzes[0]} ta**\n\n"
+        f"👥 Jami foydalanuvchilar: **{total_users} ta**\n"
+        f"📝 Jami yaratilgan testlar: **{total_quizzes} ta**\n\n"
         "📢 Hamma foydalanuvchilarga xabar yuborish uchun: `/send_all xabar matni` deb yozing."
     )
     bot.send_message(message.chat.id, admin_text, parse_mode="Markdown")
@@ -264,4 +265,3 @@ def show_archive(message):
     cursor = conn.cursor()
     cursor.execute("SELECT session_id, title, created_at FROM quiz_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10", (user_id,))
     sessions = cursor.fetchall()
-    conn.close()
