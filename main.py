@@ -37,7 +37,8 @@ GOOGLE_API_KEYS = [
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-DB_NAME = 'quiz_pilot.db'
+# 🛠️ TO'G'RILANDI: Eskirgan kesh bazasidan qutulish uchun yangi nom berildi
+DB_NAME = 'quiz_pilot_v2.db'
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -263,5 +264,3 @@ def show_archive(message):
     cursor.execute("SELECT session_id, title, created_at FROM quiz_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10", (user_id,))
     sessions = cursor.fetchall()
     conn.close()
-
-    # 🛠️ PROBELLAR TO'LIQ TEKISLANDI: IndentationError xatosi yo'qoldi
