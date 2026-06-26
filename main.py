@@ -2,14 +2,11 @@
 import logging
 import json
 import os
+import requests  # To'g'ridan-to'g'ri ulanish uchun
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
-from google import genai
-from google.genai import types as genai_types
-from pydantic import BaseModel, Field
-from typing import List
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -21,14 +18,6 @@ GOOGLE_API_KEYS = os.getenv("GOOGLE_API_KEYS", "").split(",")
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-
-class QuizItem(BaseModel):
-    question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
-
-class QuizResponse(BaseModel):
-    quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
@@ -56,11 +45,28 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
+    # Qat'iy va tushunarli toza JSON buyrug'i
     system_instruction = (
         "Siz berilgan savollar asosida faqat o'zbek tilida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
-        "Jami 4 ta variant bo'lsin. Berilgan sxemaga qat'iy amal qiling."
+        "Jami 4 ta variant bo'lsin. Faqat quyidagi JSON formatida javob bering, hech qanday kirish matnlari yozmang:\n"
+        "[\n"
+        "  {\n"
+        "    \"question\": \"Savol matni?\",\n"
+        "    \"options\": [\"1-variant\", \"2-variant\", \"3-variant\", \"4-variant\"],\n"
+        "    \"correct_index\": 0\n"
+        "  }\n"
+        "]"
     )
+
+    payload = {
+        "contents": [{"parts": [{"text": extracted_text[:15000]}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.7
+        }
+    }
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -68,22 +74,18 @@ def generate_quiz_from_gemini(extracted_text):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
+        # To'g'ridan-to'g'ri ulanish havolasi (Kutubxonasiz)
+        url = f"https://googleapis.com{api_key}"
+        
         try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=extracted_text[:15000],
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=QuizResponse,
-                    temperature=0.7
-                )
-            )
-            if response and response.text:
-                return response.text
+            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=25)
+            if response.status_code == 200:
+                res_json = response.json()
+                return res_json['candidates'][0]['content']['parts'][0]['text']
+            else:
+                logging.error(f"Gemini status xatosi: {response.status_code}")
         except Exception as e:
-            logging.error(f"Gemini API xatosi: {e}")
+            logging.error(f"Ulanish xatosi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
@@ -143,16 +145,16 @@ def process_quiz_logic(message, raw_text):
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
     if not quiz_json_raw:
-        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
+        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni yoki ulanishni tekshiring.", chat_id=message.chat.id, message_id=status_msg.message_id)
         return
 
     try:
-        quiz_data = json.loads(quiz_json_raw)
+        # Markdown o'ramlarini tozalash
+        clean_json = quiz_json_raw.replace("```json", "").replace("```", "").strip()
+        quiz_data = json.loads(clean_json)
         bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         
-        items = quiz_data.get("quizzes", [])
-        
-        for q in items:
+        for q in quiz_data:
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
             if correct_index >= len(options):
@@ -167,8 +169,8 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
     except Exception as e:
-        logging.error(f"JSON yoki Poll xatosi: {e}")
-        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
+        logging.error(f"JSON xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
 if __name__ == '__main__':
     logging.info("Bot ishga tushmoqda...")
