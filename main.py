@@ -25,6 +25,10 @@ DOWNLOADS_DIR = 'downloads'
 # Foydalanuvchilarning test natijalarini va poll ID larini saqlash uchun lug'at
 user_quiz_sessions = {}
 
+# Foydalanuvchilarning umumiy reytingini saqlash uchun lug'at
+# Tuzilishi: {user_id: {"name": "Ism", "score": 0}}
+global_leaderboard = {}
+
 # Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
@@ -37,7 +41,7 @@ class QuizResponse(BaseModel):
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add(types.KeyboardButton('/start'))
+    markup.add(types.KeyboardButton('/start'), types.KeyboardButton('/rating'))
     return markup
 
 def read_pdf(file_path):
@@ -109,9 +113,28 @@ def send_welcome(message):
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
         "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
-        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
+        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!\n\n"
+        "📊 Kunlik reytingni ko'rish uchun /rating buyrug'ini bosing.",
         reply_markup=get_main_keyboard()
     )
+
+@bot.message_handler(commands=['rating'])
+def send_rating(message):
+    if not global_leaderboard:
+        bot.send_message(message.chat.id, "📊 Reyting hali bo'sh. Birinchi bo'lib testlarni yeching va reytingda yetakchi bo'ling!", reply_markup=get_main_keyboard())
+        return
+
+    # Reytingni to'g'ri javoblar soni bo'yicha kamayish tartibida saralash
+    sorted_leaderboard = sorted(global_leaderboard.items(), key=lambda x: x[1]['score'], reverse=True)
+    
+    leaderboard_text = "🏆 **Foydalanuvchilar reytingi (Top 10):**\n\n"
+    medals = ["🥇", "🥈", "🥉"]
+    
+    for idx, (user_id, data) in enumerate(sorted_leaderboard[:10], start=1):
+        medal = medals[idx-1] if idx <= 3 else f"{idx}."
+        leaderboard_text += f"{medal} {data['name']} — {data['score']} ta to'g'ri javob\n"
+        
+    bot.send_message(message.chat.id, leaderboard_text, parse_mode="Markdown", reply_markup=get_main_keyboard())
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
@@ -144,8 +167,11 @@ def handle_docs(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    if message.text == '/start' or message.text.startswith('/'):
+    if message.text == '/start' or message.text.startswith('/start'):
         send_welcome(message)
+        return
+    if message.text == '/rating' or message.text.startswith('/rating'):
+        send_rating(message)
         return
     process_quiz_logic(message, message.text)
 
@@ -170,8 +196,10 @@ def process_quiz_logic(message, raw_text):
         
         items = quiz_data.get("quizzes", [])
         user_id = message.from_user.id
+        user_name = message.from_user.first_name if message.from_user.first_name else "Foydalanuvchi"
         
         user_quiz_sessions[user_id] = {
+            "user_name": user_name,
             "correct_count": 0,
             "incorrect_count": 0,
             "total_questions": len(items),
@@ -211,30 +239,3 @@ def handle_poll_answer(poll_answer):
     poll_id = poll_answer.poll_id
     chosen_options = poll_answer.option_ids
     
-    if user_id in user_quiz_sessions and poll_id in user_quiz_sessions[user_id]["poll_map"]:
-        session = user_quiz_sessions[user_id]
-        correct_index = session["poll_map"][poll_id]
-        
-        # Ro'yxatning birinchi elementini tekshiramiz
-        if chosen_options and chosen_options[0] == correct_index:
-            session["correct_count"] += 1
-        else:
-            session["incorrect_count"] += 1
-            
-        session["answered_questions"] += 1
-        
-        if session["answered_questions"] == session["total_questions"]:
-            correct = session["correct_count"]
-            incorrect = session["incorrect_count"]
-            total = session["total_questions"]
-            percentage = int((correct / total) * 100) if total > 0 else 0
-            
-            result_text = f"📊 **Sizning test natijangiz tayyor!**\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
-            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
-            
-            if user_id in user_quiz_sessions:
-                del user_quiz_sessions[user_id]
-
-if __name__ == '__main__':
-    logging.info("Bot ishga tushdi...")
-    bot.infinity_polling()
