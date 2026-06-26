@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
 import logging
+import sqlite3
 import json
 import os
-import requests  # To'g'ridan-to'g'ri ulanish uchun
+from datetime import datetime, timedelta
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
+from google import genai
+from google.genai import types as genai_types
+from pydantic import BaseModel, Field
+from typing import List
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -17,12 +22,61 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 GOOGLE_API_KEYS = os.getenv("GOOGLE_API_KEYS", "").split(",")
 current_key_index = 0
 
+DB_PATH = 'quiz_bot.db'
 DOWNLOADS_DIR = 'downloads'
+
+class QuizItem(BaseModel):
+    question: str = Field(description="Savol matni")
+    options: List[str] = Field(description="4 ta variant ro'yxati")
+    correct_index: int = Field(description="To'g'ri javob indeksi (0-3)")
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     markup.add(types.KeyboardButton('/start'))
     return markup
+
+def init_db():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                tests_today INTEGER DEFAULT 0,
+                last_test_time TEXT,
+                last_reset_date TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Baza xatosi: {e}")
+
+def get_user(user_id):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT tests_today, last_test_time, last_reset_date FROM users WHERE user_id = ?', (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return {"tests_today": int(row[0]), "last_test_time": row[1], "last_reset_date": row[2]}
+    except Exception as e:
+        logging.error(f"Baza o'qishda xato: {e}")
+    return {"tests_today": 0, "last_test_time": None, "last_reset_date": str(datetime.today().date())}
+
+def update_user(user_id, tests_today, last_test_time, last_reset_date):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO users (user_id, tests_today, last_test_time, last_reset_date)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, tests_today, last_test_time, last_reset_date))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Baza yozishda xato: {e}")
 
 def read_pdf(file_path):
     try:
@@ -45,28 +99,11 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
-    # Qat'iy va tushunarli toza JSON buyrug'i
     system_instruction = (
         "Siz berilgan savollar asosida faqat o'zbek tilida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
-        "Jami 4 ta variant bo'lsin. Faqat quyidagi JSON formatida javob bering, hech qanday kirish matnlari yozmang:\n"
-        "[\n"
-        "  {\n"
-        "    \"question\": \"Savol matni?\",\n"
-        "    \"options\": [\"1-variant\", \"2-variant\", \"3-variant\", \"4-variant\"],\n"
-        "    \"correct_index\": 0\n"
-        "  }\n"
-        "]"
+        "Jami 4 ta variant bo'lsin. Berilgan sxemaga qat'iy amal qiling."
     )
-
-    payload = {
-        "contents": [{"parts": [{"text": extracted_text[:15000]}]}],
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "temperature": 0.7
-        }
-    }
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -74,18 +111,22 @@ def generate_quiz_from_gemini(extracted_text):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
-        # To'g'ridan-to'g'ri ulanish havolasi (Kutubxonasiz)
-        url = f"https://googleapis.com{api_key}"
-        
         try:
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=25)
-            if response.status_code == 200:
-                res_json = response.json()
-                return res_json['candidates'][0]['content']['parts'][0]['text']
-            else:
-                logging.error(f"Gemini status xatosi: {response.status_code}")
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=extracted_text[:15000],
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=List[QuizItem],
+                    temperature=0.7
+                )
+            )
+            if response and response.text:
+                return response.text
         except Exception as e:
-            logging.error(f"Ulanish xatosi: {e}")
+            logging.error(f"Gemini API xatosi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
@@ -99,7 +140,7 @@ def send_welcome(message):
         "🚀 Men **Quiz Pilot Bot** — sizning super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
-        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
+        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n\n"
         "🎯 Men to'g'ri javobni topib, 4 ta variantli interaktiv test qilib beraman!",
         reply_markup=get_main_keyboard()
     )
@@ -141,17 +182,27 @@ def handle_text(message):
     process_quiz_logic(message, message.text)
 
 def process_quiz_logic(message, raw_text):
+    user_id = message.from_user.id
+    today_str = str(datetime.today().date())
+    user_data = get_user(user_id)
+
+    if user_data["last_reset_date"] != today_str:
+        user_data["tests_today"] = 0
+        user_data["last_reset_date"] = today_str
+
+    if user_data["tests_today"] >= 15:
+        bot.send_message(message.chat.id, "❌ Kunlik limitingiz (15 ta test) tugadi.", reply_markup=get_main_keyboard())
+        return
+
     status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
     if not quiz_json_raw:
-        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni yoki ulanishni tekshiring.", chat_id=message.chat.id, message_id=status_msg.message_id)
+        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi.", chat_id=message.chat.id, message_id=status_msg.message_id)
         return
 
     try:
-        # Markdown o'ramlarini tozalash
-        clean_json = quiz_json_raw.replace("```json", "").replace("```", "").strip()
-        quiz_data = json.loads(clean_json)
+        quiz_data = json.loads(quiz_json_raw)
         bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         
         for q in quiz_data:
@@ -168,10 +219,11 @@ def process_quiz_logic(message, raw_text):
                 type='quiz',
                 is_anonymous=False
             )
+        update_user(user_id, user_data["tests_today"] + 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), today_str)
     except Exception as e:
-        logging.error(f"JSON xatosi: {e}")
-        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Ma'lumotlarni o'qishda xatolik.", reply_markup=get_main_keyboard())
 
 if __name__ == '__main__':
+    init_db()
     logging.info("Bot ishga tushmoqda...")
     bot.infinity_polling()
