@@ -17,7 +17,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Barcha yuborgan kalitlaringiz joylashtirildi)
+# Google API kalitlari ro'yxati (Rotation tizimi bilan)
 GOOGLE_API_KEYS = [
     "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
     "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
@@ -216,9 +216,28 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
+            # Har bir test (poll) ID sini uning to'g'ri javob indeksi bilan bog'lab saqlaymiz
+            user_quiz_sessions[user_id]["poll_map"][poll_msg.poll.id] = correct_index
+            
     except Exception as e:
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-if __name__ == "__main__":
-    bot.infinity_polling()
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH QISMI ---
+@bot.poll_answer_handler()
+def handle_poll_answer(poll_answer):
+    try:
+        user_id = poll_answer.user.id
+        poll_id = poll_answer.poll_id
+        chosen_options = poll_answer.option_ids
+
+        # Foydalanuvchining faol test sessiyasi borligini tekshiramiz
+        if user_id not in user_quiz_sessions:
+            return
+
+        session = user_quiz_sessions[user_id]
+        poll_map = session.get("poll_map", {})
+
+        # Agar bu poll ushbu foydalanuvchiga tegishli bo'lsa
+        if poll_id in poll_map:
+            correct_index = poll_map[poll_id]
