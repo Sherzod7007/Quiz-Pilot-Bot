@@ -2,7 +2,6 @@
 import logging
 import json
 import os
-import sqlite3
 import hashlib
 from pypdf import PdfReader
 import docx
@@ -22,13 +21,15 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
-DB_PATH = 'quiz_pilot_super.db'
+# SQLITE O'RNIGA HAQIQIY SMART XOTIRA (DICTIONARY) TIZIMI O'RNATILDI
+USER_TEXTS = {}       # Foydalanuvchilarning arxiv matnlari
+ACTIVE_SESSIONS = {}  # Foydalanuvchilarning faol test sahifalari (offset)
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
     correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushunturuvchi qisqa qoida (maksimal 200 ta belgi)")
+    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida (maksimal 200 ta belgi)")
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
@@ -37,77 +38,6 @@ def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     markup.row(types.KeyboardButton('/start'), types.KeyboardButton('🗂️ Mening testlarim'))
     return markup
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    # Foydalanuvchining testlar tarixi uchun jadval
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_texts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            title TEXT,
-            text_content TEXT,
-            text_hash TEXT
-        )
-    ''')
-    # Hozirgi faol test holati (qaysi sahifada turgani) uchun jadval
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS active_sessions (
-            user_id INTEGER PRIMARY KEY,
-            text_id INTEGER,
-            current_offset INTEGER
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def save_user_text(user_id, title, content):
-    text_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT id FROM user_texts WHERE user_id = ? AND text_hash = ?', (user_id, text_hash))
-    row = cursor.fetchone()
-    if row:
-        text_id = row[0]
-    else:
-        cursor.execute('INSERT INTO user_texts (user_id, title, text_content, text_hash) VALUES (?, ?, ?, ?)',
-                       (user_id, title, content, text_hash))
-        text_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return text_id
-
-def get_user_texts(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, title FROM user_texts WHERE user_id = ? ORDER BY id DESC', (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
-
-def set_active_session(user_id, text_id, offset=0):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR REPLACE INTO active_sessions (user_id, text_id, current_offset) VALUES (?, ?, ?)',
-                   (user_id, text_id, offset))
-    conn.commit()
-    conn.close()
-
-def get_active_session(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT active_sessions.text_id, active_sessions.current_offset, user_texts.text_content, user_texts.title 
-        FROM active_sessions 
-        JOIN user_texts ON active_sessions.text_id = user_texts.id 
-        WHERE active_sessions.user_id = ?
-    ''', (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"text_id": row[0], "offset": row[1], "content": row[2], "title": row[3]}
-    return None
 
 def read_pdf(file_path):
     try:
@@ -131,7 +61,7 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
     system_instruction = (
-        "Siz berilgan darslik matni segmenti asosida faqat o'zbek tilida 5 ta eng muhim interaktiv test yaratuvchi botsiz. "
+        "Siz berilgan darslik matni segmenti asosida faqat o'zbek tilida 5 ta interaktiv test yaratuvchi botsiz. "
         "Matndagi ma'lumotlarga tayanib savol bering, to'g'ri javobni aniqlang va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
@@ -184,24 +114,35 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda message: message.text == '🗂️ Mening testlarim')
 def show_history(message):
-    texts = get_user_texts(message.from_user.id)
-    if not texts:
+    user_id = message.from_user.id
+    if user_id not in USER_TEXTS or not USER_TEXTS[user_id]:
         bot.send_message(message.chat.id, "🗂️ Sizda hali saqlangan testlar mavjud emas. Biror fayl yoki matn yuboring.", reply_markup=get_main_keyboard())
         return
     
     markup = types.InlineKeyboardMarkup()
-    for text_id, title in texts[:10]: # Eng oxirgi 10 ta test
-        markup.add(types.InlineKeyboardButton(text=f"📖 {title[:30]}", callback_data=f"open_{text_id}"))
+    # Eng oxirgi 10 ta yuklangan testni xotiradan chiqarish
+    for idx, item in enumerate(USER_TEXTS[user_id][-10:]):
+        markup.add(types.InlineKeyboardButton(text=f"📖 {item['title'][:30]}", callback_data=f"open_{idx}"))
     
     bot.send_message(message.chat.id, "🗂️ Saqlangan testlaringiz ro'yxati. Qayta ishlash uchun birortasini tanlang:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('open_'))
 def open_text_callback(call):
-    text_id = int(call.data.split('_')[1])
-    set_active_session(call.from_user.id, text_id, 0)
-    bot.answer_callback_query(call.id, "Test yuklanmoqda...")
-    # Testni birinchi qismdan boshlash
-    execute_quiz_generation(call.message, call.from_user.id)
+    idx = int(call.data.split('_')[1])
+    user_id = call.from_user.id
+    
+    if user_id in USER_TEXTS and idx < len(USER_TEXTS[user_id]):
+        target_text = USER_TEXTS[user_id][idx]
+        ACTIVE_SESSIONS[user_id] = {
+            "title": target_text["title"],
+            "content": target_text["content"],
+            "offset": 0,
+            "idx": idx
+        }
+        bot.answer_callback_query(call.id, "Test yuklanmoqda...")
+        execute_quiz_generation(call.message, user_id)
+    else:
+        bot.answer_callback_query(call.id, "Xatolik: test topilmadi.")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'next_chunk')
 def next_chunk_callback(call):
@@ -211,6 +152,7 @@ def next_chunk_callback(call):
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
     try:
+        user_id = message.from_user.id
         file_name = message.document.file_name
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -236,18 +178,71 @@ def handle_docs(message):
             bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
             return
 
-        # Matnni arxivga saqlash
-        title = file_name
-        text_id = save_user_text(message.from_user.id, title, raw_text)
-        set_active_session(message.from_user.id, text_id, 0)
+        # Matnni xavfsiz ichki xotiraga saqlash
+        if user_id not in USER_TEXTS:
+            USER_TEXTS[user_id] = []
         
-        execute_quiz_generation(message, message.from_user.id)
+        USER_TEXTS[user_id].append({"title": file_name, "content": raw_text})
+        current_idx = len(USER_TEXTS[user_id]) - 1
+        
+        ACTIVE_SESSIONS[user_id] = {
+            "title": file_name,
+            "content": raw_text,
+            "offset": 0,
+            "idx": current_idx
+        }
+        
+        execute_quiz_generation(message, user_id)
     except Exception as e:
         logging.error(f"Fayl xatosi: {e}")
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
+    user_id = message.from_user.id
     if message.text.startswith('/'):
         send_welcome(message)
         return
+    
     title = message.text[:20] + "..." if len(message.text) > 20 else message.text
+    
+    if user_id not in USER_TEXTS:
+        USER_TEXTS[user_id] = []
+        
+    USER_TEXTS[user_id].append({"title": title, "content": message.text})
+    current_idx = len(USER_TEXTS[user_id]) - 1
+    
+    ACTIVE_SESSIONS[user_id] = {
+        "title": title,
+        "content": message.text,
+        "offset": 0,
+        "idx": current_idx
+    }
+    execute_quiz_generation(message, user_id)
+
+def execute_quiz_generation(message, user_id):
+    if user_id not in ACTIVE_SESSIONS:
+        bot.send_message(message.chat.id, "❌ Hech qanday faol test seansi topilmadi.", reply_markup=get_main_keyboard())
+        return
+
+    session = ACTIVE_SESSIONS[user_id]
+    full_text = session["content"]
+    offset = session["offset"]
+    
+    # Har safar matndan 4000 ta belgini kesib olamiz
+    chunk_size = 4000
+    text_chunk = full_text[offset:offset+chunk_size].strip()
+    
+    if not text_chunk or len(text_chunk) < 5:
+        bot.send_message(message.chat.id, f"🎉 '{session['title']}' darsligi bo'yicha barcha savollar tugadi!", reply_markup=get_main_keyboard())
+        return
+
+    status_msg = bot.send_message(message.chat.id, f"⏳ '{session['title'][:20]}' darsligidan test tayyorlanmoqda, kuting...", reply_markup=get_main_keyboard())
+    quiz_json_raw = generate_quiz_from_gemini(text_chunk)
+    
+    try:
+        bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+    except:
+        pass
+
+    if not quiz_json_raw:
+        bot.send_message(message.chat.id, "❌ Afsuski, ushbu qismdan test yaratishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
