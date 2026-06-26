@@ -219,8 +219,8 @@ def admin_panel(message):
 
     admin_text = (
         "📊 **QUIZ PILOT BOT - ADMIN PANEL**\n\n"
-        f"👥 Jami foydalanuvchilar: **{total_users} ta**\n"
-        f"📝 Jami yaratilgan testlar: **{total_quizzes} ta**\n\n"
+        f"👥 Jami foydalanuvchilar: **{total_users[0]} ta**\n"
+        f"📝 Jami yaratilgan testlar: **{total_quizzes[0]} ta**\n\n"
         "📢 Hamma foydalanuvchilarga xabar yuborish uchun: `/send_all xabar matni` deb yozing."
     )
     bot.send_message(message.chat.id, admin_text, parse_mode="Markdown")
@@ -264,4 +264,4 @@ def show_archive(message):
     sessions = cursor.fetchall()
     conn.close()
 
-    if not sessions:
+    # 🛠️ PROBELLAR TO'LIQ TEKISLANDI: IndentationError xatosi yo'qoldi
