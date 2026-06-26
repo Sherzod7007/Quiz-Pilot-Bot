@@ -171,7 +171,6 @@ def process_quiz_logic(message, raw_text):
         items = quiz_data.get("quizzes", [])
         user_id = message.from_user.id
         
-        # Har bir yangi test seansi uchun ma'lumotlar tuzilmasini yaratamiz
         user_quiz_sessions[user_id] = {
             "correct_count": 0,
             "incorrect_count": 0,
@@ -181,7 +180,6 @@ def process_quiz_logic(message, raw_text):
             "chat_id": message.chat.id
         }
         
-        # Savollarni tartib raqami bilan chiqarish
         for idx, q in enumerate(items, start=1):
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
@@ -189,8 +187,6 @@ def process_quiz_logic(message, raw_text):
                 correct_index = 0
                 
             explanation_text = q.get('explanation', '')[:200]
-            
-            # Savol matni oldiga tartib raqamini biriktirish (Masalan: "1. Savol matni")
             numbered_question = f"{idx}. {q['question']}"
             
             poll_msg = bot.send_poll(
@@ -203,26 +199,23 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
-            # Yaratilgan poll_id ni to'g'ri javob indeksi bilan bog'lab saqlaymiz
             user_quiz_sessions[user_id]["poll_map"][poll_msg.poll.id] = correct_index
             
     except Exception as e:
         logging.error(f"JSON yoki Poll xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
 
-# Foydalanuvchi variantlardan birini tanlaganda ishlovchi yangi handler
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     user_id = poll_answer.user.id
     poll_id = poll_answer.poll_id
     chosen_options = poll_answer.option_ids
     
-    # Agar foydalanuvchining faol seansi mavjud bo'lsa va bu poll bizning testga tegishli bo'lsa
     if user_id in user_quiz_sessions and poll_id in user_quiz_sessions[user_id]["poll_map"]:
         session = user_quiz_sessions[user_id]
         correct_index = session["poll_map"][poll_id]
         
-        # Javobni tekshirish
+        # Ro'yxatning birinchi elementini tekshiramiz
         if chosen_options and chosen_options[0] == correct_index:
             session["correct_count"] += 1
         else:
@@ -230,12 +223,18 @@ def handle_poll_answer(poll_answer):
             
         session["answered_questions"] += 1
         
-        # Agar barcha savollarga javob berib bo'lingan bo'lsa, yakuniy natijani chiqarish
         if session["answered_questions"] == session["total_questions"]:
             correct = session["correct_count"]
             incorrect = session["incorrect_count"]
             total = session["total_questions"]
             percentage = int((correct / total) * 100) if total > 0 else 0
             
-            result_text = (
-                f"📊 **Sizning test natijangiz tayyor!**\n\n"
+            result_text = f"📊 **Sizning test natijangiz tayyor!**\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
+            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
+            
+            if user_id in user_quiz_sessions:
+                del user_quiz_sessions[user_id]
+
+if __name__ == '__main__':
+    logging.info("Bot ishga tushdi...")
+    bot.infinity_polling()
