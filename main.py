@@ -2,15 +2,11 @@
 import logging
 import json
 import os
-import hashlib
+import requests
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
-from google import genai
-from google.genai import types as genai_types
-from pydantic import BaseModel, Field
-from typing import List
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -18,21 +14,13 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
+# Kalitingiz va tokeningiz o'z joyida mahkamlangan
 GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
-# SQLITE O'RNIGA HAQIQIY SMART XOTIRA (DICTIONARY) TIZIMI O'RNATILDI
+# SMART ICHKI XOTIRA TIZIMI (SERVERNI QOTIRMAYDI)
 USER_TEXTS = {}       # Foydalanuvchilarning arxiv matnlari
 ACTIVE_SESSIONS = {}  # Foydalanuvchilarning faol test sahifalari (offset)
-
-class QuizItem(BaseModel):
-    question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida (maksimal 200 ta belgi)")
-
-class QuizResponse(BaseModel):
-    quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
@@ -68,8 +56,17 @@ def generate_quiz_from_gemini(extracted_text):
         "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
         "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
         "Agar matn ingliz tilida bo'lsa, test ham, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
-        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
+        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Faqat berilgan toza JSON ro'yxatini qaytaring."
     )
+
+    payload = {
+        "contents": [{"parts": [{"text": extracted_text}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.7
+        }
+    }
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -77,22 +74,18 @@ def generate_quiz_from_gemini(extracted_text):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
+        # TO'G'RIDAN-TO'G'RI ENG TEZKOR HTTP ENDPOINT
+        url = f"https://googleapis.com{api_key}"
+        
         try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=extracted_text,
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=QuizResponse,
-                    temperature=0.5
-                )
-            )
-            if response and response.text:
-                return response.text
+            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=25)
+            if response.status_code == 200:
+                res_json = response.json()
+                return res_json['candidates'][0]['content']['parts'][0]['text']
+            else:
+                logging.error(f"Gemini status xatosi: {response.status_code}")
         except Exception as e:
-            logging.error(f"Gemini API xatosi: {e}")
+            logging.error(f"Ulanish xatosi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
@@ -105,9 +98,9 @@ def send_welcome(message):
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot** — sizning super yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga matn yoki savollarni yuboring.\n"
-        "2️⃣ Savollar/darsliklar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n"
-        "3️⃣ Men ularni **5 tadan bo'lib** test qilaman va tarixingizga saqlab qo'yaman!\n\n"
+        "1️⃣ Menga istalgan matn yoki savollarni yuboring.\n"
+        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n"
+        "3️⃣ Men ularni **5 tadan bo'lib** interaktiv test qilaman va arxivga saqlayman!\n\n"
         "🗂️ Oldingi testlaringizni qayta ishlash uchun pastdagi **'🗂️ Mening testlarim'** tugmasini bosing.",
         reply_markup=get_main_keyboard()
     )
@@ -116,11 +109,10 @@ def send_welcome(message):
 def show_history(message):
     user_id = message.from_user.id
     if user_id not in USER_TEXTS or not USER_TEXTS[user_id]:
-        bot.send_message(message.chat.id, "🗂️ Sizda hali saqlangan testlar mavjud emas. Biror fayl yoki matn yuboring.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "🗂️ Sizda Saqlangan testlar mavjud emas. Fayl yoki matn yuboring.", reply_markup=get_main_keyboard())
         return
     
     markup = types.InlineKeyboardMarkup()
-    # Eng oxirgi 10 ta yuklangan testni xotiradan chiqarish
     for idx, item in enumerate(USER_TEXTS[user_id][-10:]):
         markup.add(types.InlineKeyboardButton(text=f"📖 {item['title'][:30]}", callback_data=f"open_{idx}"))
     
@@ -178,7 +170,6 @@ def handle_docs(message):
             bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
             return
 
-        # Matnni xavfsiz ichki xotiraga saqlash
         if user_id not in USER_TEXTS:
             USER_TEXTS[user_id] = []
         
@@ -199,12 +190,11 @@ def handle_docs(message):
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.from_user.id
-    if message.text.startswith('/'):
+    if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
     
     title = message.text[:20] + "..." if len(message.text) > 20 else message.text
-    
     if user_id not in USER_TEXTS:
         USER_TEXTS[user_id] = []
         
@@ -221,22 +211,21 @@ def handle_text(message):
 
 def execute_quiz_generation(message, user_id):
     if user_id not in ACTIVE_SESSIONS:
-        bot.send_message(message.chat.id, "❌ Hech qanday faol test seansi topilmadi.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Seans topilmadi. /start bosing.", reply_markup=get_main_keyboard())
         return
 
     session = ACTIVE_SESSIONS[user_id]
     full_text = session["content"]
     offset = session["offset"]
     
-    # Har safar matndan 4000 ta belgini kesib olamiz
     chunk_size = 4000
     text_chunk = full_text[offset:offset+chunk_size].strip()
     
     if not text_chunk or len(text_chunk) < 5:
-        bot.send_message(message.chat.id, f"🎉 '{session['title']}' darsligi bo'yicha barcha savollar tugadi!", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, f"🎉 '{session['title']}' bo'yicha barcha savollar tugadi!", reply_markup=get_main_keyboard())
         return
 
-    status_msg = bot.send_message(message.chat.id, f"⏳ '{session['title'][:20]}' darsligidan test tayyorlanmoqda, kuting...", reply_markup=get_main_keyboard())
+    status_msg = bot.send_message(message.chat.id, f"⏳ '{session['title'][:20]}' darsligidan test tayyorlanmoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(text_chunk)
     
     try:
@@ -245,4 +234,19 @@ def execute_quiz_generation(message, user_id):
         pass
 
     if not quiz_json_raw:
-        bot.send_message(message.chat.id, "❌ Afsuski, ushbu qismdan test yaratishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        return
+
+    try:
+        clean_json = quiz_json_raw.replace("```json", "").replace("```", "").strip()
+        quiz_data = json.loads(clean_json)
+        
+        # Har ikkala ehtimoliy formatni ham o'qiymiz (ro'yxat yoki obyekt)
+        if isinstance(quiz_data, dict):
+            items = quiz_data.get("quizzes", []) or quiz_data.get("quiz", [])
+        else:
+            items = quiz_data
+            
+        for q in items:
+            options = q['options'][:4]
+            correct_index = int(q['correct_index'])
