@@ -22,7 +22,6 @@ current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
-# Pydantic sxemasi - Google faqat shu formatda ma'lumot qaytarishini kafolatlaydi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
@@ -70,7 +69,6 @@ def generate_quiz_from_gemini(extracted_text):
             continue
             
         try:
-            # Google'ning rasmiy xavfsiz SDK mantiqi ulandi
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-1.5-flash',
@@ -144,13 +142,21 @@ def process_quiz_logic(message, raw_text):
     status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
+    # MUAMMO SHU YERDA BUTUNLAY TUZATILDI: edit_message_text o'rniga toza delete va send ishlatildi
     if not quiz_json_raw:
-        bot.edit_message_text("❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitni tekshiring.", chat_id=message.chat.id, message_id=status_msg.message_id)
+        try:
+            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        except:
+            pass
+        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
         quiz_data = json.loads(quiz_json_raw)
-        bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        try:
+            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        except:
+            pass
         
         items = quiz_data.get("quizzes", [])
         
