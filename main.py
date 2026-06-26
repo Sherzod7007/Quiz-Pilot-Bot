@@ -17,7 +17,6 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# API калитларни тўғридан-тўғри рўйхат сифатида ёзиш (Логлардаги янги калитингиз қўшилди)
 GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
@@ -57,11 +56,14 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
+    # BUYRUQ YANGILANDI: Savol qaysi tilda kelgan bo'lsa, testni o'sha tilda yaratish buyurildi!
     system_instruction = (
-        "Siz berilgan savollar asosida faqat o'zbek tilida interaktiv testlar yaratuvchi botsiz. "
+        "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing (Masalan: ['A) Variant 1', 'B) Variant 2', ...]). "
+        "DIQQAT: Savol va variantlar matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
+        "Agar savol ingliz tilida bo'lsa, test savoli ham, variantlar ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
         "Berilgan sxemaga qat'iy amal qiling."
     )
 
@@ -73,7 +75,6 @@ def generate_quiz_from_gemini(extracted_text):
             
         try:
             client = genai.Client(api_key=api_key)
-            # МОДЕЛЬ НОМИ янги SDK талабларига мослаб "gemini-2.5-flash" га ўзгартирилди (404 xатоси йўқолади)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=extracted_text[:15000],
@@ -102,7 +103,7 @@ def send_welcome(message):
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
         "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
-        "🎯 Men to'g'ri javobni topib, 4 ta variantli interaktiv test qilib beraman!",
+        "🎯 Men to'g'ri javobni topib, uning asl tilida 4 ta variantli interaktiv test qilib beraman!",
         reply_markup=get_main_keyboard()
     )
 
