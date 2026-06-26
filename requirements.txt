@@ -1,4 +1,3 @@
-```text
 aiogram
 google-genai
 pypdf
