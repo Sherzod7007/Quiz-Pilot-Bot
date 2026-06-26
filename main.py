@@ -18,7 +18,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAGwfHZUV5Jc_JU
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # API калитларни тўғридан-тўғри рўйхат сифатида ёзиш (Логлардаги янги калитингиз қўшилди)
-GOOGLE_API_KEYS = ["AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g"]
+GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
