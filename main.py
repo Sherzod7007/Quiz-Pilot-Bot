@@ -24,7 +24,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8h
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # 🚨 ADMIN ID va API KALITLAR RO'YXATI (ROTATION TIZIMI)
-ADMIN_ID = 324575351  # O'zingizning yoki do'stingizning Telegram ID raqamini yozing
+ADMIN_ID = 324575351  # O'zingizning Telegram ID raqamingiz
 GOOGLE_API_KEYS = [
     "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
     "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
@@ -94,7 +94,6 @@ class QuizResponse(BaseModel):
 # ---- KEYBOARDS ----
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    # 🆕 Klaviaturaga '🏆 Top foydalanuvchilar' tugmasi qo'shildi
     markup.row(types.KeyboardButton('🗂️ Mening testlarim'), types.KeyboardButton('🏆 Top foydalanuvchilar'))
     return markup
 
@@ -181,7 +180,6 @@ def send_welcome(message):
     first_name = message.from_user.first_name
     username = message.from_user.username
     
-    # 🆕 Foydalanuvchini bazaga ro'yxatga olish (Statistika uchun)
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO users (user_id, first_name, username) VALUES (?, ?, ?)", (user_id, first_name, username))
@@ -197,7 +195,6 @@ def send_welcome(message):
         parse_mode="Markdown"
     )
 
-# 🆕 REYTINQ (LEADERBOARD) TIZIMI HANDLERI
 @bot.message_handler(func=lambda message: message.text == '🏆 Top foydalanuvchilar')
 def show_leaderboard(message):
     conn = sqlite3.connect(DB_NAME)
@@ -219,11 +216,10 @@ def show_leaderboard(message):
         
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
-# 🆕 ADMIN PANEL STATUSI (/admin)
 @bot.message_handler(commands=['admin'])
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID:
-        return # Admin bo'lmasa javob bermaydi
+        return
 
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -241,13 +237,11 @@ def admin_panel(message):
     )
     bot.send_message(message.chat.id, admin_text, parse_mode="Markdown")
 
-# 🆕 BARCHAGA REKLAMA/XABAR YUBORISH TIZIMI (/send_all)
 @bot.message_handler(commands=['send_all'])
 def send_all_users(message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    # Buyruqdan keyingi matnni ajratib olish
     broadcast_text = message.text.replace("/send_all", "").strip()
     if not broadcast_text:
         bot.send_message(message.chat.id, "❌ Xato! Foydalanish: `/send_all Salom foydalanuvchilar!`")
@@ -268,3 +262,8 @@ def send_all_users(message):
         try:
             bot.send_message(u_id, broadcast_text, parse_mode="Markdown")
             success += 1
+            time.sleep(0.05)
+        except Exception as e:
+            failed += 1
+
+    bot.send_message(message.chat.id, f"✅ Yuborish yakunlandi!\n👍 Yetkazildi: {success}\n👎 Bloklaganlar: {failed}")
