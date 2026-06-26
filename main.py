@@ -4,12 +4,8 @@ import json
 import os
 import sqlite3
 import uuid
-import asyncio
-
-# Professional asinxron aiogram kutubxonasi
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+import telebot
+from telebot import types
 
 # Google GenAI yangi versiyasi
 from google import genai
@@ -24,8 +20,7 @@ import docx
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 GOOGLE_API_KEYS = [os.getenv("GEMINI_API_KEY", "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg")]
 current_key_index = 0
@@ -33,7 +28,7 @@ current_key_index = 0
 DOWNLOADS_DIR = 'downloads'
 DB_NAME = 'quiz_pilot.db'
 
-# ---- DATABASES (SQLite) ----
+# ---- DATABASES (SQLite - Sinxron) ----
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -71,14 +66,15 @@ class QuizResponse(BaseModel):
 
 # ---- KEYBOARDS ----
 def get_main_keyboard():
-    buttons = [[types.KeyboardButton(text='🗂️ Mening testlarim')]]
-    return types.ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    markup.row(types.KeyboardButton('🗂️ Mening testlarim'))
+    return markup
 
-def get_inline_pagination(session_id: str, current_offset: int, total_count: int):
-    builder = InlineKeyboardBuilder()
+def get_inline_pagination(session_id, current_offset, total_count):
+    markup = types.InlineKeyboardMarkup()
     if current_offset + 5 < total_count:
-        builder.button(text="➡️ Keyingi 5 ta test", callback_data=f"next:{session_id}:{current_offset + 5}")
-    return builder.as_markup()
+        markup.add(types.InlineKeyboardButton("➡️ Keyingi 5 ta test", callback_data=f"next:{session_id}:{current_offset + 5}"))
+    return markup
 
 # ---- FILE READERS ----
 def read_pdf(file_path):
@@ -134,10 +130,11 @@ def generate_quiz_from_gemini(extracted_text):
     return None
 
 # ---- BOT HANDLERS ----
-@dp.message(CommandStart())
-async def send_welcome(message: types.Message):
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
     user_name = message.from_user.first_name
-    await message.answer(
+    bot.send_message(
+        message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot (Super Version)** — intellektual yordamchingizman.\n\n"
         "📖 **Imkoniyatlarim:**\n"
@@ -149,8 +146,8 @@ async def send_welcome(message: types.Message):
         parse_mode="Markdown"
     )
 
-@dp.message(F.text == '🗂️ Mening testlarim')
-async def show_archive(message: types.Message):
+@bot.message_handler(func=lambda message: message.text == '🗂️ Mening testlarim')
+def show_archive(message):
     user_id = message.from_user.id
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -159,57 +156,60 @@ async def show_archive(message: types.Message):
     conn.close()
 
     if not sessions:
-        await message.answer("🗂️ Sizda hali yaratilgan testlar arxivi mavjud emas.")
+        bot.send_message(message.chat.id, "🗂️ Sizda hali yaratilgan testlar arxivi mavjud emas.")
         return
 
     text = "📂 **Sizning oxirgi testlaringiz arxivi:**\n\n"
-    builder = InlineKeyboardBuilder()
+    markup = types.InlineKeyboardMarkup()
     for idx, (s_id, title, date) in enumerate(sessions, 1):
         text += f"{idx}. 📝 {title[:30]}... ({date[:10]})\n"
-        builder.button(text=f"👁️ {idx}-testni ko'rish", callback_data=f"view:{s_id}:0")
+        markup.add(types.InlineKeyboardButton(f"👁️ {idx}-testni ko'rish", callback_data=f"view:{s_id}:0"))
     
-    builder.adjust(1)
-    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
 
-@dp.message(F.document)
-async def handle_docs(message: types.Message):
+@bot.message_handler(content_types=['document'])
+def handle_docs(message):
     try:
         file_name = message.document.file_name
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
         
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         file_path = os.path.join(DOWNLOADS_DIR, file_name)
         
-        # Aiogram formatida faylni xavfsiz yuklab olish
-        file_info = await bot.get_file(message.document.file_id)
-        await bot.download_file(file_info.file_path, file_path)
+        with open(file_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
 
         if file_name.endswith('.pdf'):
             raw_text = read_pdf(file_path)
         elif file_name.endswith('.docx'):
             raw_text = read_docx(file_path)
         else:
-            await message.answer("❌ Faqat PDF yoki DOCX formatidagi fayllarni yuboring.")
+            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX formatidagi fayllarni yuboring.")
             return
 
         if not raw_text.strip():
-            await message.answer("❌ Fayl ichidan matn o'qib bo'lmadi.")
+            bot.send_message(message.chat.id, "❌ Fayl ichidan matn o'qib bo'lmadi.")
             return
 
-        await process_quiz_logic(message, raw_text, title=file_name)
+        process_quiz_logic(message, raw_text, title=file_name)
     except Exception as e:
         logging.error(f"Fayl yuklashda xatolik: {e}")
 
-@dp.message(F.text)
-async def handle_text(message: types.Message):
-    await process_quiz_logic(message, message.text, title=message.text[:20])
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    if message.text.startswith('/'):
+        return
+    process_quiz_logic(message, message.text, title=message.text[:20])
 
-async def process_quiz_logic(message: types.Message, raw_text: str, title: str):
-    status_msg = await message.answer("⏳ Gemini AI matnni tahlil qilib, testlar to'plamini tayyorlamoqda...")
+def process_quiz_logic(message, raw_text, title):
+    status_msg = bot.send_message(message.chat.id, "⏳ Gemini AI matnni tahlil qilib, testlar to'plamini tayyorlamoqda...")
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
     if not quiz_json_raw:
-        await bot.delete_message(message.chat.id, status_msg.message_id)
-        await message.answer("❌ Test yaratishda xatolik yuz berdi. Qaytadan urinib ko'ring.")
+        try: bot.delete_message(message.chat.id, status_msg.message_id)
+        except: pass
+        bot.send_message(message.chat.id, "❌ Test yaratishda xatolik yuz berdi. Qaytadan urinib ko'ring.")
         return
 
     try:
@@ -217,7 +217,7 @@ async def process_quiz_logic(message: types.Message, raw_text: str, title: str):
         items = quiz_data.get("quizzes", [])
         
         if not items:
-            await message.answer("❌ Matnga mos test savollari topilmadi.")
+            bot.send_message(message.chat.id, "❌ Matnga mos test savollari topilmadi.")
             return
 
         session_id = str(uuid.uuid4())
@@ -235,14 +235,16 @@ async def process_quiz_logic(message: types.Message, raw_text: str, title: str):
         conn.commit()
         conn.close()
 
-        await bot.delete_message(message.chat.id, status_msg.message_id)
-        await send_quiz_chunk(message.chat.id, session_id, offset=0)
+        try: bot.delete_message(message.chat.id, status_msg.message_id)
+        except: pass
+
+        send_quiz_chunk(message.chat.id, session_id, offset=0)
 
     except Exception as e:
         logging.error(f"Katta xatolik: {e}")
-        await message.answer("❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.")
+        bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.")
 
-async def send_quiz_chunk(chat_id: int, session_id: str, offset: int = 0):
+def send_quiz_chunk(chat_id, session_id, offset=0):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
@@ -256,4 +258,3 @@ async def send_quiz_chunk(chat_id: int, session_id: str, offset: int = 0):
     for q_question, q_options, q_correct_index, q_explanation in quizzes:
         options = json.loads(q_options)[:4]
         correct_index = int(q_correct_index)
-        if correct_index >= len(options): correct_index = 0
