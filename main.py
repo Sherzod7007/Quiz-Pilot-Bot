@@ -2,75 +2,138 @@
 import logging
 import json
 import os
-from pypdf import PdfReader
-import docx
+import sqlite3
+import uuid
+import time
 import telebot
 from telebot import types
+
+# Google GenAI va Pydantic sxemalari
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
-# Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# PDF va Word o'quvchilar
+from pypdf import PdfReader
+import docx
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
+# 🚨 ADMIN ID va API KALITLAR RO'YXATI (ROTATION TIZIMI)
+ADMIN_ID = 324575351  # O'zingizning yoki do'stingizning Telegram ID raqamini yozing
+GOOGLE_API_KEYS = [
+    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
+    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
+    "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
+    "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
+    "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
+    "AQ.Ab8RN6LMoKRl2AvvsaMHigzCaFgjSkIh9raQwh_srC-uMNn5-g",
+    "AQ.Ab8RN6K6iedLHkBub1TJQjP7YNHaphRhQ8v7pze_9hfKQArhlQ"
+]
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
+DB_NAME = 'quiz_pilot.db'
 
-# Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
+# ---- DATABASES (SQLite yangi jadvallar bilan) ----
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    # 🆕 Foydalanuvchilar jadvali (Reyting va Statistika uchun)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            first_name TEXT,
+            username TEXT,
+            score INTEGER DEFAULT 0,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quiz_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            title TEXT,
+            start_time INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quiz_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            telegram_poll_id TEXT,
+            question TEXT,
+            options TEXT,
+            correct_index INTEGER,
+            explanation TEXT,
+            user_answer INTEGER DEFAULT -1,
+            FOREIGN KEY(session_id) REFERENCES quiz_sessions(session_id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# ---- PYDANTIC SCHEMAS ----
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida (maksimal 200 ta belgi)")
+    options: List[str] = Field(description="To'g'ri javob va 3 ta variantdan iborat jami 4 ta variant")
+    correct_index: int = Field(description="To'g'ri javob indeksi (0 dan 3 gacha)")
+    explanation: str = Field(description="Javob to'g'riligini isbotlovchi qoida (maksimal 180 ta belgi)")
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
+# ---- KEYBOARDS ----
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add(types.KeyboardButton('/start'))
+    # 🆕 Klaviaturaga '🏆 Top foydalanuvchilar' tugmasi qo'shildi
+    markup.row(types.KeyboardButton('🗂️ Mening testlarim'), types.KeyboardButton('🏆 Top foydalanuvchilar'))
     return markup
 
+def get_inline_pagination(session_id, current_offset, total_count):
+    markup = types.InlineKeyboardMarkup()
+    if current_offset + 5 < total_count:
+        markup.add(types.InlineKeyboardButton("➡️ Keyingi 5 ta test", callback_data=f"next:{session_id}:{current_offset + 5}"))
+    else:
+        markup.add(types.InlineKeyboardButton("📊 Natijalarni hisoblash", callback_data=f"result:{session_id}"))
+    return markup
+
+# ---- FILE READERS ----
 def read_pdf(file_path):
     try:
         reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-        return text
-    except Exception as e:
+        return "".join([page.extract_text() + "\n" for page in reader.pages if page.extract_text()])
+    except Exception:
         return ""
 
 def read_docx(file_path):
     try:
         doc = docx.Document(file_path)
         return "\n".join([p.text for p in doc.paragraphs])
-    except Exception as e:
+    except Exception:
         return ""
 
+# ---- GEMINI GENERATION (ROTATION & ALERT INTEGRATED) ----
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
-
-    # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
+    
     system_instruction = (
-        "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
-        "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
-        "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
-        "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing (Masalan: ['A) Variant 1', 'B) Variant 2', ...]). "
-        "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
-        "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
-        "Agar savol ingliz tilida bo'lsa, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
-        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
+        "Siz berilgan matnlar asosida interaktiv testlar yaratuvchi botsiz. "
+        "Matndan kelib chiqib imkon qadar ko'proq (maksimal 25 tagacha) mukammal test savollari tuzing. "
+        "Har bir variant boshiga qat'iy ravishda ketma-ketlikda 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. "
+        "Savol, variantlar va explanation matni foydalanuvchi yuborgan til bilan AYNAN BIR XIL bo'lishi shart! "
+        "Explanation matni qat'iy ravishda 180 ta belgidan oshmasligi kerak. Berilgan sxemaga rioya qiling."
     )
 
-    for _ in range(len(GOOGLE_API_KEYS)):
+    for attempt in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
@@ -80,115 +143,128 @@ def generate_quiz_from_gemini(extracted_text):
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=extracted_text[:15000],
+                contents=extracted_text[:35000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=QuizResponse,
-                    temperature=0.7
+                    temperature=0.6
                 )
             )
             if response and response.text:
                 return response.text
+                
         except Exception as e:
-            logging.error(f"Gemini API xatosi: {e}")
+            error_message = str(e)
+            logging.error(f"Kalit #{current_key_index+1} xatosi: {error_message}")
             
-        current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            if "429" in error_message or "ResourceExhausted" in error_message or "quota" in error_message.lower():
+                try:
+                    bot.send_message(
+                        ADMIN_ID,
+                        f"⚠️ **DIQQAT ADMIN!**\n\n"
+                        f"🔑 Loyihadagi {current_key_index+1}-raqamli API kalitning kunlik limiti (Quota) tugadi!\n"
+                        f"🔄 Bot keyingi kalitga avtomatik o'tmoqda.",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+            
+            current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            
     return None
 
+# ---- BOT HANDLERS ----
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    user_name = message.from_user.first_name
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    username = message.from_user.username
+    
+    # 🆕 Foydalanuvchini bazaga ro'yxatga olish (Statistika uchun)
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO users (user_id, first_name, username) VALUES (?, ?, ?)", (user_id, first_name, username))
+    conn.commit()
+    conn.close()
+
     bot.send_message(
         message.chat.id,
-        f"👋 Assalomu alaykum, {user_name}!\n\n"
-        "🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n"
-        "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
-        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
-        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
-        reply_markup=get_main_keyboard()
+        f"👋 Assalomu alaykum, {first_name}!\n\n"
+        "🚀 Matn yoki fayl yuboring, men ularni interaktiv testlarga aylantiraman va oxirida aniq natijangizni hisoblab beraman!\n\n"
+        "🏆 Testlarni ko'proq yechib, eng kuchlilar reytingida peshqadam bo'ling!",
+        reply_markup=get_main_keyboard(),
+        parse_mode="Markdown"
     )
 
-@bot.message_handler(content_types=['document'])
-def handle_docs(message):
-    try:
-        file_name = message.document.file_name
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-        
-        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-        file_path = os.path.join(DOWNLOADS_DIR, file_name)
-        
-        with open(file_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
+# 🆕 REYTINQ (LEADERBOARD) TIZIMI HANDLERI
+@bot.message_handler(func=lambda message: message.text == '🏆 Top foydalanuvchilar')
+def show_leaderboard(message):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT first_name, score FROM users ORDER BY score DESC LIMIT 10")
+    top_users = cursor.fetchall()
+    conn.close()
 
-        if file_name.endswith('.pdf'):
-            raw_text = read_pdf(file_path)
-        elif file_name.endswith('.docx'):
-            raw_text = read_docx(file_path)
-        else:
-            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
-            return
-
-        if not raw_text.strip():
-            bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
-            return
-
-        process_quiz_logic(message, raw_text)
-    except Exception as e:
-        logging.error(f"Fayl xatosi: {e}")
-
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    if message.text == '/start' or message.text.startswith('/'):
-        send_welcome(message)
+    if not top_users:
+        bot.send_message(message.chat.id, "🏆 Reyting ro'yxati hali bo'sh. Birinchi bo'lib test yeching!")
         return
-    process_quiz_logic(message, message.text)
 
-def process_quiz_logic(message, raw_text):
-    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
-    quiz_json_raw = generate_quiz_from_gemini(raw_text)
+    text = "🏆 **Eng ko'p ball to'plagan TOP-10 foydalanuvchi:**\n\n"
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     
-    if not quiz_json_raw:
-        try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-        except:
-            pass
-        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitni tekshiring.", reply_markup=get_main_keyboard())
+    for idx, (name, score) in enumerate(top_users):
+        medal = medals[idx] if idx < len(medals) else "👤"
+        text += f"{medal} {name} — **{score} ball**\n"
+        
+    bot.send_message(message.chat.id, text, parse_mode="Markdown")
+
+# 🆕 ADMIN PANEL STATUSI (/admin)
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        return # Admin bo'lmasa javob bermaydi
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM quiz_sessions")
+    total_quizzes = cursor.fetchone()[0]
+    conn.close()
+
+    admin_text = (
+        "📊 **QUIZ PILOT BOT - ADMIN PANEL**\n\n"
+        f"👥 Jami foydalanuvchilar: **{total_users} ta**\n"
+        f"📝 Jami yaratilgan testlar: **{total_quizzes} ta**\n\n"
+        "📢 Hamma foydalanuvchilarga xabar yuborish uchun: `/send_all xabar matni` deb yozing."
+    )
+    bot.send_message(message.chat.id, admin_text, parse_mode="Markdown")
+
+# 🆕 BARCHAGA REKLAMA/XABAR YUBORISH TIZIMI (/send_all)
+@bot.message_handler(commands=['send_all'])
+def send_all_users(message):
+    if message.from_user.id != ADMIN_ID:
         return
 
-    try:
-        quiz_data = json.loads(quiz_json_raw)
-        try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-        except:
-            pass
-        
-        items = quiz_data.get("quizzes", [])
-        
-        for q in items:
-            options = q['options'][:4]
-            correct_index = int(q['correct_index'])
-            if correct_index >= len(options):
-                correct_index = 0
-                
-            # Telegram-ga explanation (tushuntirish qoidasi) qo'shib yuboriladi
-            explanation_text = q.get('explanation', '')[:200]  # Telegram limiti 200 ta belgi
-            
-            bot.send_poll(
-                chat_id=message.chat.id,
-                question=q['question'],
-                options=options,
-                correct_option_id=correct_index,
-                type='quiz',
-                explanation=explanation_text,  # Tushuntirish matni ulandi
-                is_anonymous=False
-            )
-    except Exception as e:
-        logging.error(f"JSON yoki Poll xatosi: {e}")
-        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
+    # Buyruqdan keyingi matnni ajratib olish
+    broadcast_text = message.text.replace("/send_all", "").strip()
+    if not broadcast_text:
+        bot.send_message(message.chat.id, "❌ Xato! Foydalanish: `/send_all Salom foydalanuvchilar!`")
+        return
 
-if __name__ == '__main__':
-    logging.info("Bot ishga tushmoqda...")
-    bot.infinity_polling()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users")
+    all_users = cursor.fetchall()
+    conn.close()
+
+    success = 0
+    failed = 0
+    
+    bot.send_message(message.chat.id, f"📢 {len(all_users)} ta foydalanuvchiga xabar yuborish boshlandi...")
+
+    for (u_id,) in all_users:
+        try:
+            bot.send_message(u_id, broadcast_text, parse_mode="Markdown")
+            success += 1
