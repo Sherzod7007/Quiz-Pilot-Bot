@@ -227,7 +227,7 @@ def process_quiz_logic(message, raw_text):
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- TO'G'RILANGAN VA XATOSIZ FOYDALANUVCHI JAVOBINI TEKSHIRISH FUNKSIYASI ---
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     try:
@@ -242,3 +242,5 @@ def handle_poll_answer(poll_answer):
 
         if user_id not in user_quiz_sessions:
             return
+
+        session = user_quiz_sessions[user_id]
