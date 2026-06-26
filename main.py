@@ -26,7 +26,6 @@ DOWNLOADS_DIR = 'downloads'
 user_quiz_sessions = {}
 
 # Foydalanuvchilarning umumiy reytingini saqlash uchun lug'at
-# Tuzilishi: {user_id: {"name": "Ism", "score": 0}}
 global_leaderboard = {}
 
 # Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
@@ -124,9 +123,7 @@ def send_rating(message):
         bot.send_message(message.chat.id, "📊 Reyting hali bo'sh. Birinchi bo'lib testlarni yeching va reytingda yetakchi bo'ling!", reply_markup=get_main_keyboard())
         return
 
-    # Reytingni to'g'ri javoblar soni bo'yicha kamayish tartibida saralash
     sorted_leaderboard = sorted(global_leaderboard.items(), key=lambda x: x[1]['score'], reverse=True)
-    
     leaderboard_text = "🏆 **Foydalanuvchilar reytingi (Top 10):**\n\n"
     medals = ["🥇", "🥈", "🥉"]
     
@@ -167,15 +164,12 @@ def handle_docs(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    # Buyruqlarni birinchi navbatda tutib qolamiz
     if message.text == '/start' or message.text.startswith('/start'):
         send_welcome(message)
         return
     if message.text == '/rating' or message.text.startswith('/rating'):
         send_rating(message)
         return
-        
-    # Agar oddiy matn yoki test bo'lsa, logikaga yuboramiz
     process_quiz_logic(message, message.text)
 
 def process_quiz_logic(message, raw_text):
@@ -238,3 +232,9 @@ def process_quiz_logic(message, raw_text):
 
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
+    user_id = poll_answer.user.id
+    poll_id = poll_answer.poll_id
+    chosen_options = poll_answer.option_ids
+    
+    if user_id in user_quiz_sessions and poll_id in user_quiz_sessions[user_id]["poll_map"]:
+        session = user_quiz_sessions[user_id]
