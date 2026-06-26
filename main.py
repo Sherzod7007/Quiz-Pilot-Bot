@@ -14,7 +14,7 @@ from typing import List
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAGwfHZUV5Jc_JUFu0uw08UB0IS4cFZ1ceQ")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # API калитларни тўғридан-тўғри рўйхат сифатида ёзиш (Логлардаги янги калитингиз қўшилди)
