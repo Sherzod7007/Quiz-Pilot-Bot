@@ -22,6 +22,9 @@ current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
+# Foydalanuvchilarning test natijalarini va poll ID larini saqlash uchun lug'at
+user_quiz_sessions = {}
+
 # Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
@@ -166,29 +169,73 @@ def process_quiz_logic(message, raw_text):
             pass
         
         items = quiz_data.get("quizzes", [])
+        user_id = message.from_user.id
         
-        for q in items:
+        # Har bir yangi test seansi uchun ma'lumotlar tuzilmasini yaratamiz
+        user_quiz_sessions[user_id] = {
+            "correct_count": 0,
+            "incorrect_count": 0,
+            "total_questions": len(items),
+            "answered_questions": 0,
+            "poll_map": {},
+            "chat_id": message.chat.id
+        }
+        
+        # Savollarni tartib raqami bilan chiqarish
+        for idx, q in enumerate(items, start=1):
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
             if correct_index >= len(options):
                 correct_index = 0
                 
-            # Telegram-ga explanation (tushuntirish qoidasi) qo'shib yuboriladi
-            explanation_text = q.get('explanation', '')[:200]  # Telegram limiti 200 ta belgi
+            explanation_text = q.get('explanation', '')[:200]
             
-            bot.send_poll(
+            # Savol matni oldiga tartib raqamini biriktirish (Masalan: "1. Savol matni")
+            numbered_question = f"{idx}. {q['question']}"
+            
+            poll_msg = bot.send_poll(
                 chat_id=message.chat.id,
-                question=q['question'],
+                question=numbered_question,
                 options=options,
                 correct_option_id=correct_index,
                 type='quiz',
-                explanation=explanation_text,  # Tushuntirish matni ulandi
+                explanation=explanation_text,
                 is_anonymous=False
             )
+            
+            # Yaratilgan poll_id ni to'g'ri javob indeksi bilan bog'lab saqlaymiz
+            user_quiz_sessions[user_id]["poll_map"][poll_msg.poll.id] = correct_index
+            
     except Exception as e:
         logging.error(f"JSON yoki Poll xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
 
-if __name__ == '__main__':
-    logging.info("Bot ishga tushmoqda...")
-    bot.infinity_polling()
+# Foydalanuvchi variantlardan birini tanlaganda ishlovchi yangi handler
+@bot.poll_answer_handler()
+def handle_poll_answer(poll_answer):
+    user_id = poll_answer.user.id
+    poll_id = poll_answer.poll_id
+    chosen_options = poll_answer.option_ids
+    
+    # Agar foydalanuvchining faol seansi mavjud bo'lsa va bu poll bizning testga tegishli bo'lsa
+    if user_id in user_quiz_sessions and poll_id in user_quiz_sessions[user_id]["poll_map"]:
+        session = user_quiz_sessions[user_id]
+        correct_index = session["poll_map"][poll_id]
+        
+        # Javobni tekshirish
+        if chosen_options and chosen_options[0] == correct_index:
+            session["correct_count"] += 1
+        else:
+            session["incorrect_count"] += 1
+            
+        session["answered_questions"] += 1
+        
+        # Agar barcha savollarga javob berib bo'lingan bo'lsa, yakuniy natijani chiqarish
+        if session["answered_questions"] == session["total_questions"]:
+            correct = session["correct_count"]
+            incorrect = session["incorrect_count"]
+            total = session["total_questions"]
+            percentage = int((correct / total) * 100) if total > 0 else 0
+            
+            result_text = (
+                f"📊 **Sizning test natijangiz tayyor!**\n\n"
