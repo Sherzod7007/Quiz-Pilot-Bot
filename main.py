@@ -167,12 +167,15 @@ def handle_docs(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
+    # Buyruqlarni birinchi navbatda tutib qolamiz
     if message.text == '/start' or message.text.startswith('/start'):
         send_welcome(message)
         return
     if message.text == '/rating' or message.text.startswith('/rating'):
         send_rating(message)
         return
+        
+    # Agar oddiy matn yoki test bo'lsa, logikaga yuboramiz
     process_quiz_logic(message, message.text)
 
 def process_quiz_logic(message, raw_text):
@@ -235,7 +238,3 @@ def process_quiz_logic(message, raw_text):
 
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
-    user_id = poll_answer.user.id
-    poll_id = poll_answer.poll_id
-    chosen_options = poll_answer.option_ids
-    
