@@ -2,11 +2,14 @@
 import logging
 import json
 import os
-import requests
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
+from google import genai
+from google.genai import types as genai_types
+from pydantic import BaseModel, Field
+from typing import List
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -14,17 +17,24 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Kalitingiz va tokeningiz o'z joyida mahkamlangan
 GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
-# SMART ICHKI XOTIRA TIZIMI (SERVERNI QOTIRMAYDI)
-USER_TEXTS = {}       # Foydalanuvchilarning arxiv matnlari
-ACTIVE_SESSIONS = {}  # Foydalanuvchilarning faol test sahifalari (offset)
+DOWNLOADS_DIR = 'downloads'
+
+# Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
+class QuizItem(BaseModel):
+    question: str = Field(description="Savol matni")
+    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
+    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
+    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida (maksimal 200 ta belgi)")
+
+class QuizResponse(BaseModel):
+    quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.row(types.KeyboardButton('/start'), types.KeyboardButton('🗂️ Mening testlarim'))
+    markup.add(types.KeyboardButton('/start'))
     return markup
 
 def read_pdf(file_path):
@@ -48,25 +58,17 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
+    # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
     system_instruction = (
-        "Siz berilgan darslik matni segmenti asosida faqat o'zbek tilida 5 ta interaktiv test yaratuvchi botsiz. "
-        "Matndagi ma'lumotlarga tayanib savol bering, to'g'ri javobni aniqlang va unga mos 3 ta noto'g'ri variant to'qing. "
+        "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
+        "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
-        "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
+        "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing (Masalan: ['A) Variant 1', 'B) Variant 2', ...]). "
         "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
-        "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
-        "Agar matn ingliz tilida bo'lsa, test ham, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
-        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Faqat berilgan toza JSON ro'yxatini qaytaring."
+        "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
+        "Agar savol ingliz tilida bo'lsa, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
+        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
     )
-
-    payload = {
-        "contents": [{"parts": [{"text": extracted_text}]}],
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "temperature": 0.7
-        }
-    }
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -74,18 +76,22 @@ def generate_quiz_from_gemini(extracted_text):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
             
-        # TO'G'RIDAN-TO'G'RI ENG TEZKOR HTTP ENDPOINT
-        url = f"https://googleapis.com{api_key}"
-        
         try:
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=25)
-            if response.status_code == 200:
-                res_json = response.json()
-                return res_json['candidates'][0]['content']['parts'][0]['text']
-            else:
-                logging.error(f"Gemini status xatosi: {response.status_code}")
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=extracted_text[:15000],
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=QuizResponse,
+                    temperature=0.7
+                )
+            )
+            if response and response.text:
+                return response.text
         except Exception as e:
-            logging.error(f"Ulanish xatosi: {e}")
+            logging.error(f"Gemini API xatosi: {e}")
             
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
@@ -96,60 +102,24 @@ def send_welcome(message):
     bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
-        "🚀 Men **Quiz Pilot Bot** — sizning super yordamchingizman.\n\n"
+        "🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga istalgan matn yoki savollarni yuboring.\n"
-        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** fayllarni yuboring.\n"
-        "3️⃣ Men ularni **5 tadan bo'lib** interaktiv test qilaman va arxivga saqlayman!\n\n"
-        "🗂️ Oldingi testlaringizni qayta ishlash uchun pastdagi **'🗂️ Mening testlarim'** tugmasini bosing.",
+        "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
+        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
+        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
         reply_markup=get_main_keyboard()
     )
-
-@bot.message_handler(func=lambda message: message.text == '🗂️ Mening testlarim')
-def show_history(message):
-    user_id = message.from_user.id
-    if user_id not in USER_TEXTS or not USER_TEXTS[user_id]:
-        bot.send_message(message.chat.id, "🗂️ Sizda Saqlangan testlar mavjud emas. Fayl yoki matn yuboring.", reply_markup=get_main_keyboard())
-        return
-    
-    markup = types.InlineKeyboardMarkup()
-    for idx, item in enumerate(USER_TEXTS[user_id][-10:]):
-        markup.add(types.InlineKeyboardButton(text=f"📖 {item['title'][:30]}", callback_data=f"open_{idx}"))
-    
-    bot.send_message(message.chat.id, "🗂️ Saqlangan testlaringiz ro'yxati. Qayta ishlash uchun birortasini tanlang:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('open_'))
-def open_text_callback(call):
-    idx = int(call.data.split('_')[1])
-    user_id = call.from_user.id
-    
-    if user_id in USER_TEXTS and idx < len(USER_TEXTS[user_id]):
-        target_text = USER_TEXTS[user_id][idx]
-        ACTIVE_SESSIONS[user_id] = {
-            "title": target_text["title"],
-            "content": target_text["content"],
-            "offset": 0,
-            "idx": idx
-        }
-        bot.answer_callback_query(call.id, "Test yuklanmoqda...")
-        execute_quiz_generation(call.message, user_id)
-    else:
-        bot.answer_callback_query(call.id, "Xatolik: test topilmadi.")
-
-@bot.callback_query_handler(func=lambda call: call.data == 'next_chunk')
-def next_chunk_callback(call):
-    bot.answer_callback_query(call.id, "Keyingi qism yuklanmoqda...")
-    execute_quiz_generation(call.message, call.from_user.id)
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
     try:
-        user_id = message.from_user.id
         file_name = message.document.file_name
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        file_path = file_name
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        file_path = os.path.join(DOWNLOADS_DIR, file_name)
+        
         with open(file_path, 'wb') as new_file:
             new_file.write(downloaded_file)
 
@@ -161,92 +131,64 @@ def handle_docs(message):
             bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
             return
 
-        try:
-            os.remove(file_path)
-        except:
-            pass
-
         if not raw_text.strip():
             bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
             return
 
-        if user_id not in USER_TEXTS:
-            USER_TEXTS[user_id] = []
-        
-        USER_TEXTS[user_id].append({"title": file_name, "content": raw_text})
-        current_idx = len(USER_TEXTS[user_id]) - 1
-        
-        ACTIVE_SESSIONS[user_id] = {
-            "title": file_name,
-            "content": raw_text,
-            "offset": 0,
-            "idx": current_idx
-        }
-        
-        execute_quiz_generation(message, user_id)
+        process_quiz_logic(message, raw_text)
     except Exception as e:
         logging.error(f"Fayl xatosi: {e}")
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
-    user_id = message.from_user.id
     if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
-    
-    title = message.text[:20] + "..." if len(message.text) > 20 else message.text
-    if user_id not in USER_TEXTS:
-        USER_TEXTS[user_id] = []
-        
-    USER_TEXTS[user_id].append({"title": title, "content": message.text})
-    current_idx = len(USER_TEXTS[user_id]) - 1
-    
-    ACTIVE_SESSIONS[user_id] = {
-        "title": title,
-        "content": message.text,
-        "offset": 0,
-        "idx": current_idx
-    }
-    execute_quiz_generation(message, user_id)
+    process_quiz_logic(message, message.text)
 
-def execute_quiz_generation(message, user_id):
-    if user_id not in ACTIVE_SESSIONS:
-        bot.send_message(message.chat.id, "❌ Seans topilmadi. /start bosing.", reply_markup=get_main_keyboard())
-        return
-
-    session = ACTIVE_SESSIONS[user_id]
-    full_text = session["content"]
-    offset = session["offset"]
+def process_quiz_logic(message, raw_text):
+    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
+    quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
-    chunk_size = 4000
-    text_chunk = full_text[offset:offset+chunk_size].strip()
-    
-    if not text_chunk or len(text_chunk) < 5:
-        bot.send_message(message.chat.id, f"🎉 '{session['title']}' bo'yicha barcha savollar tugadi!", reply_markup=get_main_keyboard())
-        return
-
-    status_msg = bot.send_message(message.chat.id, f"⏳ '{session['title'][:20]}' darsligidan test tayyorlanmoqda...", reply_markup=get_main_keyboard())
-    quiz_json_raw = generate_quiz_from_gemini(text_chunk)
-    
-    try:
-        bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-    except:
-        pass
-
     if not quiz_json_raw:
-        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        try:
+            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        except:
+            pass
+        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
-        clean_json = quiz_json_raw.replace("```json", "").replace("```", "").strip()
-        quiz_data = json.loads(clean_json)
+        quiz_data = json.loads(quiz_json_raw)
+        try:
+            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+        except:
+            pass
         
-        # Har ikkala ehtimoliy formatni ham o'qiymiz (ro'yxat yoki obyekt)
-        if isinstance(quiz_data, dict):
-            items = quiz_data.get("quizzes", []) or quiz_data.get("quiz", [])
-        else:
-            items = quiz_data
-            
+        items = quiz_data.get("quizzes", [])
+        
         for q in items:
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
+            if correct_index >= len(options):
+                correct_index = 0
+                
+            # Telegram-ga explanation (tushuntirish qoidasi) qo'shib yuboriladi
+            explanation_text = q.get('explanation', '')[:200]  # Telegram limiti 200 ta belgi
+            
+            bot.send_poll(
+                chat_id=message.chat.id,
+                question=q['question'],
+                options=options,
+                correct_option_id=correct_index,
+                type='quiz',
+                explanation=explanation_text,  # Tushuntirish matni ulandi
+                is_anonymous=False
+            )
+    except Exception as e:
+        logging.error(f"JSON yoki Poll xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
+
+if __name__ == '__main__':
+    logging.info("Bot ishga tushmoqda...")
+    bot.infinity_polling()
