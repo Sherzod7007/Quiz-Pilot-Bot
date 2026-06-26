@@ -1,4 +1,5 @@
-aiogram
+```text
+pyTelegramBotAPI
 google-genai
 pypdf
 pydantic
