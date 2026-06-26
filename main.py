@@ -218,7 +218,7 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
-            # Yangi mantiq: Test ID raqamini to'g'ridan-to'g'ri sessiyaga va foydalanuvchiga bog'laymiz
+            # Test ID raqamini sessiyaga va foydalanuvchiga to'g'ri bog'laymiz
             p_id = poll_msg.poll.id
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
@@ -227,14 +227,14 @@ def process_quiz_logic(message, raw_text):
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- MUTLAQO YANGILANGAN VAXATOLIKSIZ FOYDALANUVCHI JAVOBINI TEKSHIRISH FUNKSIYASI ---
+# --- TO'G'RILANGAN VA XATOSIZ FOYDALANUVCHI JAVOBINI TEKSHIRISH FUNKSIYASI ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     try:
         poll_id = poll_answer.poll_id
         chosen_options = poll_answer.option_ids
 
-        # Poll ID orqali qaysi foydalanuvchi yechayotganini aniqlaymiz
+        # Poll ID orqali qaysi foydalanuvchiga tegishliligini tekshiramiz
         if poll_id not in poll_to_user_map:
             return
 
