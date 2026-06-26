@@ -15,7 +15,9 @@ from typing import List
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+# MULTITHREADING FAOLLASHTIRILDI: Handlerlar bir-birini bloklab qo'ymasligi uchun oqimlar soni berildi
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, num_threads=4)
 
 GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
@@ -236,5 +238,3 @@ def handle_poll_answer(poll_answer):
     poll_id = poll_answer.poll_id
     chosen_options = poll_answer.option_ids
     
-    if user_id in user_quiz_sessions and poll_id in user_quiz_sessions[user_id]["poll_map"]:
-        session = user_quiz_sessions[user_id]
