@@ -23,8 +23,8 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=lo
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# 🚨 ADMIN ID va API KALITLAR RO'YXATI (ROTATION TIZIMI)
-ADMIN_ID = 324575351  # O'zingizning Telegram ID raqamingiz
+# ADMIN ID va API KALITLAR RO'YXATI
+ADMIN_ID = 324575351  
 GOOGLE_API_KEYS = [
     "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
     "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
@@ -39,12 +39,9 @@ current_key_index = 0
 DOWNLOADS_DIR = 'downloads'
 DB_NAME = 'quiz_pilot.db'
 
-# ---- DATABASES (SQLite yangi jadvallar bilan) ----
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # 🆕 Foydalanuvchilar jadvali (Reyting va Statistika uchun)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -54,7 +51,6 @@ def init_db():
             joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quiz_sessions (
             session_id TEXT PRIMARY KEY,
@@ -64,7 +60,6 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quiz_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +76,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ---- PYDANTIC SCHEMAS ----
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta variantdan iborat jami 4 ta variant")
@@ -91,7 +85,6 @@ class QuizItem(BaseModel):
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
-# ---- KEYBOARDS ----
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     markup.row(types.KeyboardButton('🗂️ Mening testlarim'), types.KeyboardButton('🏆 Top foydalanuvchilar'))
@@ -105,7 +98,6 @@ def get_inline_pagination(session_id, current_offset, total_count):
         markup.add(types.InlineKeyboardButton("📊 Natijalarni hisoblash", callback_data=f"result:{session_id}"))
     return markup
 
-# ---- FILE READERS ----
 def read_pdf(file_path):
     try:
         reader = PdfReader(file_path)
@@ -120,7 +112,6 @@ def read_docx(file_path):
     except Exception:
         return ""
 
-# ---- GEMINI GENERATION (ROTATION & ALERT INTEGRATED) ----
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     
@@ -173,7 +164,6 @@ def generate_quiz_from_gemini(extracted_text):
             
     return None
 
-# ---- BOT HANDLERS ----
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
@@ -224,15 +214,15 @@ def admin_panel(message):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
+    total_users = cursor.fetchone()
     cursor.execute("SELECT COUNT(*) FROM quiz_sessions")
-    total_quizzes = cursor.fetchone()[0]
+    total_quizzes = cursor.fetchone()
     conn.close()
 
     admin_text = (
         "📊 **QUIZ PILOT BOT - ADMIN PANEL**\n\n"
-        f"👥 Jami foydalanuvchilar: **{total_users} ta**\n"
-        f"📝 Jami yaratilgan testlar: **{total_quizzes} ta**\n\n"
+        f"👥 Jami foydalanuvchilar: **{total_users[0]} ta**\n"
+        f"📝 Jami yaratilgan testlar: **{total_quizzes[0]} ta**\n\n"
         "📢 Hamma foydalanuvchilarga xabar yuborish uchun: `/send_all xabar matni` deb yozing."
     )
     bot.send_message(message.chat.id, admin_text, parse_mode="Markdown")
@@ -244,7 +234,7 @@ def send_all_users(message):
 
     broadcast_text = message.text.replace("/send_all", "").strip()
     if not broadcast_text:
-        bot.send_message(message.chat.id, "❌ Xato! Foydalanish: `/send_all Salom foydalanuvchilar!`")
+        bot.send_message(message.chat.id, "❌ Xato! Foydalanish: `/send_all xabar matni`")
         return
 
     conn = sqlite3.connect(DB_NAME)
@@ -255,7 +245,6 @@ def send_all_users(message):
 
     success = 0
     failed = 0
-    
     bot.send_message(message.chat.id, f"📢 {len(all_users)} ta foydalanuvchiga xabar yuborish boshlandi...")
 
     for (u_id,) in all_users:
@@ -263,7 +252,16 @@ def send_all_users(message):
             bot.send_message(u_id, broadcast_text, parse_mode="Markdown")
             success += 1
             time.sleep(0.05)
-        except Exception as e:
+        except Exception:
             failed += 1
 
     bot.send_message(message.chat.id, f"✅ Yuborish yakunlandi!\n👍 Yetkazildi: {success}\n👎 Bloklaganlar: {failed}")
+
+@bot.message_handler(func=lambda message: message.text == '🗂️ Mening testlarim')
+def show_archive(message):
+    user_id = message.from_user.id
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT session_id, title, created_at FROM quiz_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10", (user_id,))
+    sessions = cursor.fetchall()
+    conn.close()
