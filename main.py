@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import uuid
+import asyncio
 from pypdf import PdfReader
 import docx
 
@@ -79,7 +80,7 @@ def get_main_keyboard():
 def get_inline_pagination(session_id, current_offset, total_count):
     markup = types.InlineKeyboardMarkup()
     if current_offset + 5 < total_count:
-        # Callback data Telegram chekloviga tushmasligi uchun faqat session_id va offset yuboriladi
+        # Callback data chekloviga tushmasligi uchun faqat session_id va offset yuboriladi
         markup.add(types.InlineKeyboardButton("➡️ Keyingi 5 ta test", callback_data=f"next:{session_id}:{current_offset + 5}"))
     return markup
 
@@ -120,7 +121,7 @@ def generate_quiz_from_gemini(extracted_text):
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=extracted_text[:35000],  # Kontekst hajmi 35k belgiga ko'tarildi
+                contents=extracted_text[:35000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
@@ -227,7 +228,6 @@ async def process_quiz_logic(message, raw_text, title):
             await bot.send_message(message.chat.id, "❌ Matnga mos test savollari topilmadi.")
             return
 
-        # SQLite bazasiga saqlash jarayoni
         session_id = str(uuid.uuid4())
         user_id = message.from_user.id
         
@@ -246,8 +246,13 @@ async def process_quiz_logic(message, raw_text, title):
         try: await bot.delete_message(message.chat.id, status_msg.message_id)
         except: pass
 
-        # Dastlabki 5 ta testni foydalanuvchiga yuborish
         await send_quiz_chunk(message.chat.id, session_id, offset=0)
 
     except Exception as e:
         logging.error(f"Katta xatolik: {e}")
+        await bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.")
+
+async def send_quiz_chunk(chat_id, session_id, offset=0):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
