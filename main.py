@@ -22,10 +22,12 @@ current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
+# Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
     correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
+    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida (maksimal 200 ta belgi)")
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
@@ -56,15 +58,16 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
-    # BUYRUQ YANGILANDI: Savol qaysi tilda kelgan bo'lsa, testni o'sha tilda yaratish buyurildi!
+    # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing (Masalan: ['A) Variant 1', 'B) Variant 2', ...]). "
-        "DIQQAT: Savol va variantlar matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
-        "Agar savol ingliz tilida bo'lsa, test savoli ham, variantlar ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
-        "Berilgan sxemaga qat'iy amal qiling."
+        "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
+        "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
+        "Agar savol ingliz tilida bo'lsa, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
+        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -99,11 +102,11 @@ def send_welcome(message):
     bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
-        "🚀 Men **Quiz Pilot Bot** — sizning super yordamchingizman.\n\n"
+        "🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n"
         "📖 **Men nimalar qila olaman?**\n"
         "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
         "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
-        "🎯 Men to'g'ri javobni topib, uning asl tilida 4 ta variantli interaktiv test qilib beraman!",
+        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
         reply_markup=get_main_keyboard()
     )
 
@@ -170,12 +173,16 @@ def process_quiz_logic(message, raw_text):
             if correct_index >= len(options):
                 correct_index = 0
                 
+            # Telegram-ga explanation (tushuntirish qoidasi) qo'shib yuboriladi
+            explanation_text = q.get('explanation', '')[:200]  # Telegram limiti 200 ta belgi
+            
             bot.send_poll(
                 chat_id=message.chat.id,
                 question=q['question'],
                 options=options,
                 correct_option_id=correct_index,
                 type='quiz',
+                explanation=explanation_text,  # Tushuntirish matni ulandi
                 is_anonymous=False
             )
     except Exception as e:
