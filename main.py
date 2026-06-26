@@ -26,8 +26,7 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 # ADMIN ID va API KALITLAR RO'YXATI
 ADMIN_ID = 324575351  
 GOOGLE_API_KEYS = [
-    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
-    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
+    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",    
     "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
     "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
     "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
