@@ -234,7 +234,7 @@ def handle_poll_answer(poll_answer):
         poll_id = poll_answer.poll_id
         chosen_options = poll_answer.option_ids
 
-        # Poll ID orqali qaysi foydalanuvchiga tegishliligini tekshiramiz
+        # Ushbu Poll ID biror foydalanuvchiga tegishli ekanligini tekshiramiz
         if poll_id not in poll_to_user_map:
             return
 
