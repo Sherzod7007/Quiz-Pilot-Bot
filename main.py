@@ -5,7 +5,6 @@ import os
 import sqlite3
 import uuid
 import time
-import threading
 import telebot
 from telebot import types
 
@@ -22,7 +21,7 @@ import docx
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, num_threads=4)
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # ADMIN ID va API KALITLAR RO'YXATI
 ADMIN_ID = 324575351  
@@ -65,12 +64,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS quiz_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT,
-            telegram_poll_id TEXT,
             question TEXT,
             options TEXT,
             correct_index INTEGER,
             explanation TEXT,
-            user_answer INTEGER DEFAULT -1,
             FOREIGN KEY(session_id) REFERENCES quiz_sessions(session_id)
         )
     ''')
@@ -265,3 +262,6 @@ def show_archive(message):
     cursor = conn.cursor()
     cursor.execute("SELECT session_id, title, created_at FROM quiz_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 10", (user_id,))
     sessions = cursor.fetchall()
+    conn.close()
+
+    if not sessions:
