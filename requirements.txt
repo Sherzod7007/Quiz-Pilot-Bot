@@ -1,6 +1,6 @@
-pyTelegramBotAPI
+```text
+aiogram
 google-genai
 pypdf
 pydantic
 python-docx
-aiohttp
