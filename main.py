@@ -17,7 +17,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAGwfHZUV5Jc_JUFu0uw08UB0IS4cFZ1ceQ")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-GOOGLE_API_KEYS = os.getenv("GOOGLE_API_KEYS", "").split(",")
+# API калитларни тўғридан-тўғри рўйхат сифатида ёзиш (Логлардаги янги калитингиз қўшилди)
+GOOGLE_API_KEYS = ["AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g"]
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
@@ -70,8 +71,9 @@ def generate_quiz_from_gemini(extracted_text):
             
         try:
             client = genai.Client(api_key=api_key)
+            # МОДЕЛЬ НОМИ янги SDK талабларига мослаб "gemini-2.5-flash" га ўзгартирилди (404 xатоси йўқолади)
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=extracted_text[:15000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -142,7 +144,6 @@ def process_quiz_logic(message, raw_text):
     status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     
-    # MUAMMO SHU YERDA BUTUNLAY TUZATILDI: edit_message_text o'rniga toza delete va send ishlatildi
     if not quiz_json_raw:
         try:
             bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
