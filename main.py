@@ -17,7 +17,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Barcha yuborgan kalitlaringiz joylashtirildi)
+# Google API kalitlari ro'yxati (Rotation tizimi bilan)
 GOOGLE_API_KEYS = [
     "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
     "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
@@ -31,8 +31,10 @@ current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
-# Foydalanuvchilarning test natijalarini va poll ID larini saqlash uchun lug'at
+# Foydalanuvchilarning test sessiyalarini umumiy kuzatish lug'ati
 user_quiz_sessions = {}
+# Har bir yuborilgan Poll ID qaysi foydalanuvchiga tegishliligini saqlash paneli
+poll_to_user_map = {}
 
 # Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
@@ -216,9 +218,27 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
+            # Yangi mantiq: Test ID raqamini to'g'ridan-to'g'ri sessiyaga va foydalanuvchiga bog'laymiz
+            p_id = poll_msg.poll.id
+            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
+            poll_to_user_map[p_id] = user_id
+            
     except Exception as e:
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-if __name__ == "__main__":
-    bot.infinity_polling()
+# --- MUTLAQO YANGILANGAN VAXATOLIKSIZ FOYDALANUVCHI JAVOBINI TEKSHIRISH FUNKSIYASI ---
+@bot.poll_answer_handler()
+def handle_poll_answer(poll_answer):
+    try:
+        poll_id = poll_answer.poll_id
+        chosen_options = poll_answer.option_ids
+
+        # Poll ID orqali qaysi foydalanuvchi yechayotganini aniqlaymiz
+        if poll_id not in poll_to_user_map:
+            return
+
+        user_id = poll_to_user_map[poll_id]
+
+        if user_id not in user_quiz_sessions:
+            return
