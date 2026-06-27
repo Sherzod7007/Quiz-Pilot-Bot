@@ -17,16 +17,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Barcha yuborgan kalitlaringiz joylashtirildi)
-GOOGLE_API_KEYS = [
-    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
-    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
-    "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
-    "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
-    "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
-    "AQ.Ab8RN6LMoKRl2AvvsaMHigzCaFgjSkIh9raQwh_srC-uMNn5-g",
-    "AQ.Ab8RN6K6iedLHkBub1TJQjP7YNHaphRhQ8v7pze_9hfKQArhlQ"
-]
+GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
@@ -70,10 +61,6 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
-    if not GOOGLE_API_KEYS:
-        logging.error("Google API kalitlari ro'yxati bo'sh!")
-        return None
-
     # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
@@ -86,7 +73,6 @@ def generate_quiz_from_gemini(extracted_text):
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
     )
 
-    # Kalitlar soni bo'yicha sikl aylanadi, har bir kalit xato bersa keyingisiga o'tadi
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
@@ -94,7 +80,6 @@ def generate_quiz_from_gemini(extracted_text):
             continue
             
         try:
-            logging.info(f"Ishlatilayotgan API Key indeksi: {current_key_index}")
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
@@ -109,11 +94,9 @@ def generate_quiz_from_gemini(extracted_text):
             if response and response.text:
                 return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
+            logging.error(f"Gemini API xatosi: {e}")
             
-        # Agar xatolik bo'lsa, indeksni bittaga oshirib keyingi kalitga o'tamiz
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-        
     return None
 
 @bot.message_handler(commands=['start'])
@@ -175,7 +158,7 @@ def process_quiz_logic(message, raw_text):
             bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except:
             pass
-        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
@@ -216,9 +199,42 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
+            user_quiz_sessions[user_id]["poll_map"][poll_msg.poll.id] = correct_index
+            
     except Exception as e:
-        logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
-        bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        logging.error(f"JSON yoki Poll xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
 
-if __name__ == "__main__":
+@bot.poll_answer_handler()
+def handle_poll_answer(poll_answer):
+    user_id = poll_answer.user.id
+    poll_id = poll_answer.poll_id
+    chosen_options = poll_answer.option_ids
+    
+    if user_id in user_quiz_sessions and poll_id in user_quiz_sessions[user_id]["poll_map"]:
+        session = user_quiz_sessions[user_id]
+        correct_index = session["poll_map"][poll_id]
+        
+        # Ro'yxatning birinchi elementini tekshiramiz
+        if chosen_options and chosen_options[0] == correct_index:
+            session["correct_count"] += 1
+        else:
+            session["incorrect_count"] += 1
+            
+        session["answered_questions"] += 1
+        
+        if session["answered_questions"] == session["total_questions"]:
+            correct = session["correct_count"]
+            incorrect = session["incorrect_count"]
+            total = session["total_questions"]
+            percentage = int((correct / total) * 100) if total > 0 else 0
+            
+            result_text = f"📊 **Sizning test natijangiz tayyor!**\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
+            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
+            
+            if user_id in user_quiz_sessions:
+                del user_quiz_sessions[user_id]
+
+if __name__ == '__main__':
+    logging.info("Bot ishga tushdi...")
     bot.infinity_polling()
