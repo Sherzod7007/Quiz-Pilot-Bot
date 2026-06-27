@@ -17,24 +17,10 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Rotation tizimi bilan)
-GOOGLE_API_KEYS = [
-    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
-    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
-    "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
-    "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
-    "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
-    "AQ.Ab8RN6LMoKRl2AvvsaMHigzCaFgjSkIh9raQwh_srC-uMNn5-g",
-    "AQ.Ab8RN6K6iedLHkBub1TJQjP7YNHaphRhQ8v7pze_9hfKQArhlQ"
-]
+GOOGLE_API_KEYS = ["AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg"]
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-
-# Foydalanuvchilarning test sessiyalarini umumiy kuzatish lug'ati
-user_quiz_sessions = {}
-# Har bir yuborilgan Poll ID qaysi foydalanuvchiga tegishliligini saqlash paneli
-poll_to_user_map = {}
 
 # Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
@@ -72,10 +58,6 @@ def read_docx(file_path):
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
-    if not GOOGLE_API_KEYS:
-        logging.error("Google API kalitlari ro'yxati bo'sh!")
-        return None
-
     # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
@@ -88,7 +70,6 @@ def generate_quiz_from_gemini(extracted_text):
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
     )
 
-    # Kalitlar soni bo'yicha sikl aylanadi, har bir kalit xato bersa keyingisiga o'tadi
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
@@ -96,7 +77,6 @@ def generate_quiz_from_gemini(extracted_text):
             continue
             
         try:
-            logging.info(f"Ishlatilayotgan API Key indeksi: {current_key_index}")
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
@@ -111,11 +91,9 @@ def generate_quiz_from_gemini(extracted_text):
             if response and response.text:
                 return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
+            logging.error(f"Gemini API xatosi: {e}")
             
-        # Agar xatolik bo'lsa, indeksni bittaga oshirib keyingi kalitga o'tamiz
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-        
     return None
 
 @bot.message_handler(commands=['start'])
@@ -177,7 +155,7 @@ def process_quiz_logic(message, raw_text):
             bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except:
             pass
-        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
@@ -188,59 +166,29 @@ def process_quiz_logic(message, raw_text):
             pass
         
         items = quiz_data.get("quizzes", [])
-        user_id = message.from_user.id
         
-        user_quiz_sessions[user_id] = {
-            "correct_count": 0,
-            "incorrect_count": 0,
-            "total_questions": len(items),
-            "answered_questions": 0,
-            "poll_map": {},
-            "chat_id": message.chat.id
-        }
-        
-        for idx, q in enumerate(items, start=1):
+        for q in items:
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
             if correct_index >= len(options):
                 correct_index = 0
                 
-            explanation_text = q.get('explanation', '')[:200]
-            numbered_question = f"{idx}. {q['question']}"
+            # Telegram-ga explanation (tushuntirish qoidasi) qo'shib yuboriladi
+            explanation_text = q.get('explanation', '')[:200]  # Telegram limiti 200 ta belgi
             
-            poll_msg = bot.send_poll(
+            bot.send_poll(
                 chat_id=message.chat.id,
-                question=numbered_question,
+                question=q['question'],
                 options=options,
                 correct_option_id=correct_index,
                 type='quiz',
-                explanation=explanation_text,
+                explanation=explanation_text,  # Tushuntirish matni ulandi
                 is_anonymous=False
             )
-            
-            # Test ID raqamini sessiyaga va foydalanuvchiga to'g'ri bog'laymiz
-            p_id = poll_msg.poll.id
-            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
-            poll_to_user_map[p_id] = user_id
-            
     except Exception as e:
-        logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
-        bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        logging.error(f"JSON yoki Poll xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Test ma'lumotlarini o'qishda xatolik.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
-@bot.poll_answer_handler()
-def handle_poll_answer(poll_answer):
-    try:
-        poll_id = poll_answer.poll_id
-        chosen_options = poll_answer.option_ids
-
-        # Ushbu Poll ID biror foydalanuvchiga tegishli ekanligini tekshiramiz
-        if poll_id not in poll_to_user_map:
-            return
-
-        user_id = poll_to_user_map[poll_id]
-
-        if user_id not in user_quiz_sessions:
-            return
-
-        session = user_quiz_sessions[user_id]
+if __name__ == '__main__':
+    logging.info("Bot ishga tushmoqda...")
+    bot.infinity_polling()
