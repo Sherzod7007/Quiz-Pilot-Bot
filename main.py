@@ -15,7 +15,12 @@ from typing import List
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Telegram Bot Token (.env fayldan yoki server sozlamasidan o'qiladi)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
+# Yangi xavfsiz ko'rinish:
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN muhit o'zgaruvchisi topilmadi! Railway panelini tekshiring.")
+
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # Google API kalitlari ro'yxati (.env fayldan vergul bilan ajratilgan holda o'qib olinadi)
