@@ -70,7 +70,7 @@ def generate_quiz_from_gemini(extracted_text):
 
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
-        "Foydalanuvchi bergan savolของ to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
+        "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
         "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
@@ -201,7 +201,7 @@ def process_quiz_logic(message, raw_text):
         logging.error(f"JSON yoki Poll xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA REZULTATNI CHIQARISH ---
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     try:
@@ -242,4 +242,3 @@ def handle_poll_answer(poll_answer):
                     "📝 Umumiy savollar: {total} ta\n"
                     "🎯 Ko'rsatkich: {percentage}%"
                 ).format(correct=correct, incorrect=incorrect, total=total, percentage=percentage)
-
