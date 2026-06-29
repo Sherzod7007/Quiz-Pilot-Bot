@@ -33,7 +33,7 @@ user_quiz_sessions = {}
 # Har bir yuborilgan Poll ID qaysi foydalanuvchiga tegishliligini saqlash paneli
 poll_to_user_map = {}
 
-# Model sxemasi yangilandi
+# Model sxemasi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
