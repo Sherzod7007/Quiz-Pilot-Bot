@@ -21,7 +21,7 @@ if not TELEGRAM_BOT_TOKEN:
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Railway panelidan vergul bilan ajratilgan holda o'qib olinadi)
+# Google API kalitlari ro'yxati (Railway panelidan o'qib olinadi)
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
@@ -33,7 +33,7 @@ user_quiz_sessions = {}
 # Har bir yuborilgan Poll ID qaysi foydalanuvchiga tegishliligini saqlash paneli
 poll_to_user_map = {}
 
-# Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
+# Model sxemasi yangilandi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
@@ -73,19 +73,17 @@ def generate_quiz_from_gemini(extracted_text):
         logging.error("Google API kalitlari ro'yxati bo'sh! .env fayl yoki muhit o'zgaruvchilarini tekshiring.")
         return None
 
-    # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing (Masalan: ['A) Variant 1', 'B) Variant 2', ...]). "
-        "Har bir savolbox uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
+        "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
         "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
         "Agar savol ingliz tilida bo'lsa, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
     )
 
-    # Kalitlar soni bo'yicha sikl aylanadi, har bir kalit xato bersa keyingisiga o'tadi
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
@@ -110,7 +108,6 @@ def generate_quiz_from_gemini(extracted_text):
         except Exception as e:
             logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
             
-        # Agar xatolik bo'lsa, indeksni bittaga oshirib keyingi kalitga o'tamiz
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
         
     return None
@@ -215,7 +212,6 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
-            # Test ID raqamini sessiyaga va foydalanuvchiga bog'laymiz
             p_id = poll_msg.poll.id
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
@@ -224,14 +220,13 @@ def process_quiz_logic(message, raw_text):
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     try:
         poll_id = poll_answer.poll_id
         chosen_options = poll_answer.option_ids
 
-        # Ushbu Poll ID biror foydalanuvchiga tegishli ekanligini tekshiramiz
         if poll_id not in poll_to_user_map:
             return
 
@@ -244,3 +239,17 @@ def handle_poll_answer(poll_answer):
         poll_map = session.get("poll_map", {})
 
         if poll_id in poll_map:
+            correct_index = poll_map[poll_id]
+            user_chosen = chosen_options[0] if chosen_options else -1
+
+            if user_chosen == correct_index:
+                session["correct_count"] += 1
+            else:
+                session["incorrect_count"] += 1
+
+            session["answered_questions"] += 1
+
+            if session["answered_questions"] >= session["total_questions"]:
+                total = session["total_questions"]
+                correct = session["correct_count"]
+                incorrect = session["incorrect_count"]
