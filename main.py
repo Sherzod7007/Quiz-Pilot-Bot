@@ -220,7 +220,7 @@ def handle_poll_answer(poll_answer):
 
         if poll_id in poll_map:
             correct_index = poll_map[poll_id]
-            user_chosen = chosen_options[0] if chosen_options else -1
+            user_chosen = chosen_options if chosen_options else -1
 
             if user_chosen == correct_index:
                 session["correct_count"] += 1
@@ -238,6 +238,6 @@ def handle_poll_answer(poll_answer):
                 result_text = f"📊 Sizning test natijangiz tayyor!\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
 
                 bot.send_message(session["chat_id"], result_text, reply_markup=get_main_keyboard())
-                
-                for saved_poll_id in list(poll_map.keys()):
-                    if saved_poll_id in poll_to_user_map:
+                session.clear()
+                del user_quiz_sessions[user_id]
+    except Exception as e:
