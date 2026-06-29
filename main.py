@@ -19,13 +19,13 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 # Google API kalitlari ro'yxati (Barcha yuborgan kalitlaringiz joylashtirildi)
 GOOGLE_API_KEYS = [
-    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
-    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
-    "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
-    "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
-    "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
-    "AQ.Ab8RN6LMoKRl2AvvsaMHigzCaFgjSkIh9raQwh_srC-uMNn5-g",
-    "AQ.Ab8RN6K6iedLHkBub1TJQjP7YNHaphRhQ8v7pze_9hfKQArhlQ"
+    "AQ.Ab8RN6JAO4dN51G4lkFOqca2gvsd583E9Mfri1dYCtf936E1qg",
+    "AQ.Ab8RN6Iu0QqlaNGCdxvW2MxScLHRW9ZG_7I1x-8DFqygcl0YKg",
+    "AQ.Ab8RN6ItNt45S4SCS3e-JE1q172prCc41y_lXr2uOMXiv78lGg",
+    "AQ.Ab8RN6KMaK5x7ZkiA6qGC8MM-Sud9sTIWKOkXh2CLCP-NdnEGA",
+    "AQ.Ab8RN6Kq63xa6ww_RfoOlVNoaxj5WhqUwnhLdr8_IzP02mV5DQ",
+    "AQ.Ab8RN6KsB6NbOBlm1en9B6MjOrZ8kZkzlysThJXsQUiVXGnrZw",
+    "AQ.Ab8RN6IYvdIUdwiXGLvtnqy2oXisFKdCmPw0uytpJcP4ipjdkA"
 ]
 current_key_index = 0
 
