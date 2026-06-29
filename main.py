@@ -14,16 +14,14 @@ from typing import List
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token (.env fayldan yoki server sozlamasidan o'qiladi)
-# Yangi xavfsiz ko'rinish:
+# Telegram Bot Token (Railway panelidagi Variables qismidan o'qiladi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN muhit o'zgaruvchisi topilmadi! Railway panelini tekshiring.")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (.env fayldan vergul bilan ajratilgan holda o'qib olinadi)
+# Google API kalitlari ro'yxati (Railway panelidan vergul bilan ajratilgan holda o'qib olinadi)
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
@@ -81,7 +79,7 @@ def generate_quiz_from_gemini(extracted_text):
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing (Masalan: ['A) Variant 1', 'B) Variant 2', ...]). "
-        "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
+        "Har bir savolbox uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
         "DIQQAT: Savol, variantlar va explanation (tushuntirish) matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
         "Agar savol ingliz tilida bo'lsa, explanation ham faqat ingliz tilida bo'lsin. Tarjima qilmang. "
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
@@ -217,7 +215,7 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
-            # Test ID raqamini sessiyaga va foydalanuvchiga to'g'ri bog'laymiz
+            # Test ID raqamini sessiyaga va foydalanuvchiga bog'laymiz
             p_id = poll_msg.poll.id
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
@@ -246,4 +244,3 @@ def handle_poll_answer(poll_answer):
         poll_map = session.get("poll_map", {})
 
         if poll_id in poll_map:
-            correct_index = poll_map[poll_id]
