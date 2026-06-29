@@ -14,25 +14,21 @@ from typing import List
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Telegram Bot Token (.env fayldan yoki server sozlamasidan o'qiladi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Barcha yuborgan kalitlaringiz joylashtirildi)
-GOOGLE_API_KEYS = [
-    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
-    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
-    "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
-    "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
-    "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
-    "AQ.Ab8RN6LMoKRl2AvvsaMHigzCaFgjSkIh9raQwh_srC-uMNn5-g",
-    "AQ.Ab8RN6K6iedLHkBub1TJQjP7YNHaphRhQ8v7pze_9hfKQArhlQ"
-]
+# Google API kalitlari ro'yxati (.env fayldan vergul bilan ajratilgan holda o'qib olinadi)
+raw_keys = os.getenv("GOOGLE_API_KEYS", "")
+GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
-# Foydalanuvchilarning test natijalarini va poll ID larini saqlash uchun lug'at
+# Foydalanuvchilarning test sessiyalarini umumiy kuzatish lug'ati
 user_quiz_sessions = {}
+# Har bir yuborilgan Poll ID qaysi foydalanuvchiga tegishliligini saqlash paneli
+poll_to_user_map = {}
 
 # Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
@@ -71,7 +67,7 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
     if not GOOGLE_API_KEYS:
-        logging.error("Google API kalitlari ro'yxati bo'sh!")
+        logging.error("Google API kalitlari ro'yxati bo'sh! .env fayl yoki muhit o'zgaruvchilarini tekshiring.")
         return None
 
     # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
@@ -216,9 +212,33 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
+            # Test ID raqamini sessiyaga va foydalanuvchiga to'g'ri bog'laymiz
+            p_id = poll_msg.poll.id
+            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
+            poll_to_user_map[p_id] = user_id
+            
     except Exception as e:
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-if __name__ == "__main__":
-    bot.infinity_polling()
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
+@bot.poll_answer_handler()
+def handle_poll_answer(poll_answer):
+    try:
+        poll_id = poll_answer.poll_id
+        chosen_options = poll_answer.option_ids
+
+        # Ushbu Poll ID biror foydalanuvchiga tegishli ekanligini tekshiramiz
+        if poll_id not in poll_to_user_map:
+            return
+
+        user_id = poll_to_user_map[poll_id]
+
+        if user_id not in user_quiz_sessions:
+            return
+
+        session = user_quiz_sessions[user_id]
+        poll_map = session.get("poll_map", {})
+
+        if poll_id in poll_map:
+            correct_index = poll_map[poll_id]
