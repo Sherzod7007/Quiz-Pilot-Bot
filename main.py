@@ -14,26 +14,27 @@ from typing import List
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token (Railway panelidagi Variables qismidan o'qiladi)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not TELEGRAM_BOT_TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN muhit o'zgaruvchisi topilmadi! Railway panelini tekshiring.")
-
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8873670048:AAHT1j9JOTcBp8hmu5SP1JDwlEHAUySeIJs")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Railway panelidan o'qib olinadi)
-raw_keys = os.getenv("GOOGLE_API_KEYS", "")
-GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
+# Google API kalitlari ro'yxati (Barcha yuborgan kalitlaringiz joylashtirildi)
+GOOGLE_API_KEYS = [
+    "AQ.Ab8RN6KzCuEHHBw1uDXcLR82sYNdoukSexyeImZpkftNys7Lwg",
+    "AQ.Ab8RN6JRvaIQvqgs-3W-dP5pJvmYQMco3Xs99cqgah0_ar4U4g",
+    "AQ.Ab8RN6JjtMJ_MbVkOB0wh--spHnVz_kLYrEi6rn31nvnS_Oxsg",
+    "AQ.Ab8RN6K0S6Pok0j4NFFHKSjyQ_ks-75vhnSg73LlL07Hs4eAXg",
+    "AQ.Ab8RN6LvgBcj7NiC_wiquNuGRmoQmQN945yTTPC7W52zQRxmbg",
+    "AQ.Ab8RN6LMoKRl2AvvsaMHigzCaFgjSkIh9raQwh_srC-uMNn5-g",
+    "AQ.Ab8RN6K6iedLHkBub1TJQjP7YNHaphRhQ8v7pze_9hfKQArhlQ"
+]
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
-# Foydalanuvchilarning test sessiyalarini umumiy kuzatish lug'ati
+# Foydalanuvchilarning test natijalarini va poll ID larini saqlash uchun lug'at
 user_quiz_sessions = {}
-# Har bir yuborilgan Poll ID qaysi foydalanuvchiga tegishliligini saqlash paneli
-poll_to_user_map = {}
 
-# Model sxemasi
+# Model sxemasi yangilandi: endi har bir savol uchun tushuntirish matni (explanation) ham olinadi
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
@@ -70,9 +71,10 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
     if not GOOGLE_API_KEYS:
-        logging.error("Google API kalitlari ro'yxati bo'sh! .env fayl yoki muhit o'zgaruvchilarini tekshiring.")
+        logging.error("Google API kalitlari ro'yxati bo'sh!")
         return None
 
+    # BUYRUQ YANGILANDI: Test qaysi tilda bo'lsa, tushuntirish qoidasi ham o'sha tilda qisqa yozilishi buyurildi
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
@@ -84,6 +86,7 @@ def generate_quiz_from_gemini(extracted_text):
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak. Berilgan sxemaga amal qiling."
     )
 
+    # Kalitlar soni bo'yicha sikl aylanadi, har bir kalit xato bersa keyingisiga o'tadi
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
@@ -108,6 +111,7 @@ def generate_quiz_from_gemini(extracted_text):
         except Exception as e:
             logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
             
+        # Agar xatolik bo'lsa, indeksni bittaga oshirib keyingi kalitga o'tamiz
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
         
     return None
@@ -212,44 +216,9 @@ def process_quiz_logic(message, raw_text):
                 is_anonymous=False
             )
             
-            p_id = poll_msg.poll.id
-            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
-            poll_to_user_map[p_id] = user_id
-            
     except Exception as e:
         logging.error(f"JSON parsing yoki Poll yuborish xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH ---
-@bot.poll_answer_handler()
-def handle_poll_answer(poll_answer):
-    try:
-        poll_id = poll_answer.poll_id
-        chosen_options = poll_answer.option_ids
-
-        if poll_id not in poll_to_user_map:
-            return
-
-        user_id = poll_to_user_map[poll_id]
-
-        if user_id not in user_quiz_sessions:
-            return
-
-        session = user_quiz_sessions[user_id]
-        poll_map = session.get("poll_map", {})
-
-        if poll_id in poll_map:
-            correct_index = poll_map[poll_id]
-            user_chosen = chosen_options[0] if chosen_options else -1
-
-            if user_chosen == correct_index:
-                session["correct_count"] += 1
-            else:
-                session["incorrect_count"] += 1
-
-            session["answered_questions"] += 1
-
-            if session["answered_questions"] >= session["total_questions"]:
-                total = session["total_questions"]
-                correct = session["correct_count"]
-                incorrect = session["incorrect_count"]
+if __name__ == "__main__":
+    bot.infinity_polling()
