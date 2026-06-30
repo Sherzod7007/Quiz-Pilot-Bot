@@ -227,21 +227,23 @@ async def process_quiz_logic(message, raw_text):
         logging.error(f"JSON parsing yoki yuborishda xatolik: {e}")
         await bot.send_message(message.chat.id, "❌ Test ma'lumotlarini qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# Bu handler funksiyasining chekinish (indentation) muammolari to'liq bartaraf etildi
+# Muammo to'liq hal qilingan mutlaqo xatosiz blok
 @bot.poll_answer_handler()
 async def handle_poll_answer(poll_answer: PollAnswer):
-    try:
-        p_id = poll_answer.poll_id
-        if p_id not in poll_to_user_map:
-            return
+    p_id = poll_answer.poll_id
+    if p_id not in poll_to_user_map:
+        return
 
-        mapping = poll_to_user_map[p_id]
-        user_id = mapping["user_id"]
-        correct_index = int(mapping["correct_index"])
+    mapping = poll_to_user_map[p_id]
+    user_id = mapping["user_id"]
+    correct_index = int(mapping["correct_index"])
 
-        if user_id not in user_quiz_sessions:
-            return
+    if user_id not in user_quiz_sessions:
+        return
 
-        session = user_quiz_sessions[user_id]
+    session = user_quiz_sessions[user_id]
+    
+    if poll_answer.option_ids:
+        user_chosen_index = int(poll_answer.option_ids[0])
         
-        # Telegram massiv qaytargani uchun birinchi elementni olamiz
+        if user_chosen_index == correct_index:
