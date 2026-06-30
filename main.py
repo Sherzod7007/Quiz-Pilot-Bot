@@ -2,6 +2,7 @@
 import logging
 import json
 import os
+import time
 from pypdf import PdfReader
 import docx
 import telebot
@@ -11,10 +12,10 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
-# Logging
+# Logging sozlamalari
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token (Railway Variables panelidan o'qiydi)
+# Telegram Bot Token (Railway Variables panelidan avtomat o'qiydi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
@@ -70,6 +71,7 @@ def generate_quiz_from_gemini(extracted_text):
 
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
+        "Foydalanuvchi bergan savol/matnlar ichidan maksimal darajada ko'p (kamida 25-30 tagacha agar matn yetarli bo'lsa) test savollari yarating. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
@@ -88,7 +90,7 @@ def generate_quiz_from_gemini(extracted_text):
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=extracted_text[:15000],
+                contents=extracted_text[:25000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
@@ -197,11 +199,15 @@ def process_quiz_logic(message, raw_text):
             p_id = poll_msg.poll.id
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
+            
+            # Telegram spam-blokidan o'tish uchun 0.5 soniya pauza
+            time.sleep(0.5)
+            
     except Exception as e:
         logging.error(f"JSON yoki Poll xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH ---
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     poll_id = poll_answer.poll_id
@@ -219,7 +225,7 @@ def handle_poll_answer(poll_answer):
 
     if poll_id in poll_map:
         correct_index = poll_map[poll_id]
-        user_chosen = chosen_options[0] if chosen_options else -1
+        user_chosen = chosen_options if chosen_options else -1
 
         if user_chosen == correct_index:
             session["correct_count"] += 1
@@ -235,9 +241,3 @@ def handle_poll_answer(poll_answer):
             percentage = int((correct / total) * 100) if total > 0 else 0
 
             result_text = f"📊 Sizning test natijangiz tayyor!\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
-
-            bot.send_message(session["chat_id"], result_text, reply_markup=get_main_keyboard())
-            del user_quiz_sessions[user_id]
-
-if __name__ == "__main__":
-    bot.infinity_polling()
