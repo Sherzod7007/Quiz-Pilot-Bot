@@ -1,4 +1,17 @@
-
+# -*- coding: utf-8 -*-
+import logging
+import json
+import os
+import time
+from pypdf import PdfReader
+import docx
+import telebot
+from telebot import types
+from telebot.types import PollAnswer
+from google import genai
+from google.genai import types as genai_types
+from pydantic import BaseModel, Field
+from typing import List
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -204,7 +217,6 @@ def handle_poll_answer(poll_answer: PollAnswer):
     if not poll_answer.option_ids:
         return
 
-    # List elementini indekslash orqali to'g'ri olamiz va TypeError ning oldini olamiz
     user_chosen_index = poll_answer.option_ids[0]
 
     if int(user_chosen_index) == int(correct_index):
@@ -237,3 +249,4 @@ def handle_poll_answer(poll_answer: PollAnswer):
 
 if __name__ == "__main__":
     logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushdi...")
+    bot.infinity_polling()
