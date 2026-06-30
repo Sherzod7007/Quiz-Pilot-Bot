@@ -1,29 +1,13 @@
-# -*- coding: utf-8 -*-
-import logging
-import json
-import os
-import time
-from pypdf import PdfReader
-import docx
-import telebot
-from telebot import types
-from telebot.types import PollAnswer
-from google import genai
-from google.genai import types as genai_types
-from pydantic import BaseModel, Field
-from typing import List
 
-# Logging
+
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
@@ -110,12 +94,7 @@ def send_welcome(message):
     user_name = message.from_user.first_name
     bot.send_message(
         message.chat.id,
-        f"👋 Assalomu alaykum, {user_name}!\n\n"
-        "🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n"
-        "📖 **Men nimalar qila olaman?**\n"
-        "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
-        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
-        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
+        f"👋 Assalomu alaykum, {user_name}!\n\n🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n📖 **Men nimalar qila olaman?**\n1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
         reply_markup=get_main_keyboard()
     )
 
@@ -171,6 +150,10 @@ def process_quiz_logic(message, raw_text):
         except Exception:
             pass
         items = quiz_data.get("quizzes", [])
+        if not items:
+            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
+            return
+
         user_id = message.from_user.id
         user_quiz_sessions[user_id] = {
             "correct_count": 0,
@@ -201,48 +184,56 @@ def process_quiz_logic(message, raw_text):
             poll_to_user_map[p_id] = user_id
             time.sleep(0.5)
     except Exception as e:
-        logging.error(f"Xatolik yuz berdi: {e}")
+        logging.error(f"Xatolik: {e}")
 
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer: PollAnswer):
-    try:
-        p_id = poll_answer.poll_id
-        if p_id not in poll_to_user_map:
-            return
+    p_id = poll_answer.poll_id
+    if p_id not in poll_to_user_map:
+        return
 
-        user_id = poll_to_user_map[p_id]
-        if user_id not in user_quiz_sessions:
-            return
+    user_id = poll_to_user_map[p_id]
+    if user_id not in user_quiz_sessions:
+        return
 
-        session = user_quiz_sessions[user_id]
-        correct_index = session["poll_map"].get(p_id)
+    session = user_quiz_sessions[user_id]
+    correct_index = session["poll_map"].get(p_id)
+    if correct_index is None:
+        return
 
-        if poll_answer.option_ids and correct_index is not None:
-            # Massivning birinchi elementini indeks qilib olamiz
-            user_chosen_index = poll_answer.option_ids[0]
+    if not poll_answer.option_ids:
+        return
 
-            if int(user_chosen_index) == int(correct_index):
-                session["correct_count"] += 1
-            else:
-                session["incorrect_count"] += 1
+    # List elementini indekslash orqali to'g'ri olamiz va TypeError ning oldini olamiz
+    user_chosen_index = poll_answer.option_ids[0]
 
-            session["answered_questions"] += 1
+    if int(user_chosen_index) == int(correct_index):
+        session["correct_count"] += 1
+    else:
+        session["incorrect_count"] += 1
 
-            if session["answered_questions"] == session["total_questions"]:
-                total = session["total_questions"]
-                correct = session["correct_count"]
-                incorrect = session["incorrect_count"]
-                foiz = int((correct / total) * 100) if total > 0 else 0
+    session["answered_questions"] += 1
 
-                result_text = (
-                    "📊 **Sizning test natijangiz:**\n\n"
-                    f"✅ To'g'ri javoblar: {correct} ta\n"
-                    f"❌ Noto'g'ri javoblar: {incorrect} ta\n"
-                    f"📝 Jami savollar: {total} ta\n"
-                    f"🎯 Umumiy natija: {foiz}%\n\n"
-                    "Yangi test boshlash uchun darslik fayli yoki matn yuboring!"
-                )
-                bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
-                if user_id in user_quiz_sessions:
-                    del user_quiz_sessions[user_id]
-    except Exception as e:
+    if session["answered_questions"] == session["total_questions"]:
+        total = session["total_questions"]
+        correct = session["correct_count"]
+        incorrect = session["incorrect_count"]
+        foiz = int((correct / total) * 100) if total > 0 else 0
+
+        result_text = (
+            "📊 **Sizning test natijangiz:**\n\n"
+            f"✅ To'g'ri javoblar: {correct} ta\n"
+            f"❌ Noto'g'ri javoblar: {incorrect} ta\n"
+            f"📝 Jami savollar: {total} ta\n"
+            f"🎯 Umumiy natija: {foiz}%\n\n"
+            "Yangi test boshlash uchun darslik fayli yoki matn yuboring!"
+        )
+        try:
+            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
+        except Exception:
+            pass
+        if user_id in user_quiz_sessions:
+            del user_quiz_sessions[user_id]
+
+if __name__ == "__main__":
+    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushdi...")
