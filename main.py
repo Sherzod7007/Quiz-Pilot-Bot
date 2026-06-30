@@ -13,14 +13,18 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
+# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Telegram Bot Token (Railway Variables panelidan o'qiydi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
 
+# Asinxron bot obyekti
 bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 
+# Google API kalitlari ro'yxati (Railway Variables panelidan avtomat o'qiydi)
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
@@ -107,7 +111,12 @@ async def send_welcome(message):
     user_name = message.from_user.first_name
     await bot.send_message(
         message.chat.id,
-        f"👋 Assalomu alaykum, {user_name}!\n\n🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n📖 **Men nimalar qila olaman?**\n1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
+        f"👋 Assalomu alaykum, {user_name}!\n\n"
+        "🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n"
+        "📖 **Men nimalar qila olaman?**\n"
+        "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
+        "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
+        "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
@@ -218,30 +227,22 @@ async def process_quiz_logic(message, raw_text):
         logging.error(f"JSON parsing yoki yuborishda xatolik: {e}")
         await bot.send_message(message.chat.id, "❌ Test ma'lumotlarini qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
+# Mutlaqo xatosiz va toza yozilgan poll handler funksiyasi
 @bot.poll_answer_handler()
 async def handle_poll_answer(poll_answer: PollAnswer):
-    p_id = poll_answer.poll_id
-    if p_id not in poll_to_user_map:
-        return
+    try:
+        p_id = poll_answer.poll_id
+        if p_id not in poll_to_user_map:
+            return
 
-    mapping = poll_to_user_map[p_id]
-    user_id = mapping["user_id"]
-    correct_index = mapping["correct_index"]
+        mapping = poll_to_user_map[p_id]
+        user_id = mapping["user_id"]
+        correct_index = mapping["correct_index"]
 
-    if user_id not in user_quiz_sessions:
-        return
+        if user_id not in user_quiz_sessions:
+            return
 
-    session = user_quiz_sessions[user_id]
-    
-    if poll_answer.option_ids:
-        user_chosen_index = poll_answer.option_ids[0]
-        
-        if int(user_chosen_index) == int(correct_index):
-            session["correct_count"] += 1
-        else:
-            session["incorrect_count"] += 1
+        session = user_quiz_sessions[user_id]
 
-        session["answered_questions"] += 1
-
-        if session["answered_questions"] == session["total_questions"]:
-            total = session["total_questions"]
+        if poll_answer.option_ids:
+            # list ichidagi indeksni [0] orqali to'g'ri ajratib olamiz
