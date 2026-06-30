@@ -2,25 +2,26 @@
 import logging
 import json
 import os
-import time
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
-from telebot.types import PollAnswer
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
+# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Telegram Bot Token (Railway Variables panelidan o'qiydi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
+# Google API kalitlari ro'yxati (Railway Variables panelidan avtomat o'qiydi)
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
@@ -168,10 +169,6 @@ def process_quiz_logic(message, raw_text):
         except Exception:
             pass
         items = quiz_data.get("quizzes", [])
-        if not items:
-            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
-            return
-
         user_id = message.from_user.id
         user_quiz_sessions[user_id] = {
             "correct_count": 0,
@@ -200,57 +197,47 @@ def process_quiz_logic(message, raw_text):
             p_id = poll_msg.poll.id
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
-            time.sleep(0.5)
     except Exception as e:
-        logging.error(f"Xatolik: {e}")
+        logging.error(f"JSON yoki Poll xatosi: {e}")
+        bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
+# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH ---
 @bot.poll_answer_handler()
-def handle_poll_answer(poll_answer: PollAnswer):
-    p_id = poll_answer.poll_id
-    if p_id not in poll_to_user_map:
+def handle_poll_answer(poll_answer):
+    poll_id = poll_answer.poll_id
+    chosen_options = poll_answer.option_ids
+
+    if poll_id not in poll_to_user_map:
         return
 
-    user_id = poll_to_user_map[p_id]
+    user_id = poll_to_user_map[poll_id]
     if user_id not in user_quiz_sessions:
         return
 
     session = user_quiz_sessions[user_id]
-    correct_index = session["poll_map"].get(p_id)
-    if correct_index is None:
-        return
+    poll_map = session.get("poll_map", {})
 
-    if not poll_answer.option_ids:
-        return
+    if poll_id in poll_map:
+        correct_index = poll_map[poll_id]
+        user_chosen = chosen_options[0] if chosen_options else -1
 
-    # List ichidan birinchi tanlangan elementning indeksini xavfsiz olamiz
-    user_chosen_index = poll_answer.option_ids[0]
+        if user_chosen == correct_index:
+            session["correct_count"] += 1
+        else:
+            session["incorrect_count"] += 1
 
-    if int(user_chosen_index) == int(correct_index):
-        session["correct_count"] += 1
-    else:
-        session["incorrect_count"] += 1
+        session["answered_questions"] += 1
 
-    session["answered_questions"] += 1
+        if session["answered_questions"] >= session["total_questions"]:
+            total = session["total_questions"]
+            correct = session["correct_count"]
+            incorrect = session["incorrect_count"]
+            percentage = int((correct / total) * 100) if total > 0 else 0
 
-    if session["answered_questions"] == session["total_questions"]:
-        total = session["total_questions"]
-        correct = session["correct_count"]
-        incorrect = session["incorrect_count"]
-        foiz = int((correct / total) * 100) if total > 0 else 0
+            result_text = f"📊 Sizning test natijangiz tayyor!\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
 
-        result_text = (
-            "📊 **Sizning test natijangiz:**\n\n"
-            f"✅ To'g'ri javoblar: {correct} ta\n"
-            f"❌ Noto'g'ri javoblar: {incorrect} ta\n"
-            f"📝 Jami savollar: {total} ta\n"
-            f"🎯 Umumiy natija: {foiz}%\n\n"
-            "Yangi test boshlash uchun darslik fayli yoki matn yuboring!"
-        )
-        try:
-            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
-        except Exception:
-            pass
-        if user_id in user_quiz_sessions:
+            bot.send_message(session["chat_id"], result_text, reply_markup=get_main_keyboard())
             del user_quiz_sessions[user_id]
 
 if __name__ == "__main__":
+    bot.infinity_polling()
