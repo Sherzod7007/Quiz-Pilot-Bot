@@ -2,25 +2,27 @@
 import logging
 import json
 import os
-import time
+import asyncio
 from pypdf import PdfReader
 import docx
-import telebot
+from telebot.async_telebot import AsyncTeleBot
 from telebot import types
+from telebot.types import PollAnswer
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
-# Logging sozlamalari
+# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token (Railway Variables panelidan avtomat o'qiydi)
+# Telegram Bot Token (Railway Variables panelidan o'qiydi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
 
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+# Asinxron bot obyekti
+bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 
 # Google API kalitlari ro'yxati (Railway Variables panelidan avtomat o'qiydi)
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
@@ -71,7 +73,6 @@ def generate_quiz_from_gemini(extracted_text):
 
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
-        "Foydalanuvchi bergan savol/matnlar ichidan maksimal darajada ko'p (kamida 25-30 tagacha agar matn yetarli bo'lsa) test savollari yarating. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
         "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
         "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
@@ -90,7 +91,7 @@ def generate_quiz_from_gemini(extracted_text):
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=extracted_text[:25000],
+                contents=extracted_text[:15000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
@@ -106,9 +107,9 @@ def generate_quiz_from_gemini(extracted_text):
     return None
 
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
+async def send_welcome(message):
     user_name = message.from_user.first_name
-    bot.send_message(
+    await bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n"
         "🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n"
@@ -116,15 +117,16 @@ def send_welcome(message):
         "1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n"
         "2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n"
         "🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(),
+        parse_mode="Markdown"
     )
 
 @bot.message_handler(content_types=['document'])
-def handle_docs(message):
+async def handle_docs(message):
     try:
         file_name = message.document.file_name
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
+        file_info = await bot.get_file(message.document.file_id)
+        downloaded_file = await bot.download_file(file_info.file_path)
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         file_path = os.path.join(DOWNLOADS_DIR, file_name)
         with open(file_path, 'wb') as new_file:
@@ -135,51 +137,62 @@ def handle_docs(message):
         elif file_name.endswith('.docx'):
             raw_text = read_docx(file_path)
         else:
-            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
+            await bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
             return
 
         if not raw_text.strip():
-            bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
+            await bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
             return
 
-        process_quiz_logic(message, raw_text)
+        await process_quiz_logic(message, raw_text)
     except Exception as e:
         logging.error(f"Fayl xatosi: {e}")
 
 @bot.message_handler(func=lambda message: True)
-def handle_text(message):
+async def handle_text(message):
     if message.text == '/start' or message.text.startswith('/'):
-        send_welcome(message)
+        await send_welcome(message)
         return
-    process_quiz_logic(message, message.text)
+    await process_quiz_logic(message, message.text)
 
-def process_quiz_logic(message, raw_text):
-    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
-    quiz_json_raw = generate_quiz_from_gemini(raw_text)
+async def process_quiz_logic(message, raw_text):
+    status_msg = await bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
+    
+    # Gemini so'rovi biroz vaqt oladi, uni alohida thread'da ishga tushiramiz (bot qotib qolmasligi uchun)
+    loop = asyncio.get_running_loop()
+    quiz_json_raw = await loop.run_in_executor(None, generate_quiz_from_gemini, raw_text)
+    
     if not quiz_json_raw:
         try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
-        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
+        await bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
         quiz_data = json.loads(quiz_json_raw)
         try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
+            
         items = quiz_data.get("quizzes", [])
+        if not items:
+            await bot.send_message(message.chat.id, "❌ Matndan hech qanday test savoli yaratilmadi.", reply_markup=get_main_keyboard())
+            return
+
         user_id = message.from_user.id
         user_quiz_sessions[user_id] = {
             "correct_count": 0,
             "incorrect_count": 0,
             "total_questions": len(items),
             "answered_questions": 0,
-            "poll_map": {},
             "chat_id": message.chat.id
         }
+
+        await bot.send_message(message.chat.id, f"📚 {len(items)} ta savoldan iborat test tayyorlandi. Yuklanmoqda...", reply_markup=get_main_keyboard())
+
         for idx, q in enumerate(items, start=1):
             options = q['options'][:4]
             correct_index = int(q['correct_index'])
@@ -187,56 +200,39 @@ def process_quiz_logic(message, raw_text):
                 correct_index = 0
             explanation_text = q.get('explanation', '')[:200]
             numbered_question = f"{idx}. {q['question']}"
-            poll_msg = bot.send_poll(
-                chat_id=message.chat.id,
-                question=numbered_question,
-                options=options,
-                correct_option_id=correct_index,
-                type='quiz',
-                explanation=explanation_text,
-                is_anonymous=False
-            )
-            p_id = poll_msg.poll.id
-            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
-            poll_to_user_map[p_id] = user_id
             
-            # Telegram cheklovlaridan o'tish uchun har bir test orasida 0.5 soniya tanaffus
-            time.sleep(0.5)
-            
+            try:
+                poll_msg = await bot.send_poll(
+                    chat_id=message.chat.id,
+                    question=numbered_question,
+                    options=options,
+                    correct_option_id=correct_index,
+                    type='quiz',
+                    explanation=explanation_text,
+                    is_anonymous=False
+                )
+                
+                p_id = poll_msg.poll.id
+                # Qaysi poll qaysi foydalanuvchiga tegishli ekanini va uning to'g'ri indeksini eslab qolamiz
+                poll_to_user_map[p_id] = {
+                    "user_id": user_id,
+                    "correct_index": correct_index
+                }
+                
+                # Telegram Flood Control (Spam-blok) oldini olish uchun asinxron xavfsiz pauza
+                await asyncio.sleep(0.6)
+                
+            except Exception as e:
+                logging.error(f"Savol yuklashda muammo: {e}")
+                await asyncio.sleep(3) # Limitga tushganda ko'proq kutish
+                
     except Exception as e:
-        logging.error(f"JSON yoki Poll xatosi: {e}")
-        bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        logging.error(f"JSON parsing yoki yuborishda xatolik: {e}")
+        await bot.send_message(message.chat.id, "❌ Test ma'lumotlarini qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
+# Foydalanuvchilar javobini hisoblash va natijalarni chiqarish
 @bot.poll_answer_handler()
-def handle_poll_answer(poll_answer):
+async def handle_poll_answer(poll_answer: PollAnswer):
     try:
-        poll_id = poll_answer.poll_id
-        chosen_options = poll_answer.option_ids
-
-        if poll_id not in poll_to_user_map:
-            return
-
-        user_id = poll_to_user_map[poll_id]
-        if user_id not in user_quiz_sessions:
-            return
-
-        session = user_quiz_sessions[user_id]
-        poll_map = session.get("poll_map", {})
-
-        if poll_id in poll_map:
-            correct_index = poll_map[poll_id]
-            user_chosen = chosen_options if chosen_options else -1
-
-            if user_chosen == correct_index:
-                session["correct_count"] += 1
-            else:
-                session["incorrect_count"] += 1
-
-            session["answered_questions"] += 1
-
-            if session["answered_questions"] >= session["total_questions"]:
-                total = session["total_questions"]
-                correct = session["correct_count"]
-                incorrect = session["incorrect_count"]
-                percentage = int((correct / total) * 100) if total > 0 else 0
+        p_id = poll_answer.poll_id
+        if p_id not in poll_to_user_map:
