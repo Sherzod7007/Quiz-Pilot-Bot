@@ -200,7 +200,7 @@ def process_quiz_logic(message, raw_text):
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
             
-            # Telegram spam-blokidan o'tish uchun 0.5 soniya pauza
+            # Telegram cheklovlaridan o'tish uchun 0.5 soniya tanaffus
             time.sleep(0.5)
             
     except Exception as e:
@@ -210,34 +210,33 @@ def process_quiz_logic(message, raw_text):
 # --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
-    poll_id = poll_answer.poll_id
-    chosen_options = poll_answer.option_ids
+    try:
+        poll_id = poll_answer.poll_id
+        chosen_options = poll_answer.option_ids
 
-    if poll_id not in poll_to_user_map:
-        return
+        if poll_id not in poll_to_user_map:
+            return
 
-    user_id = poll_to_user_map[poll_id]
-    if user_id not in user_quiz_sessions:
-        return
+        user_id = poll_to_user_map[poll_id]
+        if user_id not in user_quiz_sessions:
+            return
 
-    session = user_quiz_sessions[user_id]
-    poll_map = session.get("poll_map", {})
+        session = user_quiz_sessions[user_id]
+        poll_map = session.get("poll_map", {})
 
-    if poll_id in poll_map:
-        correct_index = poll_map[poll_id]
-        user_chosen = chosen_options if chosen_options else -1
+        if poll_id in poll_map:
+            correct_index = poll_map[poll_id]
+            user_chosen = chosen_options if chosen_options else -1
 
-        if user_chosen == correct_index:
-            session["correct_count"] += 1
-        else:
-            session["incorrect_count"] += 1
+            if user_chosen == correct_index:
+                session["correct_count"] += 1
+            else:
+                session["incorrect_count"] += 1
 
-        session["answered_questions"] += 1
+            session["answered_questions"] += 1
 
-        if session["answered_questions"] >= session["total_questions"]:
-            total = session["total_questions"]
-            correct = session["correct_count"]
-            incorrect = session["incorrect_count"]
-            percentage = int((correct / total) * 100) if total > 0 else 0
-
-            result_text = f"📊 Sizning test natijangiz tayyor!\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
+            if session["answered_questions"] >= session["total_questions"]:
+                total = session["total_questions"]
+                correct = session["correct_count"]
+                incorrect = session["incorrect_count"]
+                percentage = int((correct / total) * 100) if total > 0 else 0
