@@ -158,7 +158,6 @@ async def handle_text(message):
 async def process_quiz_logic(message, raw_text):
     status_msg = await bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     
-    # Gemini so'rovi biroz vaqt oladi, uni alohida thread'da ishga tushiramiz (bot qotib qolmasligi uchun)
     loop = asyncio.get_running_loop()
     quiz_json_raw = await loop.run_in_executor(None, generate_quiz_from_gemini, raw_text)
     
@@ -213,26 +212,34 @@ async def process_quiz_logic(message, raw_text):
                 )
                 
                 p_id = poll_msg.poll.id
-                # Qaysi poll qaysi foydalanuvchiga tegishli ekanini va uning to'g'ri indeksini eslab qolamiz
                 poll_to_user_map[p_id] = {
                     "user_id": user_id,
                     "correct_index": correct_index
                 }
                 
-                # Telegram Flood Control (Spam-blok) oldini olish uchun asinxron xavfsiz pauza
                 await asyncio.sleep(0.6)
                 
             except Exception as e:
                 logging.error(f"Savol yuklashda muammo: {e}")
-                await asyncio.sleep(3) # Limitga tushganda ko'proq kutish
+                await asyncio.sleep(3)
                 
     except Exception as e:
         logging.error(f"JSON parsing yoki yuborishda xatolik: {e}")
         await bot.send_message(message.chat.id, "❌ Test ma'lumotlarini qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# Foydalanuvchilar javobini hisoblash va natijalarni chiqarish
+# Foydalanuvchilar javobini hisoblash va natijalarni chiqarish (Tabulyatsiyalar to'g'rilandi)
 @bot.poll_answer_handler()
 async def handle_poll_answer(poll_answer: PollAnswer):
     try:
         p_id = poll_answer.poll_id
         if p_id not in poll_to_user_map:
+            return
+            
+        mapping = poll_to_user_map[p_id]
+        user_id = mapping["user_id"]
+        correct_index = mapping["correct_index"]
+        
+        if user_id not in user_quiz_sessions:
+            return
+            
+        session = user_quiz_sessions[user_id]
