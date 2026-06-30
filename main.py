@@ -203,7 +203,7 @@ def process_quiz_logic(message, raw_text):
     except Exception as e:
         logging.error(f"Xatolik yuz berdi: {e}")
 
-# Chala qolgan handler 100% sinxron standartda yakunlandi
+# Tayyor sinxron kodga qo'shilgan va to'liq yopilgan funksiya
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer: PollAnswer):
     try:
@@ -219,6 +219,7 @@ def handle_poll_answer(poll_answer: PollAnswer):
         correct_index = session["poll_map"].get(p_id)
 
         if poll_answer.option_ids and correct_index is not None:
+            # Telegram qaytaradigan ro'yxatning birinchi elementini olamiz
             user_chosen_index = poll_answer.option_ids[0]
 
             if int(user_chosen_index) == int(correct_index):
@@ -242,5 +243,3 @@ def handle_poll_answer(poll_answer: PollAnswer):
                     f"🎯 Umumiy natija: {foiz}%\n\n"
                     "Yangi test boshlash uchun darslik fayli yoki matn yuboring!"
                 )
-                bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
-                if user_id in user_quiz_sessions:
