@@ -13,17 +13,14 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
-# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token (Railway Variables panelidan o'qiydi)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Google API kalitlari ro'yxati (Railway Variables panelidan avtomat o'qiydi)
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
@@ -220,7 +217,6 @@ def handle_poll_answer(poll_answer: PollAnswer):
     if not poll_answer.option_ids:
         return
 
-    # Telegram'dan kelayotgan ro'yxat (list) ichidan foydalanuvchi tanlagan indeksni to'g'ri olamiz
     user_chosen_index = poll_answer.option_ids[0]
 
     if int(user_chosen_index) == int(correct_index):
@@ -249,3 +245,8 @@ def handle_poll_answer(poll_answer: PollAnswer):
         except Exception:
             pass
         if user_id in user_quiz_sessions:
+            del user_quiz_sessions[user_id]
+
+if __name__ == "__main__":
+    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushdi...")
+    bot.infinity_polling()
