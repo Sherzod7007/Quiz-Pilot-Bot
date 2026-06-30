@@ -201,7 +201,7 @@ def process_quiz_logic(message, raw_text):
         logging.error(f"JSON yoki Poll xatosi: {e}")
         bot.send_message(message.chat.id, "❌ Ma'lumotlarni qayta ishlashda xatolik yuz berdi.", reply_markup=get_main_keyboard())
 
-# --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
+# --- NATIJANI FOIZLARDA HISOBLAB CHIQARISH QISMI (XATOSIZ) ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
     poll_id = poll_answer.poll_id
@@ -237,7 +237,9 @@ def handle_poll_answer(poll_answer):
             result_text = f"📊 Sizning test natijangiz tayyor!\n\n✅ To'g'ri javoblar: {correct} ta\n❌ Noto'g'ri javoblar: {incorrect} ta\n📝 Umumiy savollar: {total} ta\n🎯 Ko'rsatkich: {percentage}%"
 
             bot.send_message(session["chat_id"], result_text, reply_markup=get_main_keyboard())
+            
+            # Xotirani tozalash
+            for saved_poll_id in list(poll_map.keys()):
+                if saved_poll_id in poll_to_user_map:
+                    del poll_to_user_map[saved_poll_id]
             del user_quiz_sessions[user_id]
-
-if __name__ == "__main__":
-    bot.infinity_polling()
