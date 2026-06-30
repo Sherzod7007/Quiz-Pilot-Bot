@@ -12,7 +12,7 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
 
-# Logging
+# Logging sozlamalari
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Telegram Bot Token (Railway Variables panelidan avtomat o'qiydi)
@@ -69,7 +69,6 @@ def generate_quiz_from_gemini(extracted_text):
         logging.error("Google API kalitlari ro'yxati bo'sh!")
         return None
 
-    # BUYRUQ YANGILANDI: Ko'proq (25-30 tagacha) savollarni sig'dirish uchun AI ko'rsatmasi kuchaytirildi
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savol/matnlar ichidan maksimal darajada ko'p (kamida 25-30 tagacha agar matn yetarli bo'lsa) test savollari yarating. "
@@ -91,7 +90,6 @@ def generate_quiz_from_gemini(extracted_text):
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                # 25-30 ta savol uchun kontekst hajmi oshirildi (25000 belgi)
                 contents=extracted_text[:25000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -202,7 +200,7 @@ def process_quiz_logic(message, raw_text):
             user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
             poll_to_user_map[p_id] = user_id
             
-            # KATTA ISLOHOT: Telegram cheklovlaridan o'tish uchun har bir test orasida 0.5 soniya pauza beriladi
+            # Telegram cheklovlaridan o'tish uchun har bir test orasida 0.5 soniya tanaffus
             time.sleep(0.5)
             
     except Exception as e:
@@ -212,32 +210,33 @@ def process_quiz_logic(message, raw_text):
 # --- FOYDALANUVCHI JAVOBINI TEKSHIRISH VA NATIJANI CHIQARISH ---
 @bot.poll_answer_handler()
 def handle_poll_answer(poll_answer):
-    poll_id = poll_answer.poll_id
-    chosen_options = poll_answer.option_ids
+    try:
+        poll_id = poll_answer.poll_id
+        chosen_options = poll_answer.option_ids
 
-    if poll_id not in poll_to_user_map:
-        return
+        if poll_id not in poll_to_user_map:
+            return
 
-    user_id = poll_to_user_map[poll_id]
-    if user_id not in user_quiz_sessions:
-        return
+        user_id = poll_to_user_map[poll_id]
+        if user_id not in user_quiz_sessions:
+            return
 
-    session = user_quiz_sessions[user_id]
-    poll_map = session.get("poll_map", {})
+        session = user_quiz_sessions[user_id]
+        poll_map = session.get("poll_map", {})
 
-    if poll_id in poll_map:
-        correct_index = poll_map[poll_id]
-        user_chosen = chosen_options if chosen_options else -1
+        if poll_id in poll_map:
+            correct_index = poll_map[poll_id]
+            user_chosen = chosen_options[0] if chosen_options else -1
 
-        if user_chosen == correct_index:
-            session["correct_count"] += 1
-        else:
-            session["incorrect_count"] += 1
+            if user_chosen == correct_index:
+                session["correct_count"] += 1
+            else:
+                session["incorrect_count"] += 1
 
-        session["answered_questions"] += 1
+            session["answered_questions"] += 1
 
-        if session["answered_questions"] >= session["total_questions"]:
-            total = session["total_questions"]
-            correct = session["correct_count"]
-            incorrect = session["incorrect_count"]
-            percentage = int((correct / total) * 100) if total > 0 else 0
+            if session["answered_questions"] >= session["total_questions"]:
+                total = session["total_questions"]
+                correct = session["correct_count"]
+                incorrect = session["incorrect_count"]
+                percentage = int((correct / total) * 100) if total > 0 else 0
