@@ -168,6 +168,10 @@ def process_quiz_logic(message, raw_text):
         except Exception:
             pass
         items = quiz_data.get("quizzes", [])
+        if not items:
+            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
+            return
+
         user_id = message.from_user.id
         user_quiz_sessions[user_id] = {
             "correct_count": 0,
@@ -218,6 +222,7 @@ def handle_poll_answer(poll_answer: PollAnswer):
     if not poll_answer.option_ids:
         return
 
+    # List ichidan birinchi tanlangan elementning indeksini xavfsiz olamiz
     user_chosen_index = poll_answer.option_ids[0]
 
     if int(user_chosen_index) == int(correct_index):
@@ -249,5 +254,3 @@ def handle_poll_answer(poll_answer: PollAnswer):
             del user_quiz_sessions[user_id]
 
 if __name__ == "__main__":
-    logging.info("Bot ishga tushdi...")
-    bot.infinity_polling(skip_pending_updates=True)
