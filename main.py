@@ -197,10 +197,9 @@ def process_quiz_logic(message, raw_text):
         except Exception as e:
             logging.error(f"Faylga yozishda xatolik: {e}")
 
-        # KESHNI SINDIRISH: Havola oxiriga dinamik vaqt (timestamp) va v=2 qo'shildi
         timestamp = int(time.time())
         markup = types.InlineKeyboardMarkup()
-        app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}&v=2&t={timestamp}"
+        app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}&v=3&t={timestamp}"
         markup.add(types.InlineKeyboardButton(text="📱 Testni Ilovada Boshlash", web_app=types.WebAppInfo(url=app_url)))
 
         bot.send_message(
@@ -213,23 +212,22 @@ def process_quiz_logic(message, raw_text):
 
 # ----------------- TELEGRAM MINI APP -----------------
 
-@flask_app.route('/quiz_data', methods=['GET'])
-def get_quiz_data_api():
+@flask_app.route('/quiz')
+def quiz_page():
     user_id_raw = request.args.get('user_id', '')
     user_id_str = str(user_id_raw).strip()
     
+    # TO'G'RILANDI: Savollar srazu Python tomonidan topiladi
     data = global_quiz_data.get(user_id_str)
     if not data and global_quiz_data:
         last_key = list(global_quiz_data.keys())[-1]
         data = global_quiz_data[last_key]
-        logging.info(f"ID mos kelmadi, oxirgi yuklangan test taqdim etildi (Kalit: {last_key})")
         
-    return jsonify(data if data else [])
-
-@flask_app.route('/quiz')
-def quiz_page():
-    user_id = request.args.get('user_id', '')
-    return render_template('quiz.html', user_id=user_id)
+    # Ma'lumotni xavfsiz JSON-matn ko'rinishiga keltirib, sahifaga srazu uzatamiz
+    quiz_json_string = json.dumps(data if data else [], ensure_ascii=False)
+    
+    # TO'G'RILANDI: render_template orqali ma'lumot to'g'ridan-to'g'ri HTML ichiga yuklanadi!
+    return render_template('quiz.html', quiz_json=quiz_json_string)
 
 def run_flask():
     logging.info(f"Flask veb-server {PORT} portida ishga tushmoqda...")
