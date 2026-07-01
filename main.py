@@ -2,48 +2,32 @@
 import logging
 import json
 import os
-import threading
 import time
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
+from telebot.types import PollAnswer
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
-from flask import Flask, jsonify, request, render_template
 
-# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN topilmadi!")
+    raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-flask_app = Flask(__name__)
-
-PORT = int(os.getenv("PORT", 5000))
-RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-STORE_FILE = 'quiz_store.json'
-global_quiz_data = {}
-
-if os.path.exists(STORE_FILE):
-    try:
-        with open(STORE_FILE, 'r', encoding='utf-8') as f:
-            global_quiz_data = json.load(f)
-        logging.info("Eski testlar fayldan muvaffaqiyatli yuklandi.")
-    except Exception as e:
-        logging.error(f"Fayldan o'qishda xatolik: {e}")
-        global_quiz_data = {}
+user_quiz_sessions = {}
+poll_to_user_map = {}
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
@@ -86,18 +70,17 @@ def generate_quiz_from_gemini(extracted_text):
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
-        "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy 'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shing. "
-        "Explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
-        "DIQQAT: Savol, variantlar va explanation foydalanuvchi yuborgan matnning asl tili bilan bir xil tilda bo'lishi shart! "
+        "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
+        "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
+        "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
+        "DIQQAT: Savol, variantlar va explanation matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak."
     )
 
-    attempts = 0
-    while attempts < len(GOOGLE_API_KEYS):
+    for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-            attempts += 1
             continue
         try:
             logging.info(f"Ishlatilayotgan API Key indeksi: {current_key_index}")
@@ -116,10 +99,7 @@ def generate_quiz_from_gemini(extracted_text):
                 return response.text
         except Exception as e:
             logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
-        
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-        attempts += 1
-        
     return None
 
 @bot.message_handler(commands=['start'])
@@ -127,7 +107,7 @@ def send_welcome(message):
     user_name = message.from_user.first_name
     bot.send_message(
         message.chat.id,
-        f"👋 Assalomu alaykum, {user_name}!\n\n🚀 Men **Quiz Pilot Bot** — darsliklardan chiroyli mobil ilova ko'rinishidagi testlar yaratuvchi yordamchingizman.\n\nMenga matn yoki **PDF/DOCX** fayl yuboring!",
+        f"👋 Assalomu alaykum, {user_name}!\n\n🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n📖 **Men nimalar qila olaman?**\n1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
         reply_markup=get_main_keyboard()
     )
 
@@ -151,10 +131,10 @@ def handle_docs(message):
             return
 
         if not raw_text.strip():
-            bot.send_message(message.chat.id, "❌ Fayl bo'sh.", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
             return
 
-        threading.Thread(target=process_quiz_logic, args=(message, raw_text), daemon=True).start()
+        process_quiz_logic(message, raw_text)
     except Exception as e:
         logging.error(f"Fayl xatosi: {e}")
 
@@ -163,17 +143,17 @@ def handle_text(message):
     if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
-    threading.Thread(target=process_quiz_logic, args=(message, message.text), daemon=True).start()
+    process_quiz_logic(message, message.text)
 
 def process_quiz_logic(message, raw_text):
-    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt darslik asosida chiroyli dastur interfeysini tayyorlamoqda...", reply_markup=get_main_keyboard())
+    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
         try:
             bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
-        bot.send_message(message.chat.id, "❌ Afsuski, barcha API kalitlar limitga tushgan yoki xato. Kalitlarni tekshiring.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
@@ -182,61 +162,91 @@ def process_quiz_logic(message, raw_text):
             bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
-            
         items = quiz_data.get("quizzes", [])
         if not items:
             bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
             return
 
-        user_id = str(message.from_user.id)
-        global_quiz_data[user_id] = items
-
-        try:
-            with open(STORE_FILE, 'w', encoding='utf-8') as f:
-                json.dump(global_quiz_data, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            logging.error(f"Faylga yozishda xatolik: {e}")
-
-        timestamp = int(time.time())
-        markup = types.InlineKeyboardMarkup()
-        app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}&v=3&t={timestamp}"
-        markup.add(types.InlineKeyboardButton(text="📱 Testni Ilovada Boshlash", web_app=types.WebAppInfo(url=app_url)))
-
-        bot.send_message(
-            message.chat.id, 
-            "📚 **Test savollari tayyor!**\n\n🎯 Jami savollar yuklandi.\n\nPastdagi tugmani bosing va maxsus qora fondagi interfeysda testni yeching 👇", 
-            reply_markup=markup
-        )
+        user_id = message.from_user.id
+        user_quiz_sessions[user_id] = {
+            "correct_count": 0,
+            "incorrect_count": 0,
+            "total_questions": len(items),
+            "answered_questions": 0,
+            "poll_map": {},
+            "chat_id": message.chat.id
+        }
+        for idx, q in enumerate(items, start=1):
+            options = q['options'][:4]
+            correct_index = int(q['correct_index'])
+            if correct_index >= len(options):
+                correct_index = 0
+            explanation_text = q.get('explanation', '')[:200]
+            numbered_question = f"{idx}. {q['question']}"
+            poll_msg = bot.send_poll(
+                chat_id=message.chat.id,
+                question=numbered_question,
+                options=options,
+                correct_option_id=correct_index,
+                type='quiz',
+                explanation=explanation_text,
+                is_anonymous=False
+            )
+            p_id = poll_msg.poll.id
+            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
+            poll_to_user_map[p_id] = user_id
+            time.sleep(0.5)
     except Exception as e:
         logging.error(f"Xatolik: {e}")
 
-# ----------------- TELEGRAM MINI APP -----------------
+@bot.poll_answer_handler()
+def handle_poll_answer(poll_answer: PollAnswer):
+    p_id = poll_answer.poll_id
+    if p_id not in poll_to_user_map:
+        return
 
-@flask_app.route('/quiz')
-def quiz_page():
-    user_id_raw = request.args.get('user_id', '')
-    user_id_str = str(user_id_raw).strip()
-    
-    # TO'G'RILANDI: Savollar srazu Python tomonidan topiladi
-    data = global_quiz_data.get(user_id_str)
-    if not data and global_quiz_data:
-        last_key = list(global_quiz_data.keys())[-1]
-        data = global_quiz_data[last_key]
-        
-    # Ma'lumotni xavfsiz JSON-matn ko'rinishiga keltirib, sahifaga srazu uzatamiz
-    quiz_json_string = json.dumps(data if data else [], ensure_ascii=False)
-    
-    # TO'G'RILANDI: render_template orqali ma'lumot to'g'ridan-to'g'ri HTML ichiga yuklanadi!
-    return render_template('quiz.html', quiz_json=quiz_json_string)
+    user_id = poll_to_user_map[p_id]
+    if user_id not in user_quiz_sessions:
+        return
 
-def run_flask():
-    logging.info(f"Flask veb-server {PORT} portida ishga tushmoqda...")
-    flask_app.run(host='0.0.0.0', port=PORT, use_reloader=False)
+    session = user_quiz_sessions[user_id]
+    correct_index = session["poll_map"].get(p_id)
+    if correct_index is None:
+        return
+
+    if not poll_answer.option_ids:
+        return
+
+    user_chosen_index = poll_answer.option_ids[0]
+
+    if int(user_chosen_index) == int(correct_index):
+        session["correct_count"] += 1
+    else:
+        session["incorrect_count"] += 1
+
+    session["answered_questions"] += 1
+
+    if session["answered_questions"] == session["total_questions"]:
+        total = session["total_questions"]
+        correct = session["correct_count"]
+        incorrect = session["incorrect_count"]
+        foiz = int((correct / total) * 100) if total > 0 else 0
+
+        result_text = (
+            "📊 **Sizning test natijangiz:**\n\n"
+            f"✅ To'g'ri javoblar: {correct} ta\n"
+            f"❌ Noto'g'ri javoblar: {incorrect} ta\n"
+            f"📝 Jami savollar: {total} ta\n"
+            f"🎯 Umumiy natija: {foiz}%\n\n"
+            "Yangi test boshlash uchun darslik fayli yoki matn yuboring!"
+        )
+        try:
+            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
+        except Exception:
+            pass
+        if user_id in user_quiz_sessions:
+            del user_quiz_sessions[user_id]
 
 if __name__ == "__main__":
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    logging.info("Sinxron Telegram Bot infinity_polling rejimida ishga tushdi...")
+    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushdi...")
     bot.infinity_polling()
