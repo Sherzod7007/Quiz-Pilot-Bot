@@ -22,10 +22,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi!")
 
-# Barqaror sinxron bot obyekti
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 flask_app = Flask(__name__)
 
+# Railway portini aniq o'qish mexanizmi
 PORT = int(os.getenv("PORT", 5000))
 RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "")
 
@@ -37,7 +37,6 @@ DOWNLOADS_DIR = 'downloads'
 STORE_FILE = 'quiz_store.json'
 global_quiz_data = {}
 
-# Bot ishga tushganda eski testlarni fayldan avtomat yuklab olish
 if os.path.exists(STORE_FILE):
     try:
         with open(STORE_FILE, 'r', encoding='utf-8') as f:
@@ -151,7 +150,6 @@ def handle_docs(message):
             bot.send_message(message.chat.id, "❌ Fayl bo'sh.", reply_markup=get_main_keyboard())
             return
 
-        # Bot bloklanmasligi uchun Gemini jarayonini parallel oqimda chaqiramiz
         threading.Thread(target=process_quiz_logic, args=(message, raw_text), daemon=True).start()
     except Exception as e:
         logging.error(f"Fayl xatosi: {e}")
@@ -161,7 +159,6 @@ def handle_text(message):
     if message.text == '/start' or message.text.startswith('/'):
         send_welcome(message)
         return
-    # Matn kelganda ham parallel oqimda chaqiramiz
     threading.Thread(target=process_quiz_logic, args=(message, message.text), daemon=True).start()
 
 def process_quiz_logic(message, raw_text):
@@ -208,7 +205,7 @@ def process_quiz_logic(message, raw_text):
     except Exception as e:
         logging.error(f"Xatolik: {e}")
 
-# ----------------- TELEGRAM MINI APP (FLASK WEB SERVER) QISMI -----------------
+# ----------------- TELEGRAM MINI APP -----------------
 
 @flask_app.route('/quiz_data', methods=['GET'])
 def get_quiz_data_api():
@@ -223,15 +220,12 @@ def quiz_page():
 
 def run_flask():
     logging.info(f"Flask veb-server {PORT} portida ishga tushmoqda...")
-    # use_reloader=False Railway portlarini blocklamasligi uchun shart
     flask_app.run(host='0.0.0.0', port=PORT, use_reloader=False)
 
 if __name__ == "__main__":
-    # TO'G'RILANDI: Flask serverini alohida parallel oqimga (Thread) o'tkazamiz
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # TO'G'RILANDI: Botni asosiy oqimda qoldiramiz. Shunda u hecham muzlamaydi va doim javob beradi
-    logging.info("Sinxron Telegram Bot infinity_polling rejimida ishga tushdi (ACTIVE)...")
+    logging.info("Sinxron Telegram Bot infinity_polling rejimida ishga tushdi...")
     bot.infinity_polling()
