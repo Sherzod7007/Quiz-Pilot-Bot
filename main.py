@@ -197,8 +197,10 @@ def process_quiz_logic(message, raw_text):
         except Exception as e:
             logging.error(f"Faylga yozishda xatolik: {e}")
 
+        # KESHNI SINDIRISH: Havola oxiriga dinamik vaqt (timestamp) va v=2 qo'shildi
+        timestamp = int(time.time())
         markup = types.InlineKeyboardMarkup()
-        app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}"
+        app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}&v=2&t={timestamp}"
         markup.add(types.InlineKeyboardButton(text="📱 Testni Ilovada Boshlash", web_app=types.WebAppInfo(url=app_url)))
 
         bot.send_message(
@@ -216,10 +218,8 @@ def get_quiz_data_api():
     user_id_raw = request.args.get('user_id', '')
     user_id_str = str(user_id_raw).strip()
     
-    # UZIL-KESIL TO'G'RILANDI: Agar ID bo'yicha topilmasa, bazadagi eng oxirgi testni qaytaradi!
     data = global_quiz_data.get(user_id_str)
     if not data and global_quiz_data:
-        # Lug'atning eng oxirgi elementini (oxirgi generatsiya qilingan testni) olish
         last_key = list(global_quiz_data.keys())[-1]
         data = global_quiz_data[last_key]
         logging.info(f"ID mos kelmadi, oxirgi yuklangan test taqdim etildi (Kalit: {last_key})")
