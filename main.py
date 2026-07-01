@@ -24,9 +24,7 @@ if not TELEGRAM_BOT_TOKEN:
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 flask_app = Flask(__name__)
 
-# Railway beradigan PORT (Agar bo'lmasa 5000)
 PORT = int(os.getenv("PORT", 5000))
-# Railway taqdim etadigan tashqi URL
 RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
@@ -182,7 +180,7 @@ def process_quiz_logic(message, raw_text):
 
         bot.send_message(
             message.chat.id, 
-            f"📚 **Test savollari tayyor!**\n\n🎯 Jami: {len(items)} ta savol yaratildi.\n\nPastdagi tugmani bosing va qora fondagi maxsus interfeysda testni yeching 👇", 
+            "📚 **Test savollari tayyor!**\n\n🎯 Jami savollar soni ko'p yuklandi.\n\nPastdagi tugmani bosing va maxsus qora fondagi interfeysda testni yeching 👇", 
             reply_markup=markup
         )
     except Exception as e:
@@ -200,6 +198,7 @@ def get_quiz_data_api():
 def quiz_page():
     user_id = request.args.get('user_id', '')
     
+    # HTML shablon mutlaqo xavfsiz holatga keltirildi
     html_template = """
     <!DOCTYPE html>
     <html lang="uz">
@@ -264,3 +263,4 @@ def quiz_page():
                 width: 100%;
                 box-sizing: border-box;
             }
+            .correct {
