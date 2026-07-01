@@ -26,7 +26,7 @@ flask_app = Flask(__name__)
 
 # Railway beradigan PORT (Agar bo'lmasa 5000)
 PORT = int(os.getenv("PORT", 5000))
-# Railway taqdim etadigan tashqi URL (Variables paneliga kiritishingiz kerak, masalan: https://railway.app)
+# Railway taqdim etadigan tashqi URL
 RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
@@ -34,7 +34,6 @@ GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_k
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-# Savollarni Mini App o'qib olishi uchun xotirada saqlash
 global_quiz_data = {}
 
 class QuizItem(BaseModel):
@@ -175,17 +174,15 @@ def process_quiz_logic(message, raw_text):
             return
 
         user_id = str(message.from_user.id)
-        # Savollarni Mini App uchun xotiraga joylash
         global_quiz_data[user_id] = items
 
-        # Foydalanuvchiga Telegram Mini App (Web App) ochish tugmasini yuborish
         markup = types.InlineKeyboardMarkup()
         app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}"
         markup.add(types.InlineKeyboardButton(text="📱 Testni Ilovada Boshlash", web_app=types.WebAppInfo(url=app_url)))
 
         bot.send_message(
             message.chat.id, 
-            f"📚 **Rivojlanish Psixologiyasi**\n\n🎯 Jami: {len(items)} ta savol tayyor!\n\nPastdagi tugmani bosing va qora fondagi maxsus interfeysda swipe'siz, avtomatik testni yeching 👇", 
+            f"📚 **Test savollari tayyor!**\n\n🎯 Jami: {len(items)} ta savol yaratildi.\n\nPastdagi tugmani bosing va qora fondagi maxsus interfeysda testni yeching 👇", 
             reply_markup=markup
         )
     except Exception as e:
@@ -203,7 +200,6 @@ def get_quiz_data_api():
 def quiz_page():
     user_id = request.args.get('user_id', '')
     
-    # Qora fonli (Dark mode), variantlar yashil/qizil yonadigan HTML5/CSS3/JS ilova interfeysi
     html_template = """
     <!DOCTYPE html>
     <html lang="uz">
@@ -255,3 +251,16 @@ def quiz_page():
             }
             .option-btn {
                 background-color: #21262d;
+                border: 1px solid #30363d;
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 12px;
+                text-align: left;
+                color: #c9d1d9;
+                font-size: 16px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                width: 100%;
+                box-sizing: border-box;
+            }
