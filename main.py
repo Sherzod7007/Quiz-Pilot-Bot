@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, Response
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -32,7 +32,18 @@ GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_k
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
+STORE_FILE = 'quiz_store.json'
 global_quiz_data = {}
+
+# Bot ishga tushganda eski testlarni fayldan avtomat yuklab olish
+if os.path.exists(STORE_FILE):
+    try:
+        with open(STORE_FILE, 'r', encoding='utf-8') as f:
+            global_quiz_data = json.load(f)
+        logging.info("Eski testlar fayldan muvaffaqiyatli yuklandi.")
+    except Exception as e:
+        logging.error(f"Fayldan o'qishda xatolik: {e}")
+        global_quiz_data = {}
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
@@ -174,6 +185,13 @@ def process_quiz_logic(message, raw_text):
         user_id = str(message.from_user.id)
         global_quiz_data[user_id] = items
 
+        # Test ma'lumotlarini lokal bazaga (JSON faylga) saqlash
+        try:
+            with open(STORE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(global_quiz_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            logging.error(f"Faylga yozishda xatolik: {e}")
+
         markup = types.InlineKeyboardMarkup()
         app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}"
         markup.add(types.InlineKeyboardButton(text="📱 Testni Ilovada Boshlash", web_app=types.WebAppInfo(url=app_url)))
@@ -186,7 +204,7 @@ def process_quiz_logic(message, raw_text):
     except Exception as e:
         logging.error(f"Xatolik: {e}")
 
-# ----------------- TELEGRAM MINI APP (FLASK WEB SERVER) QISMI -----------------
+# ----------------- TELEGRAM MINI APP (FLASK WEB SERVER) -----------------
 
 @flask_app.route('/quiz_data', methods=['GET'])
 def get_quiz_data_api():
@@ -196,8 +214,17 @@ def get_quiz_data_api():
 
 @flask_app.route('/quiz')
 def quiz_page():
-    # Файл алоҳида сақлангани учун ҳеч қандай синтаксис xато бермайди
-    return send_file('index.html')
+    try:
+        with open('index.html', 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        user_id = request.args.get('user_id', '')
+        # Xavfsiz ishlashi uchun user_id ni body ichiga joylash
+        html_content = html_content.replace('<body>', f'<body data-user="{user_id}">')
+        return Response(html_content, mimetype='text/html')
+    except Exception as e:
+        logging.error(f"index.html o'qishda xatolik: {e}")
+        return "Interface Error", 500
 
 def run_flask():
     flask_app.run(host='0.0.0.0', port=PORT)
