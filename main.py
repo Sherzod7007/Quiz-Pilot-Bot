@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, jsonify, request, Response
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -180,7 +180,7 @@ def process_quiz_logic(message, raw_text):
 
         bot.send_message(
             message.chat.id, 
-            "📚 **Test savollari tayyor!**\n\n🎯 Jami savollar soni ko'p yuklandi.\n\nPastdagi tugmani bosing va maxsus qora fondagi interfeysda testni yeching 👇", 
+            "📚 **Test savollari tayyor!**\n\n🎯 Jami savollar yuklandi.\n\nPastdagi tugmani bosing va maxsus qora fondagi interfeysda testni yeching 👇", 
             reply_markup=markup
         )
     except Exception as e:
@@ -198,69 +198,23 @@ def get_quiz_data_api():
 def quiz_page():
     user_id = request.args.get('user_id', '')
     
-    # HTML shablon mutlaqo xavfsiz holatga keltirildi
-    html_template = """
-    <!DOCTYPE html>
-    <html lang="uz">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Quiz Pilot App</title>
-        <script src="https://telegram.org"></script>
-        <style>
-            body {
-                background-color: #0d1117;
-                color: #c9d1d9;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                margin: 0;
-                padding: 16px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                min-height: 100vh;
-                box-sizing: border-box;
-            }
-            .container {
-                width: 100%;
-                max-width: 500px;
-                display: flex;
-                flex-direction: column;
-            }
-            .header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 20px;
-                font-size: 14px;
-                color: #8b949e;
-            }
-            .card {
-                background-color: #161b22;
-                border: 1px solid #30363d;
-                border-radius: 16px;
-                padding: 24px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            }
-            .question-text {
-                font-size: 18px;
-                font-weight: 600;
-                line-height: 1.5;
-                color: #f0f6fc;
-            }
-            .option-btn {
-                background-color: #21262d;
-                border: 1px solid #30363d;
-                border-radius: 12px;
-                padding: 16px;
-                margin-bottom: 12px;
-                text-align: left;
-                color: #c9d1d9;
-                font-size: 16px;
-                font-weight: 500;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                width: 100%;
-                box-sizing: border-box;
-            }
-            .correct {
+    # Sintaksis xatolarining oldini olish uchun HTML oqim ko'rinishida yozildi
+    html_content = (
+        '<!DOCTYPE html><html lang="uz"><head><meta charset="UTF-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        '<title>Quiz Pilot App</title><script src="https://telegram.org"></script>'
+        '<style>'
+        'body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, sans-serif; margin: 0; padding: 16px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }'
+        '.container { width: 100%; max-width: 500px; display: flex; flex-direction: column; }'
+        '.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 14px; color: #8b949e; }'
+        '.card { background-color: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }'
+        '.question-text { font-size: 18px; font-weight: 600; line-height: 1.5; color: #f0f6fc; }'
+        '.option-btn { background-color: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: left; color: #c9d1d9; font-size: 16px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; width: 100%; box-sizing: border-box; }'
+        '.correct { background-color: #238636 !important; border-color: #2ea44f !important; color: #ffffff !important; box-shadow: 0 0 10px rgba(46,164,79,0.4); }'
+        '.wrong { background-color: #da3637 !important; border-color: #f85149 !important; color: #ffffff !important; box-shadow: 0 0 10px rgba(248,81,73,0.4); }'
+        '.explanation { background-color: #1f1515; border: 1px solid #ff7b72; border-radius: 12px; padding: 14px; margin-top: 10px; font-size: 14px; color: #ff7b72; display: none; }'
+        '.result-screen { text-align: center; padding: 40px 20px; }'
+        '.res-title { font-size: 24px; font-weight: bold; color: #f0f6fc; margin-bottom: 24px; }'
+        '.circle-stat { font-size: 48px; font-weight: 800; margin-bottom: 30px; }'
+        '.green-text { color: #238636; }'
+        '.red-text { color: #da3637; }'
