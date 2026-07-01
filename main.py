@@ -14,10 +14,8 @@ from pydantic import BaseModel, Field
 from typing import List
 from flask import Flask, jsonify, request, render_template
 
-# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi!")
@@ -213,14 +211,12 @@ def process_quiz_logic(message, raw_text):
 
 @flask_app.route('/quiz_data', methods=['GET'])
 def get_quiz_data_api():
-    # TO'G'RILANDI: Ham string, ham int ko'rinishida ma'lumot qidiriladi
+    # TO'G'RILANDI: JSON kalitlari string ko'rinishida bo'lgani uchun barcha so'rovlar qat'iy string shakliga o'tkazilib qidiriladi
     user_id_raw = request.args.get('user_id', '')
+    user_id_str = str(user_id_raw).strip()
     
-    data = global_quiz_data.get(str(user_id_raw))
-    if not data:
-        data = global_quiz_data.get(user_id_raw) # original turda tekshirish
-        
-    return jsonify(data if data else [])
+    data = global_quiz_data.get(user_id_str, [])
+    return jsonify(data)
 
 @flask_app.route('/quiz')
 def quiz_page():
