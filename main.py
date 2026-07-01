@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import threading
+import time
 from pypdf import PdfReader
 import docx
 import telebot
@@ -203,7 +204,7 @@ def process_quiz_logic(message, raw_text):
     except Exception as e:
         logging.error(f"Xatolik: {e}")
 
-# ----------------- TELEGRAM MINI APP (FLASK WEB SERVER) -----------------
+# ----------------- TELEGRAM MINI APP (FLASK WEB SERVER) QISMI -----------------
 
 @flask_app.route('/quiz_data', methods=['GET'])
 def get_quiz_data_api():
@@ -213,25 +214,21 @@ def get_quiz_data_api():
 
 @flask_app.route('/quiz')
 def quiz_page():
-    # TO'G'RILANDI: index.html loyihaning mutloq manzilidan xavfsiz qidiriladi
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    html_path = os.path.join(base_dir, 'index.html')
+    user_id = request.args.get('user_id', '')
     
-    try:
-        with open(html_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        
-        user_id = request.args.get('user_id', '')
-        html_content = html_content.replace('<body>', f'<body data-user="{user_id}">')
-        return Response(html_content, mimetype='text/html')
-    except Exception as e:
-        logging.error(f"index.html o'qishda xatolik yuz berdi: {e}")
-        return "Ilova interfeysini yuklashda xatolik yuz berdi.", 500
-
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=PORT)
-
-if __name__ == "__main__":
-    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushmoqda...")
-    threading.Thread(target=run_flask, daemon=True).start()
-    bot.infinity_polling()
+    # Sintaksis xatolarining mutlaqo oldini olish uchun HTML formatlangan string shakliga keltirildi
+    html_content = """<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Pilot App</title>
+    <script src="https://telegram.org"></script>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, sans-serif; margin: 0; padding: 16px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
+        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 14px; color: #8b949e; }
+        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .question-text { font-size: 18px; font-weight: 600; line-height: 1.5; color: #f0f6fc; }
+        .option-btn { background-color: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: left; color: #c9d1d9; font-size: 16px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; width: 100%; box-sizing: border-box; }
+        .correct { background-color: #238636 !important; border-color: #2ea44f !important; color: #ffffff !important; box-shadow: 0 0 10px rgba(46,164,79,0.4); }
