@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Pilot App</title>
+    <script src="https://telegram.org"></script>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, sans-serif; margin: 0; padding: 16px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
+        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 14px; color: #8b949e; }
+        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        .question-text { font-size: 18px; font-weight: 600; line-height: 1.5; color: #f0f6fc; }
+        .option-btn { background-color: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: left; color: #c9d1d9; font-size: 16px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; width: 100%; box-sizing: border-box; }
+        .correct { background-color: #238636 !important; border-color: #2ea44f !important; color: #ffffff !important; box-shadow: 0 0 10px rgba(46,164,79,0.4); }
+        .wrong { background-color: #da3637 !important; border-color: #f85149 !important; color: #ffffff !important; box-shadow: 0 0 10px rgba(248,81,73,0.4); }
+        .explanation { background-color: #1f1515; border: 1px solid #ff7b72; border-radius: 12px; padding: 14px; margin-top: 10px; font-size: 14px; color: #ff7b72; display: none; }
+        .result-screen { text-align: center; padding: 40px 20px; }
+        .res-title { font-size: 24px; font-weight: bold; color: #f0f6fc; margin-bottom: 24px; }
+        .circle-stat { font-size: 48px; font-weight: 800; margin-bottom: 30px; }
+        .green-text { color: #238636; }
+        .red-text { color: #da3637; }
+        .stat-row { font-size: 18px; margin-bottom: 12px; display: flex; justify-content: space-between; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container" id="quiz-container">
+        <div class="header">
+            <span id="progress-text">Savol: 0/0</span>
+            <span style="color: #58a6ff; font-weight: bold;">Quiz Pilot Bot</span>
+        </div>
+        <div class="card">
+            <div class="question-text" id="question-box">Yuklanmoqda...</div>
+        </div>
+        <div id="options-parent"></div>
+        <div class="explanation" id="explanation-box"></div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        
+        // URL'dan user_id ни олиш
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('user_id');
+        
+        let quizzes = [];
+        let currentIdx = 0;
+        let correctCount = 0;
+        let incorrectCount = 0;
+        let lockAnswer = false;
+
+        fetch("/quiz_data?user_id=" + userId)
+            .then(res => res.json())
+            .then(data => {
+                quizzes = data;
+                if(quizzes.length > 0) { showQuestion(); }
+                else { document.getElementById('question-box').innerText = "Test topilmadi."; }
+            });
+
+        function showQuestion() {
+            lockAnswer = false;
+            document.getElementById('explanation-box').style.display = 'none';
+            const q = quizzes[currentIdx];
+            document.getElementById('progress-text').innerText = "Savol: " + (currentIdx + 1) + " dan " + quizzes.length;
+            document.getElementById('question-box').innerText = q.question;
+            const parent = document.getElementById('options-parent');
+            parent.innerHTML = '';
+            q.options.forEach((opt, index) => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.innerText = opt;
+                btn.onclick = () => selectOption(btn, index, q.correct_index, q.explanation);
+                parent.appendChild(btn);
+            });
+        }
+
+        function selectOption(btn, chosenIdx, correctIdx, explanation) {
+            if(lockAnswer) return;
+            lockAnswer = true;
+            const buttons = document.getElementsByClassName('option-btn');
+            if(chosenIdx === correctIdx) {
+                btn.classList.add('correct');
+                correctCount++;
+                setTimeout(() => { nextStep(); }, 1000);
+            } else {
+                btn.classList.add('wrong');
+                buttons[correctIdx].classList.add('correct');
+                incorrectCount++;
+                if(explanation && explanation.trim() !== '') {
+                    const expBox = document.getElementById('explanation-box');
+                    expBox.innerText = "💡 Qoida: " + explanation;
+                    expBox.style.display = 'block';
+                    setTimeout(() => { nextStep(); }, 4000);
+                } else {
+                    setTimeout(() => { nextStep(); }, 1500);
+                }
+            }
+        }
+
+        function nextStep() {
+            currentIdx++;
+            if(currentIdx < quizzes.length) { showQuestion(); }
+            else { showFinalResult(); }
+        }
+
+        function showFinalResult() {
+            const container = document.getElementById('quiz-container');
+            const percent = Math.round((correctCount / quizzes.length) * 100);
+            container.innerHTML = `
+                <div class="result-screen">
+                    <div class="res-title">📊 Sizning test natijangiz:</div>
+                    <div class="circle-stat">${percent}%</div>
+                    <div class="stat-row"><span>✅ To'g'ri:</span><span class="green-text">${correctCount} ta</span></div>
+                    <div class="stat-row"><span>❌ Xato:</span><span class="red-text">${incorrectCount} ta</span></div>
+                    <button class="option-btn" style="margin-top:20px;text-align:center;background:#238636;color:#fff;" onclick="tg.close();">Chiqish</button>
+                </div>`;
+        }
+    </script>
+</body>
+</html>
