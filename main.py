@@ -92,7 +92,6 @@ def generate_quiz_from_gemini(extracted_text):
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak."
     )
 
-    # 100% TO'G'RILANDI: Barcha kalitlarni oxirigacha aylanib chiqish kafolati
     attempts = 0
     while attempts < len(GOOGLE_API_KEYS):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -118,7 +117,6 @@ def generate_quiz_from_gemini(extracted_text):
         except Exception as e:
             logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
         
-        # Xato bo'lsa, keyingi kalitga o'tkazish va siklni davom ettirish
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
         attempts += 1
         
@@ -215,9 +213,14 @@ def process_quiz_logic(message, raw_text):
 
 @flask_app.route('/quiz_data', methods=['GET'])
 def get_quiz_data_api():
-    user_id = request.args.get('user_id', '')
-    data = global_quiz_data.get(user_id, [])
-    return jsonify(data)
+    # TO'G'RILANDI: Ham string, ham int ko'rinishida ma'lumot qidiriladi
+    user_id_raw = request.args.get('user_id', '')
+    
+    data = global_quiz_data.get(str(user_id_raw))
+    if not data:
+        data = global_quiz_data.get(user_id_raw) # original turda tekshirish
+        
+    return jsonify(data if data else [])
 
 @flask_app.route('/quiz')
 def quiz_page():
