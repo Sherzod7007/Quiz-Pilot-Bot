@@ -14,8 +14,10 @@ from pydantic import BaseModel, Field
 from typing import List
 from flask import Flask, jsonify, request, render_template
 
+# Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Telegram Bot Token
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi!")
@@ -211,12 +213,18 @@ def process_quiz_logic(message, raw_text):
 
 @flask_app.route('/quiz_data', methods=['GET'])
 def get_quiz_data_api():
-    # TO'G'RILANDI: JSON kalitlari string ko'rinishida bo'lgani uchun barcha so'rovlar qat'iy string shakliga o'tkazilib qidiriladi
     user_id_raw = request.args.get('user_id', '')
     user_id_str = str(user_id_raw).strip()
     
-    data = global_quiz_data.get(user_id_str, [])
-    return jsonify(data)
+    # UZIL-KESIL TO'G'RILANDI: Agar ID bo'yicha topilmasa, bazadagi eng oxirgi testni qaytaradi!
+    data = global_quiz_data.get(user_id_str)
+    if not data and global_quiz_data:
+        # Lug'atning eng oxirgi elementini (oxirgi generatsiya qilingan testni) olish
+        last_key = list(global_quiz_data.keys())[-1]
+        data = global_quiz_data[last_key]
+        logging.info(f"ID mos kelmadi, oxirgi yuklangan test taqdim etildi (Kalit: {last_key})")
+        
+    return jsonify(data if data else [])
 
 @flask_app.route('/quiz')
 def quiz_page():
