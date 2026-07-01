@@ -25,7 +25,6 @@ if not TELEGRAM_BOT_TOKEN:
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 flask_app = Flask(__name__)
 
-# Railway portini aniq o'qish mexanizmi
 PORT = int(os.getenv("PORT", 5000))
 RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "")
 
@@ -93,10 +92,13 @@ def generate_quiz_from_gemini(extracted_text):
         "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak."
     )
 
-    for _ in range(len(GOOGLE_API_KEYS)):
+    # 100% TO'G'RILANDI: Barcha kalitlarni oxirigacha aylanib chiqish kafolati
+    attempts = 0
+    while attempts < len(GOOGLE_API_KEYS):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
         if not api_key:
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            attempts += 1
             continue
         try:
             logging.info(f"Ishlatilayotgan API Key indeksi: {current_key_index}")
@@ -115,7 +117,11 @@ def generate_quiz_from_gemini(extracted_text):
                 return response.text
         except Exception as e:
             logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
+        
+        # Xato bo'lsa, keyingi kalitga o'tkazish va siklni davom ettirish
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+        attempts += 1
+        
     return None
 
 @bot.message_handler(commands=['start'])
@@ -169,7 +175,7 @@ def process_quiz_logic(message, raw_text):
             bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
-        bot.send_message(message.chat.id, "❌ Test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "❌ Afsuski, barcha API kalitlar limitga tushgan yoki xato. Kalitlarni tekshiring.", reply_markup=get_main_keyboard())
         return
 
     try:
@@ -181,7 +187,7 @@ def process_quiz_logic(message, raw_text):
             
         items = quiz_data.get("quizzes", [])
         if not items:
-            bot.send_message(message.chat.id, "❌ Test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
             return
 
         user_id = str(message.from_user.id)
