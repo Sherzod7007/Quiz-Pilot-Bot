@@ -2,10 +2,10 @@
 import logging
 import json
 import os
-import threading
+import asyncio
 from pypdf import PdfReader
 import docx
-import telebot
+from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 from google import genai
 from google.genai import types as genai_types
@@ -21,7 +21,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN topilmadi!")
 
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+# To'g'rilandi: Asinxron bot obyekti
+bot = AsyncTeleBot(TELEGRAM_BOT_TOKEN)
 flask_app = Flask(__name__)
 
 PORT = int(os.getenv("PORT", 5000))
@@ -35,7 +36,7 @@ DOWNLOADS_DIR = 'downloads'
 STORE_FILE = 'quiz_store.json'
 global_quiz_data = {}
 
-# Bot ishga tushganda eski testlarni fayldan avtomat yuklab olish
+# Bot ishga tushganda eski testlarni fayldan yuklash
 if os.path.exists(STORE_FILE):
     try:
         with open(STORE_FILE, 'r', encoding='utf-8') as f:
@@ -117,69 +118,75 @@ def generate_quiz_from_gemini(extracted_text):
     return None
 
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
+async def send_welcome(message):
     user_name = message.from_user.first_name
-    bot.send_message(
+    await bot.send_message(
         message.chat.id,
         f"👋 Assalomu alaykum, {user_name}!\n\n🚀 Men **Quiz Pilot Bot** — darsliklardan chiroyli mobil ilova ko'rinishidagi testlar yaratuvchi yordamchingizman.\n\nMenga matn yoki **PDF/DOCX** fayl yuboring!",
         reply_markup=get_main_keyboard()
     )
 
 @bot.message_handler(content_types=['document'])
-def handle_docs(message):
+async def handle_docs(message):
     try:
         file_name = message.document.file_name
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
+        file_info = await bot.get_file(message.document.file_id)
+        downloaded_file = await bot.download_file(file_info.file_path)
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         file_path = os.path.join(DOWNLOADS_DIR, file_name)
         with open(file_path, 'wb') as new_file:
             new_file.write(downloaded_file)
 
         if file_name.endswith('.pdf'):
-            raw_text = read_pdf(file_path)
+            loop = asyncio.get_running_loop()
+            raw_text = await loop.run_in_executor(None, read_pdf, file_path)
         elif file_name.endswith('.docx'):
-            raw_text = read_docx(file_path)
+            loop = asyncio.get_running_loop()
+            raw_text = await loop.run_in_executor(None, read_docx, file_path)
         else:
-            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
+            await bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
             return
 
         if not raw_text.strip():
-            bot.send_message(message.chat.id, "❌ Fayl bo'sh.", reply_markup=get_main_keyboard())
+            await bot.send_message(message.chat.id, "❌ Fayl bo'sh.", reply_markup=get_main_keyboard())
             return
 
-        process_quiz_logic(message, raw_text)
+        await process_quiz_logic(message, raw_text)
     except Exception as e:
         logging.error(f"Fayl xatosi: {e}")
 
 @bot.message_handler(func=lambda message: True)
-def handle_text(message):
+async def handle_text(message):
     if message.text == '/start' or message.text.startswith('/'):
-        send_welcome(message)
+        await send_welcome(message)
         return
-    process_quiz_logic(message, message.text)
+    await process_quiz_logic(message, message.text)
 
-def process_quiz_logic(message, raw_text):
-    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt darslik asosida chiroyli dastur interfeysini tayyorlamoqda...", reply_markup=get_main_keyboard())
-    quiz_json_raw = generate_quiz_from_gemini(raw_text)
+async def process_quiz_logic(message, raw_text):
+    status_msg = await bot.send_message(message.chat.id, "⏳ Sun'iy intellekt darslik asosida chiroyli dastur interfeysini tayyorlamoqda...", reply_markup=get_main_keyboard())
+    
+    # Gemini so'rovini asinxron thread ichida bajarish
+    loop = asyncio.get_running_loop()
+    quiz_json_raw = await loop.run_in_executor(None, generate_quiz_from_gemini, raw_text)
+    
     if not quiz_json_raw:
         try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
-        bot.send_message(message.chat.id, "❌ Test yaratishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
+        await bot.send_message(message.chat.id, "❌ Test yaratishda xatolik yuz berdi.", reply_markup=get_main_keyboard())
         return
 
     try:
         quiz_data = json.loads(quiz_json_raw)
         try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
         except Exception:
             pass
             
         items = quiz_data.get("quizzes", [])
         if not items:
-            bot.send_message(message.chat.id, "❌ Test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
+            await bot.send_message(message.chat.id, "❌ Test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
             return
 
         user_id = str(message.from_user.id)
@@ -195,7 +202,7 @@ def process_quiz_logic(message, raw_text):
         app_url = f"{RAILWAY_PUBLIC_URL}/quiz?user_id={user_id}"
         markup.add(types.InlineKeyboardButton(text="📱 Testni Ilovada Boshlash", web_app=types.WebAppInfo(url=app_url)))
 
-        bot.send_message(
+        await bot.send_message(
             message.chat.id, 
             "📚 **Test savollari tayyor!**\n\n🎯 Jami savollar yuklandi.\n\nPastdagi tugmani bosing va maxsus qora fondagi interfeysda testni yeching 👇", 
             reply_markup=markup
@@ -216,16 +223,18 @@ def quiz_page():
     user_id = request.args.get('user_id', '')
     return render_template('quiz.html', user_id=user_id)
 
-def run_bot():
-    logging.info("Telegram Bot orqa fonda ishga tushmoqda...")
-    bot.infinity_polling()
+# Har ikkala dasturni birgalikda to'siqsiz ishga tushirish mexanizmi
+async def main():
+    # Flask serverini fondagi asinxron vazifa sifatida ochamiz
+    loop = asyncio.get_running_loop()
+    flask_server = loop.run_in_executor(None, lambda: flask_app.run(host='0.0.0.0', port=PORT, use_reloader=False))
+    
+    logging.info("Asinxron Telegram Bot polling rejimida ishga tushmoqda...")
+    # Bot va Flask bir-birini block qilmasdan parallel ishlaydi
+    await asyncio.gather(
+        bot.infinity_polling(skip_pending_updates=True),
+        flask_server
+    )
 
 if __name__ == "__main__":
-    # TO'G'RILANDI: Botni orqa fondagi oqimga (Thread) o'tkazamiz
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # TO'G'RILANDI: Flask serverni asosiy oqimda qoldiramiz. Shunda u doim aktiv bo'ladi va so'rovlarga javob beradi
-    logging.info(f"Flask veb-server {PORT} portida ishga tushmoqda...")
-    flask_app.run(host='0.0.0.0', port=PORT)
+    asyncio.run(main())
