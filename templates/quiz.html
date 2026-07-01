@@ -40,17 +40,22 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
         
-        // 100% TO'G'RILANDI: ID aniqlash mexanizmi mukammal holatga keltirildi
+        // TO'G'RILANDI: Linkdan user_id parametrini aniq va birinchi bo'lib qidirish
         const urlParams = new URLSearchParams(window.location.search);
-        let userId = urlParams.get('user_id') || document.body.getAttribute('data-user') || (tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id.toString() : "");
+        let userId = urlParams.get('user_id');
+        
+        if (!userId) {
+            userId = document.body.getAttribute('data-user');
+        }
+        if (!userId && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            userId = tg.initDataUnsafe.user.id.toString();
+        }
         
         let quizzes = [];
         let currentIdx = 0;
         let correctCount = 0;
         let incorrectCount = 0;
         let lockAnswer = false;
-
-        console.log("Yuklanayotgan foydalanuvchi ID raqami:", userId);
 
         fetch("/quiz_data?user_id=" + userId)
             .then(res => res.json())
@@ -59,11 +64,10 @@
                 if(quizzes && quizzes.length > 0) { 
                     showQuestion(); 
                 } else { 
-                    document.getElementById('question-box').innerText = "Test ma'lumotlari topilmadi. Iltimos, botga boshqatdan darslik yuborib ko'ring."; 
+                    document.getElementById('question-box').innerText = "Test ma'lumotlari topilmadi. Botga yangi darslik yuborib ko'ring."; 
                 }
             })
             .catch(err => {
-                console.error("Xatolik yuz berdi:", err);
                 document.getElementById('question-box').innerText = "Ma'lumot yuklashda xatolik yuz berdi.";
             });
 
