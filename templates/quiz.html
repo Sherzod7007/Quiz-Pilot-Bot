@@ -23,7 +23,7 @@
         .stat-row { font-size: 18px; margin-bottom: 12px; display: flex; justify-content: space-between; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
     </style>
 </head>
-<body data-user="{{ user_id }}">
+<body>
     <div class="container" id="quiz-container">
         <div class="header">
             <span id="progress-text">Savol: 0/0</span>
@@ -40,32 +40,18 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
         
-        // URL'dan va body'dan user_id ni aniq ajratib olish
-        const urlParams = new URLSearchParams(window.location.search);
-        let userId = urlParams.get('user_id') || document.body.getAttribute('data-user') || "";
-        
-        let quizzes = [];
+        // TO'G'RILANDI: Flask server o'zi taqdim etgan tayyor ma'lumotni o'qiydi (Tashqi fetch yo'q qilindi!)
+        let quizzes = {{ quiz_json | safe }};
         let currentIdx = 0;
         let correctCount = 0;
         let incorrectCount = 0;
         let lockAnswer = false;
 
-        // KESHNING OLDINI OLISH: Havolaga har safar mutlaqo tasodifiy vaqt qo'shiladi
-        const timestamp = new Date().getTime();
-        
-        fetch("/quiz_data?user_id=" + userId + "&nocache=" + timestamp)
-            .then(function(res) { return res.json(); })
-            .then(function(data) {
-                quizzes = data;
-                if (quizzes && quizzes.length > 0) { 
-                    showQuestion(); 
-                } else { 
-                    document.getElementById('question-box').innerText = "Test savollari topilmadi. Botga boshqatdan yangi matn yuborib ko'ring."; 
-                }
-            })
-            .catch(function(err) {
-                document.getElementById('question-box').innerText = "Yuklashda xatolik yuz berdi.";
-            });
+        if (quizzes && quizzes.length > 0) { 
+            showQuestion(); 
+        } else { 
+            document.getElementById('question-box').innerText = "Test savollari topilmadi. Botga boshqatdan yangi matn yuborib ko'ring."; 
+        }
 
         function showQuestion() {
             lockAnswer = false;
