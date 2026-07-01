@@ -40,16 +40,9 @@
         const tg = window.Telegram.WebApp;
         tg.expand();
         
-        // TO'G'RILANDI: Linkdan user_id parametrini aniq va birinchi bo'lib qidirish
+        // URL'dan va body'dan user_id ni aniq ajratib olish
         const urlParams = new URLSearchParams(window.location.search);
-        let userId = urlParams.get('user_id');
-        
-        if (!userId) {
-            userId = document.body.getAttribute('data-user');
-        }
-        if (!userId && tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            userId = tg.initDataUnsafe.user.id.toString();
-        }
+        let userId = urlParams.get('user_id') || document.body.getAttribute('data-user') || "";
         
         let quizzes = [];
         let currentIdx = 0;
@@ -57,18 +50,21 @@
         let incorrectCount = 0;
         let lockAnswer = false;
 
-        fetch("/quiz_data?user_id=" + userId)
-            .then(res => res.json())
-            .then(data => {
+        // KESHNING OLDINI OLISH: Havolaga har safar mutlaqo tasodifiy vaqt qo'shiladi
+        const timestamp = new Date().getTime();
+        
+        fetch("/quiz_data?user_id=" + userId + "&nocache=" + timestamp)
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
                 quizzes = data;
-                if(quizzes && quizzes.length > 0) { 
+                if (quizzes && quizzes.length > 0) { 
                     showQuestion(); 
                 } else { 
-                    document.getElementById('question-box').innerText = "Test ma'lumotlari topilmadi. Botga yangi darslik yuborib ko'ring."; 
+                    document.getElementById('question-box').innerText = "Test savollari topilmadi. Botga boshqatdan yangi matn yuborib ko'ring."; 
                 }
             })
-            .catch(err => {
-                document.getElementById('question-box').innerText = "Ma'lumot yuklashda xatolik yuz berdi.";
+            .catch(function(err) {
+                document.getElementById('question-box').innerText = "Yuklashda xatolik yuz berdi.";
             });
 
         function showQuestion() {
@@ -77,44 +73,49 @@
             const q = quizzes[currentIdx];
             document.getElementById('progress-text').innerText = "Savol: " + (currentIdx + 1) + " dan " + quizzes.length;
             document.getElementById('question-box').innerText = q.question;
+            
             const parent = document.getElementById('options-parent');
             parent.innerHTML = '';
-            q.options.forEach((opt, index) => {
+            
+            q.options.forEach(function(opt, index) {
                 const btn = document.createElement('button');
                 btn.className = 'option-btn';
                 btn.innerText = opt;
-                btn.onclick = () => selectOption(btn, index, q.correct_index, q.explanation);
+                btn.onclick = function() { selectOption(btn, index, q.correct_index, q.explanation); };
                 parent.appendChild(btn);
             });
         }
 
         function selectOption(btn, chosenIdx, correctIdx, explanation) {
-            if(lockAnswer) return;
+            if (lockAnswer) return;
             lockAnswer = true;
             const buttons = document.getElementsByClassName('option-btn');
-            if(chosenIdx === correctIdx) {
+            if (chosenIdx === correctIdx) {
                 btn.classList.add('correct');
                 correctCount++;
-                setTimeout(() => { nextStep(); }, 1000);
+                setTimeout(function() { nextStep(); }, 1000);
             } else {
                 btn.classList.add('wrong');
                 buttons[correctIdx].classList.add('correct');
                 incorrectCount++;
-                if(explanation && explanation.trim() !== '') {
+                if (explanation && explanation.trim() !== '') {
                     const expBox = document.getElementById('explanation-box');
                     expBox.innerText = "💡 Qoida: " + explanation;
                     expBox.style.display = 'block';
-                    setTimeout(() => { nextStep(); }, 4000);
+                    setTimeout(function() { nextStep(); }, 4000);
                 } else {
-                    setTimeout(() => { nextStep(); }, 1500);
+                    setTimeout(function() { nextStep(); }, 1500);
                 }
             }
         }
 
         function nextStep() {
             currentIdx++;
-            if(currentIdx < quizzes.length) { showQuestion(); }
-            else { showFinalResult(); }
+            if (currentIdx < quizzes.length) { 
+                showQuestion(); 
+            } else { 
+                showFinalResult(); 
+            }
         }
 
         function showFinalResult() {
