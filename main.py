@@ -3,7 +3,6 @@ import logging
 import json
 import os
 import threading
-import time
 from pypdf import PdfReader
 import docx
 import telebot
@@ -12,7 +11,7 @@ from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, render_template
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -180,7 +179,7 @@ def process_quiz_logic(message, raw_text):
             
         items = quiz_data.get("quizzes", [])
         if not items:
-            bot.send_message(message.chat.id, "❌ Test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
             return
 
         user_id = str(message.from_user.id)
@@ -215,20 +214,13 @@ def get_quiz_data_api():
 @flask_app.route('/quiz')
 def quiz_page():
     user_id = request.args.get('user_id', '')
-    
-    # Sintaksis xatolarining mutlaqo oldini olish uchun HTML formatlangan string shakliga keltirildi
-    html_content = """<!DOCTYPE html>
-<html lang="uz">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quiz Pilot App</title>
-    <script src="https://telegram.org"></script>
-    <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, sans-serif; margin: 0; padding: 16px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
-        .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 14px; color: #8b949e; }
-        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 16px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
-        .question-text { font-size: 18px; font-weight: 600; line-height: 1.5; color: #f0f6fc; }
-        .option-btn { background-color: #21262d; border: 1px solid #30363d; border-radius: 12px; padding: 16px; margin-bottom: 12px; text-align: left; color: #c9d1d9; font-size: 16px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; width: 100%; box-sizing: border-box; }
-        .correct { background-color: #238636 !important; border-color: #2ea44f !important; color: #ffffff !important; box-shadow: 0 0 10px rgba(46,164,79,0.4); }
+    # TO'G'RILANDI: templates/quiz.html fayli xavfsiz yuklanadi
+    return render_template('quiz.html', user_id=user_id)
+
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=PORT)
+
+if __name__ == "__main__":
+    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushmoqda...")
+    threading.Thread(target=run_flask, daemon=True).start()
+    bot.infinity_polling()
