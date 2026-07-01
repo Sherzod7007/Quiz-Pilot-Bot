@@ -185,7 +185,6 @@ def process_quiz_logic(message, raw_text):
         user_id = str(message.from_user.id)
         global_quiz_data[user_id] = items
 
-        # Test ma'lumotlarini lokal bazaga (JSON faylga) saqlash
         try:
             with open(STORE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(global_quiz_data, f, ensure_ascii=False, indent=4)
@@ -214,17 +213,20 @@ def get_quiz_data_api():
 
 @flask_app.route('/quiz')
 def quiz_page():
+    # TO'G'RILANDI: index.html loyihaning mutloq manzilidan xavfsiz qidiriladi
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    html_path = os.path.join(base_dir, 'index.html')
+    
     try:
-        with open('index.html', 'r', encoding='utf-8') as f:
+        with open(html_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
         
         user_id = request.args.get('user_id', '')
-        # Xavfsiz ishlashi uchun user_id ni body ichiga joylash
         html_content = html_content.replace('<body>', f'<body data-user="{user_id}">')
         return Response(html_content, mimetype='text/html')
     except Exception as e:
-        logging.error(f"index.html o'qishda xatolik: {e}")
-        return "Interface Error", 500
+        logging.error(f"index.html o'qishda xatolik yuz berdi: {e}")
+        return "Ilova interfeysini yuklashda xatolik yuz berdi.", 500
 
 def run_flask():
     flask_app.run(host='0.0.0.0', port=PORT)
