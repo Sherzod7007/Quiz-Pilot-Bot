@@ -179,7 +179,7 @@ def process_quiz_logic(message, raw_text):
             
         items = quiz_data.get("quizzes", [])
         if not items:
-            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
+            bot.send_message(message.chat.id, "❌ Test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
             return
 
         user_id = str(message.from_user.id)
@@ -214,13 +214,18 @@ def get_quiz_data_api():
 @flask_app.route('/quiz')
 def quiz_page():
     user_id = request.args.get('user_id', '')
-    # TO'G'RILANDI: templates/quiz.html fayli xavfsiz yuklanadi
     return render_template('quiz.html', user_id=user_id)
 
-def run_flask():
-    flask_app.run(host='0.0.0.0', port=PORT)
+def run_bot():
+    logging.info("Telegram Bot orqa fonda ishga tushmoqda...")
+    bot.infinity_polling()
 
 if __name__ == "__main__":
-    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushmoqda...")
-    threading.Thread(target=run_flask, daemon=True).start()
-    bot.infinity_polling()
+    # TO'G'RILANDI: Botni orqa fondagi oqimga (Thread) o'tkazamiz
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # TO'G'RILANDI: Flask serverni asosiy oqimda qoldiramiz. Shunda u doim aktiv bo'ladi va so'rovlarga javob beradi
+    logging.info(f"Flask veb-server {PORT} portida ishga tushmoqda...")
+    flask_app.run(host='0.0.0.0', port=PORT)
