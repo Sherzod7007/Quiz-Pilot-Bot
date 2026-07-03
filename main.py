@@ -149,10 +149,11 @@ def run_bot_safe():
     while True:
         try:
             bot.delete_webhook(drop_pending_updates=True)
-            bot.polling(none_stop=True, timeout=10, long_polling_timeout=10)
+            logging.info("Bot polling boshlanmoqda...")
+            bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
         except Exception as e:
-            logging.error(f"Bot Polling qulflanish xatosi: {e}")
-            time.sleep(5)
+            logging.error(f"Bot Polling qulflanish xatosi (Tizim avtomatik qayta ulanadi): {e}")
+            time.sleep(10)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
