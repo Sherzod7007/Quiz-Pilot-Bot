@@ -80,11 +80,11 @@
         <div id="user-stats-badge" class="stats-badge">👥 Tizimda: ... foydalanuvchi</div>
         <div class="tabs">
             <button class="tab active">❓ Testlar</button>
-            <button class="tab">🌐 Ommaviy</button>
-            <button class="tab">🗂️ Kartochkalar</button>
+            <button class="tab" onclick="alert('Tez kunda ommaviy bo\'lim ishga tushadi!')">🌐 Ommaviy</button>
+            <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Yuklanmoqda...</div>
+            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
         </div>
     </div>
 
@@ -104,8 +104,8 @@
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
-        <button class="nav-item"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
-        <button class="nav-item"><span class="nav-icon">👑</span><span>Premium</span></button>
+        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
+        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
 
     <script>
@@ -144,11 +144,6 @@
 
         async function loadGlobalStats() {
             try {
-                // Keshni majburan chetlab o'tish uchun vaqt tamg'asi qo'shildi
                 const response = await fetch('/api/stats?_t=' + Date.now());
                 const data = await response.json();
                 if (data && data.status === "ok") {
-                    document.getElementById('user-stats-badge').innerText = `👥 Tizimda: ${data.total_users} foydalanuvchi`;
-                }
-            } catch (e) { console.log(e); }
-        }
