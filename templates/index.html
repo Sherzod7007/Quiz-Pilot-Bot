@@ -21,20 +21,36 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             margin: 0; padding: 15px; padding-bottom: 90px;
+            -webkit-user-select: none; user-select: none;
         }
-        .header h1 { font-size: 26px; margin: 0 0 10px 0; font-weight: 700; }
+        .header h1 { font-size: 26px; margin: 0 0 5px 0; font-weight: 700; }
         .stats-badge { background: #24242b; border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 12px; font-size: 12px; color: var(--accent-blue); display: inline-block; margin-bottom: 15px; font-weight: bold; }
         .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
         .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
         .tab.active { background: var(--accent-blue); color: #fff; }
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; }
+        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
+        .action-group { display: flex; gap: 8px; }
+        .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
+        .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
+        .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
+        .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
+        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
         .screen { display: none; }
         .screen.active { display: block; }
         .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
         .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
         .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
+        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
+        .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
+        .options-list { display: flex; flex-direction: column; gap: 12px; }
+        .opt-btn { background: var(--card-bg); border: 1px solid var(--border-color); padding: 16px; border-radius: 14px; text-align: left; font-size: 16px; color: #fff; cursor: pointer; }
+        .opt-btn.correct { background: var(--accent-green) !important; border-color: var(--accent-green); }
+        .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
+        .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
+        .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-item.active { color: var(--accent-blue); }
@@ -44,7 +60,7 @@
 </head>
 <body>
 
-    <!-- YARATISH EKRANI -->
+    <!-- YARATISH -->
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -58,40 +74,57 @@
         <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- KUTUBXONA EKRANI -->
+    <!-- KUTUBXONA -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div id="user-stats-badge" class="stats-badge">👥 Tizimda: ... foydalanuvchi</div>
         <div class="tabs">
-            <button class="tab active">Testlar</button>
-            <button class="tab">Ommaviy</button>
-            <button class="tab">Kartochkalar</button>
+            <button class="tab active">❓ Testlar</button>
+            <button class="tab">🌐 Ommaviy</button>
+            <button class="tab">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
             <div style="text-align: center; color: var(--text-hint); padding: 40px;">Yuklanmoqda...</div>
         </div>
     </div>
 
-    <!-- BOTTOM NAV -->
+    <!-- PLAY GAME -->
+    <div id="game-screen">
+        <div class="game-header">
+            <span id="game-title">Test</span>
+            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()">✖ Chiqish</span>
+        </div>
+        <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
+        <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
+        <div class="options-list" id="options-container"></div>
+        <div class="explanation-box" id="explanation-container"></div>
+        <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
+    </div>
+
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <button class="nav-item"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
+        <button class="nav-item"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
+        tg.ready(); tg.expand();
+        tg.setHeaderColor('#121214');
 
         let userId = 99999;
         if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
             userId = tg.initDataUnsafe.user.id;
         }
 
+        let currentQuizQuestions = [];
+        let currentQuestionIdx = 0;
+        let currentQuizId = "";
+
         function switchScreen(screen) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            
             if(screen === 'create') {
                 document.getElementById('create-screen').classList.add('active');
                 document.getElementById('nav-create').classList.add('active');
@@ -111,73 +144,11 @@
 
         async function loadGlobalStats() {
             try {
-                const response = await fetch('/api/stats');
+                // Keshni majburan chetlab o'tish uchun vaqt tamg'asi qo'shildi
+                const response = await fetch('/api/stats?_t=' + Date.now());
                 const data = await response.json();
                 if (data && data.status === "ok") {
                     document.getElementById('user-stats-badge').innerText = `👥 Tizimda: ${data.total_users} foydalanuvchi`;
                 }
-            } catch (e) { 
-                console.log("Statistika xatosi:", e); 
-            }
+            } catch (e) { console.log(e); }
         }
-
-        async function loadQuizzes() {
-            try {
-                const response = await fetch(`/api/quizzes?user_id=${userId}`);
-                const data = await response.json();
-                const container = document.getElementById('quiz-list');
-                
-                if (!container) return;
-                container.innerHTML = "";
-                
-                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
-                        const card = document.createElement('div');
-                        card.className = "quiz-card";
-                        card.innerHTML = `<div class="card-top"><div class="card-title">${quiz.title}</div></div>`;
-                        container.appendChild(card);
-                    });
-                } else {
-                    container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>`;
-                }
-            } catch(e) {
-                document.getElementById('quiz-list').innerHTML = `<div style="text-align: center; color: var(--accent-red); padding: 40px;">Ulanishda xatolik yuz berdi.</div>`;
-            }
-        }
-
-        async function startGeneration() {
-            const textInput = document.getElementById('text-input');
-            const fileInput = document.getElementById('file-input');
-            
-            const textValue = textInput ? textInput.value.trim() : "";
-            const hasFile = fileInput && fileInput.files && fileInput.files.length > 0;
-            
-            if(!textValue && !hasFile) {
-                alert("Matn kiriting yoki fayl yuklang!");
-                return;
-            }
-            
-            document.getElementById('generate-btn').style.display = 'none';
-            document.getElementById('loading-status').style.display = 'block';
-            
-            const formData = new FormData();
-            formData.append('user_id', userId);
-            if(textValue) formData.append('text', textValue);
-            if(hasFile) formData.append('file', fileInput.files[0]);
-            
-            try {
-                const response = await fetch('/api/create-quiz-web', { method: 'POST', body: formData });
-                const data = await response.json();
-                if(data && data.status === 'ok') {
-                    alert("Test muvaffaqiyatli yaratildi!");
-                    if(textInput) textInput.value = "";
-                    if(fileInput) fileInput.value = "";
-                    document.getElementById('upload-text').innerText = "Darslik yuklash (PDF yoki DOCX)";
-                    switchScreen('library');
-                } else {
-                    alert("Xato: " + (data ? data.message : "Noma'lum xatolik"));
-                }
-            } catch(e) {
-                alert("Server bilan aloqa uzildi.");
-            } finally {
-                document.getElementById('generate-btn').style.display = 'block';
