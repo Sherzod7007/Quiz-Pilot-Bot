@@ -16,14 +16,13 @@ from typing import List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from contextlib import asynccontextmanager
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Webhook holatida threaded=False qilish majburiy (konflikt oldini oladi)
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
-app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
@@ -136,10 +135,27 @@ def send_welcome(message):
         reply_markup=get_side_by_side_keyboard()
     )
 
-# --- FASTAPI WEBHOOK INTEGRATION (MUHIM!) ---
+# --- MODERN LIFESPAN EVENT HANDLER (YANGI VA XATOSIZ USUL) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Server yoqilganda webhookni xatosiz va avtomat sozlaydi"""
+    url = os.getenv("WEBAPP_URL", "")
+    if url:
+        url = url if url.startswith("http") else f"https://{url}"
+        webhook_url = f"{url}/{TELEGRAM_BOT_TOKEN}"
+        bot.remove_webhook()
+        time.sleep(0.5)
+        bot.set_webhook(url=webhook_url)
+        logging.info(f"🚀 Webhook muvaffaqiyatli o'rnatildi: {webhook_url}")
+    yield
+    # Server o'chganda webhookni tozalash
+    bot.remove_webhook()
+
+# FastAPI ilovasini lifespan bilan yaratamiz
+app = FastAPI(lifespan=lifespan)
+
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 async def process_webhook(request: Request):
-    """Telegramdan kelgan xabarlarni to'g'ridan-to'g'ri FastAPI qabul qiladi"""
     try:
         json_string = await request.json()
         update = telebot.types.Update.de_json(json_string)
@@ -148,18 +164,6 @@ async def process_webhook(request: Request):
     except Exception as e:
         logging.error(f"Webhook error: {e}")
         return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(e)})
-
-@app.on_event("startup")
-def startup_event():
-    """Server yoqilganda eski pollingni o'chirib, toza Webhook o'rnatadi"""
-    url = os.getenv("WEBAPP_URL", "")
-    if url:
-        url = url if url.startswith("http") else f"https://{url}"
-        webhook_url = f"{url}/{TELEGRAM_BOT_TOKEN}"
-        bot.remove_webhook()
-        time.sleep(0.5)
-        bot.set_webhook(url=webhook_url)
-        logging.info(f"Webhook muvaffaqiyatli o'rnatildi: {webhook_url}")
 
 # --- WEBAPP API ENDPOINTS ---
 @app.get("/", response_class=HTMLResponse)
@@ -252,4 +256,3 @@ def get_quiz_details(quiz_id: str):
     cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
-    if row: return {"id": row[0], "title": row[1], "quizzes": json.loads(row[2])["quizzes"]}
