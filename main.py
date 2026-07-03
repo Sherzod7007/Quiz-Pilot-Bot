@@ -4,6 +4,7 @@ import json
 import os
 import time
 import sqlite3
+from threading import Thread
 from pypdf import PdfReader
 import docx
 import telebot
@@ -13,16 +14,17 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, Form, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from contextlib import asynccontextmanager
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
+# Bu yerda threaded=True qilsak, bot fonda Active bo'lib, silliq ishlaydi
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=True)
+app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
@@ -135,36 +137,6 @@ def send_welcome(message):
         reply_markup=get_side_by_side_keyboard()
     )
 
-# --- MODERN LIFESPAN EVENT HANDLER (YANGI VA XATOSIZ USUL) ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Server yoqilganda webhookni xatosiz va avtomat sozlaydi"""
-    url = os.getenv("WEBAPP_URL", "")
-    if url:
-        url = url if url.startswith("http") else f"https://{url}"
-        webhook_url = f"{url}/{TELEGRAM_BOT_TOKEN}"
-        bot.remove_webhook()
-        time.sleep(0.5)
-        bot.set_webhook(url=webhook_url)
-        logging.info(f"🚀 Webhook muvaffaqiyatli o'rnatildi: {webhook_url}")
-    yield
-    # Server o'chganda webhookni tozalash
-    bot.remove_webhook()
-
-# FastAPI ilovasini lifespan bilan yaratamiz
-app = FastAPI(lifespan=lifespan)
-
-@app.post(f"/{TELEGRAM_BOT_TOKEN}")
-async def process_webhook(request: Request):
-    try:
-        json_string = await request.json()
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return JSONResponse(content={"status": "ok"})
-    except Exception as e:
-        logging.error(f"Webhook error: {e}")
-        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(e)})
-
 # --- WEBAPP API ENDPOINTS ---
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
@@ -238,12 +210,12 @@ def get_user_quizzes(user_id: int):
         
         result = []
         for r in rows:
-            diff = int(time.time()) - r[4]
+            diff = int(time.time()) - r
             if diff < 60: time_str = "Hozirgina"
             elif diff < 3600: time_str = f"{diff//60}m oldin"
             elif diff < 86400: time_str = f"{diff//3600}soat oldin"
             else: time_str = f"{diff//86400}kun oldin"
-            result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
+            result.append({"id": r, "title": r, "total": r, "answered": r, "time_ago": time_str})
         return result
     except Exception as e:
         logging.error(f"Quizzes API xatosi: {e}")
@@ -256,3 +228,33 @@ def get_quiz_details(quiz_id: str):
     cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
+    if row: return {"id": row, "title": row, "quizzes": json.loads(row)["quizzes"]}
+    return {"error": "Not found"}
+
+@app.post("/api/update-progress")
+def update_progress(req: ProgressUpdateRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
+    row = cursor.fetchone()
+    if row:
+        current_answered = row
+        total = row
+        if current_answered < total:
+            cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (current_answered + 1, req.quiz_id))
+            conn.commit()
+    conn.close()
+    return {"status": "updated"}
+
+def run_bot():
+    """Botni fonda xavfsiz va uzluksiz Active usulda yurgizish"""
+    # Har qanday eski webhook qoldiqlarini o'chirib, pollingni toza yoqamiz
+    try:
+        bot.remove_webhook()
+        time.sleep(0.5)
+        bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
+    except Exception as e:
+        logging.error(f"Bot Polling xatosi: {e}")
+        time.sleep(5)
+
+if __name__ == "__main__":
