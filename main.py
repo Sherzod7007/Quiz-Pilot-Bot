@@ -1,17 +1,4 @@
-# -*- coding: utf-8 -*-
-import logging
-import json
-import os
-import time
-import sqlite3
-from threading import Thread
-from pypdf import PdfReader
-import docx
-import telebot
-from telebot import types
-from google import genai
-from google.genai import types as genai_types
-from pydantic import BaseModel, Field
+
 from typing import List, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, Form
@@ -34,7 +21,6 @@ DOWNLOADS_DIR = 'downloads'
 DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
 
 def init_db():
-    # check_same_thread=False orqali FastAPI ko'p tarmoqli ishlashda bazani qulflab qo'ymaydi
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
@@ -66,10 +52,19 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
-def get_main_keyboard():
-    # Boyagi eski va qulay holatiga qaytaramiz
+def get_side_by_side_keyboard():
+    """/start va Ilovani ochish tugmalarini bitta qatorda yonma-yon chiqarish"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add(types.KeyboardButton('/start'))
+    url = os.getenv("WEBAPP_URL", "")
+    if url:
+        url = url if url.startswith("http") else f"https://{url}"
+        # Ikkala tugma bitta qatorda yonma-yon joylashadi
+        markup.add(
+            types.KeyboardButton('/start'),
+            types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
+        )
+    else:
+        markup.add(types.KeyboardButton('/start'))
     return markup
 
 def generate_quiz_from_gemini(extracted_text):
@@ -128,8 +123,8 @@ def send_welcome(message):
         f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
         "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "🚀 Marhamat, pastdagi **'Ilovani ochish 🚀'** tugmasini bosing, darsligingizni yuklang va testlarni silliq ishlang!",
-        reply_markup=get_main_keyboard()
+        "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
+        reply_markup=get_side_by_side_keyboard()
     )
 
 # --- WEBAPP API ENDPOINTS ---
