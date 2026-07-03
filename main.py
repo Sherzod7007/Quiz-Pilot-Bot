@@ -37,7 +37,6 @@ DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
-    # Baza bloklanib qolmasligi uchun WAL rejimini yoqamiz
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quizzes (
@@ -156,7 +155,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# TMA Frontend ochilganda CORS xatosi bermasligi va yuklanishda qotib qolmasligi uchun ruxsat beramiz
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -227,7 +225,6 @@ async def create_quiz_web(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# Qayta tiklangan va oxirigacha to'liq yozilgan API'lar:
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
     try:
@@ -265,3 +262,10 @@ def get_quiz_detail(quiz_id: str):
         
         if row:
             return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+        return {"status": "error", "message": "Test topilmadi."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/update-progress")
+def update_progress(data: ProgressUpdateRequest):
+    try:
