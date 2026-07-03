@@ -93,10 +93,7 @@ def send_welcome(message):
     user_name = message.from_user.first_name
     bot.send_message(
         message.chat.id, 
-        f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
-        "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
+        f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n⚡ **Yangi Yangilanish:**\n🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
         reply_markup=get_side_by_side_keyboard()
     )
 
@@ -111,7 +108,7 @@ def send_admin_stats(message):
         cursor.execute("SELECT COUNT(*) FROM quizzes")
         q_count = cursor.fetchone()
         conn.close()
-        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count[0]} ta**\n📝 Jami yaratilgan testlar: **{q_count[0]} ta**")
+        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count} ta**\n📝 Jami yaratilgan testlar: **{q_count} ta**")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Statistikani olishda xato: {e}")
 
@@ -120,10 +117,7 @@ def generate_quiz_from_gemini(extracted_text):
     if not GOOGLE_API_KEYS: return None
 
     system_instruction = (
-        "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. "
-        "Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. "
-        "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating. Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. "
-        "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."
+        "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating. Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -147,9 +141,8 @@ def generate_quiz_from_gemini(extracted_text):
 def run_bot_safe():
     while True:
         try:
-            # 409 xatolarini majburiy bartaraf etish uchun barcha eski Pollinglarni o'chiramiz
             bot.delete_webhook(drop_pending_updates=True)
-            bot.polling(none_stop=True, timeout=10, long_polling_timeout=10, skip_pending_updates=True)
+            bot.polling(none_stop=True, timeout=10, long_polling_timeout=10)
         except Exception as e:
             logging.error(f"Bot Polling qulflanish xatosi: {e}")
             time.sleep(5)
@@ -239,3 +232,7 @@ def get_user_quizzes(user_id: int):
     cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
+    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
+    return {"status": "ok", "quizzes": quizzes}
+
+@app.get("/api/quiz-detail")
