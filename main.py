@@ -88,7 +88,7 @@ def generate_quiz_from_gemini(extracted_text):
         "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri (lekin mantiqan to'g'riga yaqin) variant yarating. "
         "Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shing. "
         "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin. "
-        "Sifat juda muhim, xatolikka yo'l qo'ymang. Savollar soni aniq 50 ta bo'lishi shart."
+        "Savollar soni aniq 50 ta bo'lishi shart."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
