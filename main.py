@@ -18,7 +18,6 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -146,23 +145,15 @@ Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik b
     return None
 
 def run_bot_safe():
-    while True:
-        try:
-            bot.delete_webhook(drop_pending_updates=True)
-            logging.info("Bot polling boshlanmoqda...")
-            bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
-        except Exception as e:
-            logging.error(f"Bot Polling qulflanish xatosi (Tizim avtomatik qayta ulanadi): {e}")
-            time.sleep(10)
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)
+        logging.info("🚀 Bot Active Polling oqimi muvaffaqiyatli boshlandi!")
+        bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
+    except Exception as e:
+        logging.error(f"Bot oqimida kutilmagan xato: {e}")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    thread = Thread(target=run_bot_safe, daemon=True)
-    thread.start()
-    logging.info("🚀 Bot parallel xavfsiz tarmoqda ACTIVE holatga o'tdi!")
-    yield
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,6 +162,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def startup_event():
+    # Faqat bitta jarayon ishlashini ta'minlash uchun xavfsiz Thread ochamiz
+    bot_thread = Thread(target=run_bot_safe, daemon=True)
+    bot_thread.start()
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
@@ -240,3 +237,4 @@ def get_user_quizzes(user_id: int):
     cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
+    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
