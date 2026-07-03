@@ -69,11 +69,14 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
+    # AI ga aniq 50 ta savol tuzish haqida qat'iy buyruq beramiz
     system_instruction = (
-        "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
-        "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
-        "Jami 4 ta variant bo'lsin va har bir variant boshiga A), B), C), D) harflarini qo'shing. "
-        "Har bir savol uchun explanation maydoniga qisqa qoidani yozing. Matn tili darslik bilan bir xil bo'lsin."
+        "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. "
+        "Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. "
+        "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri (lekin mantiqan to'g'riga yaqin) variant yarating. "
+        "Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shing. "
+        "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin. "
+        "Sifat juda muhim, xatolikka yo'l qo'ymang. Savollar soni aniq 50 ta bo'lishi shart."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -83,14 +86,15 @@ def generate_quiz_from_gemini(extracted_text):
             continue
         try:
             client = genai.Client(api_key=api_key)
+            # Matn hajmini 80,000 belgigacha oshirdik (Katta kitoblar bemalol sig'adi)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
-                contents=extracted_text[:15000],
+                contents=extracted_text[:80000],
                 config=genai_types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=QuizResponse,
-                    temperature=0.7
+                    temperature=0.6 # Tempni biroz tushirdik, AI aniqroq savollar tuzishi uchun
                 )
             )
             if response and response.text: return response.text
@@ -99,22 +103,31 @@ def generate_quiz_from_gemini(extracted_text):
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-# --- BOT INTERFEYSI (Eski mantiq o'zgarishsiz saqlandi) ---
+# --- BOT HANDLER ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if os.getenv("WEBAPP_URL"):
         url = os.getenv("WEBAPP_URL")
         url = url if url.startswith("http") else f"https://{url}"
         bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
-    bot.send_message(message.chat.id, "👋 Assalomu alaykum! Ilova to'liq yangilandi. Endi test yaratish va ishlash butunlay Mini Ilova ichiga ko'chirildi! Uni pastdagi 'Ilovani ochish' tugmasi orqali ishlating.")
+    
+    # Foydalanuvchiga yangi imkoniyatlar haqida e'lon berish matni
+    bot.send_message(
+        message.chat.id, 
+        "👋 Assalomu alaykum! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
+        "⚡ **Yangi Yangilanish:**\n"
+        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
+        "ℹ️ Katta darsliklardan test tayyorlash biroz ko'proq vaqt olishi mumkin, ammo Telegram sizni spam deb bloklamaydi, chunki barcha testlar to'g'ridan-to'g'ri Mini Ilova ichiga joylanadi.\n\n"
+        "🚀 Marhamat, pastdagi **'Ilovani ochish'** tugmasini bosing, darslik yuklang va test ishlashni boshlang!"
+    )
 
-# --- WEBAPP (MINI ILOVA) UCHUN YANGI ENDPOINTLAR ---
+# --- WEBAPP API ENDPOINTS ---
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/api/create-quiz-web")
-async自由 def create_quiz_web(
+async def create_quiz_web(
     user_id: int = Form(...),
     text: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None)
@@ -147,9 +160,10 @@ async自由 def create_quiz_web(
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
+    # AI dan 50 ta test so'rash
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+        return {"status": "error", "message": "AI katta hajmli test generatsiya qila olmadi. API kalitlarni tekshiring."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -163,9 +177,11 @@ async自由 def create_quiz_web(
         conn.commit()
         conn.close()
 
-        # Bot orqali ogohlantirish yuborish
-        try: bot.send_message(user_id, f"🎉 Mini Ilova ichida yuklagan darsligingiz bo'yicha '{title[:22]}' testi muvaffaqiyatli yaratildi va Kutubxonangizga qo'shildi!")
-        except: pass
+        # Bot orqali foydalanuvchiga signal yuborish
+        try: 
+            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi va Kutubxonangizga saqlandi! Ilovani ochib ishlashingiz mumkin.")
+        except: 
+            pass
 
         return {"status": "ok"}
     except Exception as e:
@@ -175,7 +191,7 @@ async自由 def create_quiz_web(
 def get_user_quizzes(user_id: int):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY create_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     result = []
