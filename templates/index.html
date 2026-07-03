@@ -83,7 +83,7 @@
             <button class="tab">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
-            <div style="text-align: center; margin-top: 50px; color: var(--text-hint);">Yuklanmoqda...</div>
+            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Yuklanmoqda...</div>
         </div>
     </div>
 
@@ -112,10 +112,23 @@
         tg.ready(); tg.expand();
         tg.setHeaderColor('#121214');
 
-        const userId = tg.initDataUnsafe?.user?.id || 12345;
+        // Xavfsiz foydalanuvchi ID sini aniqlash
+        let userId = 12345; 
+        try {
+            if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+                userId = tg.initDataUnsafe.user.id;
+            }
+        } catch(e) {
+            console.log("Telegram ID aniqlashda xato, standart ID ishlatiladi.");
+        }
+
         let selectedFile = null;
         let currentQuizData = null;
         let currentQuestionIdx = 0;
+
+        document.addEventListener("DOMContentLoaded", function() {
+            loadQuizzes();
+        });
 
         function switchScreen(screenName) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -149,13 +162,3 @@
             document.getElementById('loading-status').style.display = 'block';
 
             const formData = new FormData();
-            formData.append('user_id', userId);
-            if(selectedFile) {
-                formData.append('file', selectedFile);
-            }
-            if(textInput.trim()) {
-                formData.append('text', textInput);
-            }
-
-            try {
-                const res = await fetch('/api/create-quiz-web', { method: 'POST', body: formData });
