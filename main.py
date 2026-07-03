@@ -136,7 +136,6 @@ def generate_quiz_from_gemini(extracted_text):
     return None
 
 def run_bot_safe():
-    """Botni mutlaqo toza oqimda, xatolarga chidamli ishga tushirish"""
     while True:
         try:
             bot.remove_webhook()
@@ -147,13 +146,11 @@ def run_bot_safe():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI yoqilganda botni mutlaqo mustaqil erkin tarmoqda Active qiladi"""
     thread = Thread(target=run_bot_safe, daemon=True)
     thread.start()
     logging.info("🚀 Bot parallel xavfsiz tarmoqda ACTIVE holatga o'tdi!")
     yield
 
-# FastAPI xizmatini lifespan bilan bog'lab ochamiz
 app = FastAPI(lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
@@ -228,12 +225,12 @@ def get_user_quizzes(user_id: int):
         
         result = []
         for r in rows:
-            diff = int(time.time()) - r[4]
+            diff = int(time.time()) - r
             if diff < 60: time_str = "Hozirgina"
             elif diff < 3600: time_str = f"{diff//60}m oldin"
             elif diff < 86400: time_str = f"{diff//3600}soat oldin"
             else: time_str = f"{diff//86400}kun oldin"
-            result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
+            result.append({"id": r, "title": r, "total": r, "answered": r, "time_ago": time_str})
         return result
     except Exception as e:
         logging.error(f"Quizzes API xatosi: {e}")
@@ -246,7 +243,7 @@ def get_quiz_details(quiz_id: str):
     cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
-    if row: return {"id": row[0], "title": row[1], "quizzes": json.loads(row[2])["quizzes"]}
+    if row: return {"id": row, "title": row, "quizzes": json.loads(row)["quizzes"]}
     return {"error": "Not found"}
 
 @app.post("/api/update-progress")
@@ -256,6 +253,10 @@ def update_progress(req: ProgressUpdateRequest):
     cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
     row = cursor.fetchone()
     if row:
-        current_answered = row[0]
-        total = row[1]
+        current_answered = row
+        total = row
         if current_answered < total:
+            cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (current_answered + 1, req.quiz_id))
+            conn.commit()
+    conn.close()
+    return {"status": "updated"}
