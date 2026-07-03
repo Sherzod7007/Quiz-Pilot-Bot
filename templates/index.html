@@ -33,7 +33,6 @@
         .card-meta { font-size: 13px; color: var(--text-hint); display: flex; gap: 8px; }
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
-        .badge-new { background: var(--accent-blue); color: white; padding: 4px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
         .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; }
@@ -159,3 +158,4 @@
             }
 
             try {
+                const res = await fetch('/api/create-quiz-web', { method: 'POST', body: formData });
