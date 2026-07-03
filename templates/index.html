@@ -44,7 +44,7 @@
 </head>
 <body>
 
-    <!-- YARATISH -->
+    <!-- YARATISH EKRANI -->
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -58,7 +58,7 @@
         <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- KUTUBXONA -->
+    <!-- KUTUBXONA EKRANI -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div id="user-stats-badge" class="stats-badge">👥 Tizimda: ... foydalanuvchi</div>
@@ -72,6 +72,7 @@
         </div>
     </div>
 
+    <!-- BOTTOM NAV -->
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
@@ -103,7 +104,7 @@
         }
 
         function fileSelected(input) {
-            if(input.files.length > 0) {
+            if(input.files && input.files.length > 0) {
                 document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
             }
         }
@@ -112,10 +113,12 @@
             try {
                 const response = await fetch('/api/stats');
                 const data = await response.json();
-                if (data.status === "ok") {
-                    document.getElementById('user-stats-badge').innerText = `👥 Tizimda: ${data.total_users[0]} foydalanuvchi`;
+                if (data && data.status === "ok") {
+                    document.getElementById('user-stats-badge').innerText = `👥 Tizimda: ${data.total_users} foydalanuvchi`;
                 }
-            } catch (e) { console.log(e); }
+            } catch (e) { 
+                console.log("Statistika xatosi:", e); 
+            }
         }
 
         async function loadQuizzes() {
@@ -123,9 +126,11 @@
                 const response = await fetch(`/api/quizzes?user_id=${userId}`);
                 const data = await response.json();
                 const container = document.getElementById('quiz-list');
+                
+                if (!container) return;
                 container.innerHTML = "";
                 
-                if (data.status === "ok" && data.quizzes.length > 0) {
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
                         const card = document.createElement('div');
                         card.className = "quiz-card";
@@ -136,15 +141,18 @@
                     container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>`;
                 }
             } catch(e) {
-                document.getElementById('quiz-list').innerHTML = `<div style="text-align: center; color: var(--accent-red); padding: 40px;">Yuklashda xatolik yuz berdi.</div>`;
+                document.getElementById('quiz-list').innerHTML = `<div style="text-align: center; color: var(--accent-red); padding: 40px;">Ulanishda xatolik yuz berdi.</div>`;
             }
         }
 
         async function startGeneration() {
-            const text = document.getElementById('text-input').value;
+            const textInput = document.getElementById('text-input');
             const fileInput = document.getElementById('file-input');
             
-            if(!text.trim() && fileInput.files.length === 0) {
+            const textValue = textInput ? textInput.value.trim() : "";
+            const hasFile = fileInput && fileInput.files && fileInput.files.length > 0;
+            
+            if(!textValue && !hasFile) {
                 alert("Matn kiriting yoki fayl yuklang!");
                 return;
             }
@@ -154,32 +162,22 @@
             
             const formData = new FormData();
             formData.append('user_id', userId);
-            if(text.trim()) formData.append('text', text);
-            if(fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
+            if(textValue) formData.append('text', textValue);
+            if(hasFile) formData.append('file', fileInput.files[0]);
             
             try {
                 const response = await fetch('/api/create-quiz-web', { method: 'POST', body: formData });
                 const data = await response.json();
-                if(data.status === 'ok') {
+                if(data && data.status === 'ok') {
                     alert("Test muvaffaqiyatli yaratildi!");
-                    document.getElementById('text-input').value = "";
-                    document.getElementById('file-input').value = "";
+                    if(textInput) textInput.value = "";
+                    if(fileInput) fileInput.value = "";
                     document.getElementById('upload-text').innerText = "Darslik yuklash (PDF yoki DOCX)";
                     switchScreen('library');
                 } else {
-                    alert("Xato: " + data.message);
+                    alert("Xato: " + (data ? data.message : "Noma'lum xatolik"));
                 }
             } catch(e) {
                 alert("Server bilan aloqa uzildi.");
             } finally {
                 document.getElementById('generate-btn').style.display = 'block';
-                document.getElementById('loading-status').style.display = 'none';
-            }
-        }
-
-        // Dastlabki ishga tushish
-        loadQuizzes();
-        loadGlobalStats();
-    </script>
-</body>
-</html>
