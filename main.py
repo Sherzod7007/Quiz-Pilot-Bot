@@ -17,6 +17,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 
@@ -36,6 +37,8 @@ DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    # Baza bloklanib qolmasligi uchun WAL rejimini yoqamiz
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quizzes (
             id TEXT PRIMARY KEY,
@@ -153,6 +156,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# TMA Frontend ochilganda CORS xatosi bermasligi va yuklanishda qotib qolmasligi uchun ruxsat beramiz
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -202,6 +214,7 @@ async def create_quiz_web(
         
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", 
                        (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
         conn.commit()
@@ -214,49 +227,41 @@ async def create_quiz_web(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+# Qayta tiklangan va oxirigacha to'liq yozilgan API'lar:
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
         rows = cursor.fetchall()
         conn.close()
         
-        result = []
-        for r in rows:
-            diff = int(time.time()) - r
-            if diff < 60: time_str = "Hozirgina"
-            elif diff < 3600: time_str = f"{diff//60}m oldin"
-            elif diff < 86400: time_str = f"{diff//3600}soat oldin"
-            else: time_str = f"{diff//86400}kun oldin"
-            result.append({"id": r, "title": r, "total": r, "answered": r, "time_ago": time_str})
-        return result
+        quizzes = []
+        for row in rows:
+            quizzes.append({
+                "id": row["id"],
+                "title": row["title"],
+                "total": row["total"],
+                "answered": row["answered"],
+                "created_at": row["created_at"]
+            })
+        return {"status": "ok", "quizzes": quizzes}
     except Exception as e:
-        logging.error(f"Quizzes API xatosi: {e}")
-        return []
+        return {"status": "error", "message": str(e)}
 
-@app.get("/api/get-quiz-details")
-def get_quiz_details(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row: return {"id": row, "title": row, "quizzes": json.loads(row)["quizzes"]}
-    return {"error": "Not found"}
-
-@app.post("/api/update-progress")
-def update_progress(req: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
-    row = cursor.fetchone()
-    if row:
-        current_answered = row
-        total = row
-        if current_answered < total:
-            cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (current_answered + 1, req.quiz_id))
-            conn.commit()
-    conn.close()
-    return {"status": "updated"}
+@app.get("/api/quiz-detail")
+def get_quiz_detail(quiz_id: str):
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
