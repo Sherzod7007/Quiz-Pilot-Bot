@@ -4,9 +4,11 @@ import json
 import os
 import time
 import sqlite3
+from threading import Thread
 from pypdf import PdfReader
 import docx
 import telebot
+from telebot import types
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
@@ -15,13 +17,13 @@ from typing import List, Optional
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from contextlib import asynccontextmanager
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-app = FastAPI()
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
@@ -63,14 +65,51 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
+def get_side_by_side_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    url = os.getenv("WEBAPP_URL", "")
+    if url:
+        url = url if url.startswith("http") else f"https://{url}"
+        markup.add(
+            types.KeyboardButton('/start'),
+            types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
+        )
+    else:
+        markup.add(types.KeyboardButton('/start'))
+    return markup
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    if os.getenv("WEBAPP_URL"):
+        try:
+            url = os.getenv("WEBAPP_URL")
+            url = url if url.startswith("http") else f"https://{url}"
+            bot.set_chat_menu_button(
+                chat_id=message.chat.id,
+                menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
+            )
+        except Exception as e:
+            logging.error(f"Menu xatosi: {e}")
+    
+    user_name = message.from_user.first_name
+    bot.send_message(
+        message.chat.id, 
+        f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
+        "⚡ **Yangi Yangilanish:**\n"
+        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
+        "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
+        reply_markup=get_side_by_side_keyboard()
+    )
+
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
     system_instruction = (
         "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. "
-        "Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE savol tuzing. "
-        "Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. Matn tili darslik bilan bir xil bo'lsin."
+        "Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. "
+        "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating. Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. "
+        "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -95,6 +134,27 @@ def generate_quiz_from_gemini(extracted_text):
             logging.error(f"Gemini API xatosi: {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
+
+def run_bot_safe():
+    """Botni mutlaqo toza oqimda, xatolarga chidamli ishga tushirish"""
+    while True:
+        try:
+            bot.remove_webhook()
+            bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
+        except Exception as e:
+            logging.error(f"Bot Polling qulflanish xatosi: {e}")
+            time.sleep(3)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI yoqilganda botni mutlaqo mustaqil erkin tarmoqda Active qiladi"""
+    thread = Thread(target=run_bot_safe, daemon=True)
+    thread.start()
+    logging.info("🚀 Bot parallel xavfsiz tarmoqda ACTIVE holatga o'tdi!")
+    yield
+
+# FastAPI xizmatini lifespan bilan bog'lab ochamiz
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
@@ -199,11 +259,3 @@ def update_progress(req: ProgressUpdateRequest):
         current_answered = row[0]
         total = row[1]
         if current_answered < total:
-            cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (current_answered + 1, req.quiz_id))
-            conn.commit()
-    conn.close()
-    return {"status": "updated"}
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
