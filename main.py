@@ -22,7 +22,6 @@ import uvicorn
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Bu yerda threaded=True qilsak, bot fonda Active bo'lib, silliq ishlaydi
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=True)
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -210,12 +209,12 @@ def get_user_quizzes(user_id: int):
         
         result = []
         for r in rows:
-            diff = int(time.time()) - r
+            diff = int(time.time()) - r[4]
             if diff < 60: time_str = "Hozirgina"
             elif diff < 3600: time_str = f"{diff//60}m oldin"
             elif diff < 86400: time_str = f"{diff//3600}soat oldin"
             else: time_str = f"{diff//86400}kun oldin"
-            result.append({"id": r, "title": r, "total": r, "answered": r, "time_ago": time_str})
+            result.append({"id": r[0], "title": r[2], "total": r[3], "answered": r[4], "time_ago": time_str})
         return result
     except Exception as e:
         logging.error(f"Quizzes API xatosi: {e}")
@@ -228,7 +227,7 @@ def get_quiz_details(quiz_id: str):
     cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
-    if row: return {"id": row, "title": row, "quizzes": json.loads(row)["quizzes"]}
+    if row: return {"id": row[0], "title": row[1], "quizzes": json.loads(row[2])["quizzes"]}
     return {"error": "Not found"}
 
 @app.post("/api/update-progress")
@@ -238,8 +237,8 @@ def update_progress(req: ProgressUpdateRequest):
     cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
     row = cursor.fetchone()
     if row:
-        current_answered = row
-        total = row
+        current_answered = row[0]
+        total = row[1]
         if current_answered < total:
             cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (current_answered + 1, req.quiz_id))
             conn.commit()
@@ -247,8 +246,6 @@ def update_progress(req: ProgressUpdateRequest):
     return {"status": "updated"}
 
 def run_bot():
-    """Botni fonda xavfsiz va uzluksiz Active usulda yurgizish"""
-    # Har qanday eski webhook qoldiqlarini o'chirib, pollingni toza yoqamiz
     try:
         bot.remove_webhook()
         time.sleep(0.5)
@@ -258,3 +255,6 @@ def run_bot():
         time.sleep(5)
 
 if __name__ == "__main__":
+    Thread(target=run_bot, daemon=True).start()
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
