@@ -110,16 +110,27 @@ def generate_quiz_from_gemini(extracted_text):
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if os.getenv("WEBAPP_URL"):
-        url = os.getenv("WEBAPP_URL")
-        url = url if url.startswith("http") else f"https://{url}"
-        bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
+        try:
+            url = os.getenv("WEBAPP_URL")
+            url = url if url.startswith("http") else f"https://{url}"
+            bot.set_chat_menu_button(
+                chat_id=message.chat.id,
+                menu_button=types.MenuButtonWebApp(
+                    type="web_app", 
+                    text="Ilovani ochish 🚀", 
+                    web_app=types.WebAppInfo(url=url)
+                )
+            )
+        except Exception as e:
+            logging.error(f"Menu tugmasini sozlashda xato: {e}")
     
+    user_name = message.from_user.first_name
     bot.send_message(
         message.chat.id, 
-        "👋 Assalomu alaykum! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
+        f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
         "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "ℹ️ Katta darsliklardan test tayyorlash biroz ko'proq vaqt olishi mumkin, ammo Telegram sizni spam deb bloklamaydi, chunki barcha testlar to'g'ridan-to'g'ri Mini Ilova ichiga joylanadi.\n\n"
+        "ℹ️ Katta darsliklardan test tayyorlash biroz ko'proq vaqt olishi mumkin, barcha testlar to'g'ridan-to'g'ri Mini Ilova ichiga joylanadi.\n\n"
         "🚀 Marhamat, pastdagi **'Ilovani ochish'** tugmasini bosing, darslik yuklang va test ishlashni boshlang!",
         reply_markup=get_main_keyboard()
     )
