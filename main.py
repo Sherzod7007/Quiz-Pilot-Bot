@@ -65,11 +65,15 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
+def get_main_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    markup.add(types.KeyboardButton('/start'))
+    return markup
+
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
-    # AI ga aniq 50 ta savol tuzish haqida qat'iy buyruq beramiz
     system_instruction = (
         "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. "
         "Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. "
@@ -86,7 +90,6 @@ def generate_quiz_from_gemini(extracted_text):
             continue
         try:
             client = genai.Client(api_key=api_key)
-            # Matn hajmini 80,000 belgigacha oshirdik (Katta kitoblar bemalol sig'adi)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=extracted_text[:80000],
@@ -94,7 +97,7 @@ def generate_quiz_from_gemini(extracted_text):
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=QuizResponse,
-                    temperature=0.6 # Tempni biroz tushirdik, AI aniqroq savollar tuzishi uchun
+                    temperature=0.6
                 )
             )
             if response and response.text: return response.text
@@ -111,14 +114,14 @@ def send_welcome(message):
         url = url if url.startswith("http") else f"https://{url}"
         bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
     
-    # Foydalanuvchiga yangi imkoniyatlar haqida e'lon berish matni
     bot.send_message(
         message.chat.id, 
         "👋 Assalomu alaykum! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
         "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
         "ℹ️ Katta darsliklardan test tayyorlash biroz ko'proq vaqt olishi mumkin, ammo Telegram sizni spam deb bloklamaydi, chunki barcha testlar to'g'ridan-to'g'ri Mini Ilova ichiga joylanadi.\n\n"
-        "🚀 Marhamat, pastdagi **'Ilovani ochish'** tugmasini bosing, darslik yuklang va test ishlashni boshlang!"
+        "🚀 Marhamat, pastdagi **'Ilovani ochish'** tugmasini bosing, darslik yuklang va test ishlashni boshlang!",
+        reply_markup=get_main_keyboard()
     )
 
 # --- WEBAPP API ENDPOINTS ---
@@ -160,7 +163,6 @@ async def create_quiz_web(
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
-    # AI dan 50 ta test so'rash
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
         return {"status": "error", "message": "AI katta hajmli test generatsiya qila olmadi. API kalitlarni tekshiring."}
@@ -177,7 +179,6 @@ async def create_quiz_web(
         conn.commit()
         conn.close()
 
-        # Bot orqali foydalanuvchiga signal yuborish
         try: 
             bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi va Kutubxonangizga saqlandi! Ilovani ochib ishlashingiz mumkin.")
         except: 
@@ -191,7 +192,7 @@ async def create_quiz_web(
 def get_user_quizzes(user_id: int):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY create_at DESC", (user_id,))
+    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     result = []
@@ -226,6 +227,14 @@ def update_progress(req: ProgressUpdateRequest):
     conn.close()
     return {"status": "updated"}
 
+def run_bot():
+    while True:
+        try: 
+            bot.polling(none_stop=True, timeout=60)
+        except Exception: 
+            time.sleep(5)
+
 if __name__ == "__main__":
-    Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
-    uvicorn.run("main.py:app", host="0.0.0.0", port=int(os.getenv("PORT", 8080)), reload=False)
+    Thread(target=run_bot, daemon=True).start()
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
