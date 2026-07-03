@@ -34,7 +34,8 @@ DOWNLOADS_DIR = 'downloads'
 DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    # check_same_thread=False orqali FastAPI ko'p tarmoqli ishlashda bazani qulflab qo'ymaydi
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quizzes (
@@ -65,16 +66,10 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
-def get_webapp_keyboard():
-    """Klaviatura o'rnida qotib turuvchi maxsus doimiy WebApp tugmasi"""
+def get_main_keyboard():
+    # Boyagi eski va qulay holatiga qaytaramiz
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    url = os.getenv("WEBAPP_URL", "")
-    if url:
-        url = url if url.startswith("http") else f"https://{url}"
-        # Oddiy /start tugmasi o'rniga doimiy ilovani ochuvchi Reply tugma
-        markup.add(types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
-    else:
-        markup.add(types.KeyboardButton('/start'))
+    markup.add(types.KeyboardButton('/start'))
     return markup
 
 def generate_quiz_from_gemini(extracted_text):
@@ -132,9 +127,9 @@ def send_welcome(message):
         message.chat.id, 
         f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz bitta darslikdan **100% xatosiz va to'liq 50 tagacha test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "🚀 Marhamat, pastdagi qo'zg'almas **'Ilovani ochish 🚀'** tugmasini bosing, darsligingizni yuklang va testlarni silliq ishlang!",
-        reply_markup=get_webapp_keyboard()
+        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
+        "🚀 Marhamat, pastdagi **'Ilovani ochish 🚀'** tugmasini bosing, darsligingizni yuklang va testlarni silliq ishlang!",
+        reply_markup=get_main_keyboard()
     )
 
 # --- WEBAPP API ENDPOINTS ---
@@ -178,14 +173,14 @@ async def create_quiz_web(
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+        return {"status": "error", "message": "AI katta hajmli test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
         items = quiz_data.get("quizzes", [])
         quiz_id = f"q_{int(time.time())}"
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", 
                        (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
@@ -203,24 +198,29 @@ async def create_quiz_web(
 
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    result = []
-    for r in rows:
-        diff = int(time.time()) - r[4]
-        if diff < 60: time_str = "Hozirgina"
-        elif diff < 3600: time_str = f"{diff//60}m oldin"
-        elif diff < 86400: time_str = f"{diff//3600}soat oldin"
-        else: time_str = f"{diff//86400}kun oldin"
-        result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
-    return result
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        result = []
+        for r in rows:
+            diff = int(time.time()) - r[4]
+            if diff < 60: time_str = "Hozirgina"
+            elif diff < 3600: time_str = f"{diff//60}m oldin"
+            elif diff < 86400: time_str = f"{diff//3600}soat oldin"
+            else: time_str = f"{diff//86400}kun oldin"
+            result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
+        return result
+    except Exception as e:
+        logging.error(f"Quizzes API xatosi: {e}")
+        return []
 
 @app.get("/api/get-quiz-details")
 def get_quiz_details(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
@@ -230,7 +230,7 @@ def get_quiz_details(quiz_id: str):
 
 @app.post("/api/update-progress")
 def update_progress(req: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
     row = cursor.fetchone()
