@@ -38,6 +38,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
+    # Testlar jadvali
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quizzes (
             id TEXT PRIMARY KEY,
@@ -46,6 +47,13 @@ def init_db():
             total INTEGER,
             answered INTEGER,
             quiz_json TEXT,
+            created_at INTEGER
+        )
+    ''')
+    # Foydalanuvchilar jadvali
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
             created_at INTEGER
         )
     ''')
@@ -67,6 +75,17 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
+def add_user_to_db(user_id: int):
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", (user_id, int(time.time())))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Foydalanuvchini qo'shishda xato: {e}")
+
 def get_side_by_side_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     url = os.getenv("WEBAPP_URL", "")
@@ -82,6 +101,7 @@ def get_side_by_side_keyboard():
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    add_user_to_db(message.from_user.id)
     if os.getenv("WEBAPP_URL"):
         try:
             url = os.getenv("WEBAPP_URL")
@@ -102,6 +122,27 @@ def send_welcome(message):
         "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
         reply_markup=get_side_by_side_keyboard()
     )
+
+@bot.message_handler(commands=['admin'])
+def send_admin_stats(message):
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM quizzes")
+        total_quizzes = cursor.fetchone()[0]
+        conn.close()
+        
+        bot.send_message(
+            message.chat.id,
+            f"📊 **Quiz Pilot Loyihasi Statistikasi:**\n\n"
+            f"👤 Jami foydalanuvchilar: **{total_users} ta**\n"
+            f"📝 Jami yaratilgan testlar: **{total_quizzes} ta**"
+        )
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Statistikani yuklashda xato: {e}")
 
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
@@ -173,6 +214,7 @@ async def create_quiz_web(
     text: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None)
 ):
+    add_user_to_db(user_id)
     raw_text = ""
     title = "Matnli Test"
     
@@ -227,45 +269,5 @@ async def create_quiz_web(
 
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        quizzes = []
-        for row in rows:
-            quizzes.append({
-                "id": row["id"],
-                "title": row["title"],
-                "total": row["total"],
-                "answered": row["answered"],
-                "created_at": row["created_at"]
-            })
-        return {"status": "ok", "quizzes": quizzes}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-        return {"status": "error", "message": "Test topilmadi."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.post("/api/update-progress")
-def update_progress(data: ProgressUpdateRequest):
+    add_user_to_db(user_id)
     try:
