@@ -66,7 +66,6 @@ class ProgressUpdateRequest(BaseModel):
     user_id: int
 
 def get_side_by_side_keyboard():
-    """/start va Ilovani ochish tugmalarini bitta qatorda yonma-yon chiqarish"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     url = os.getenv("WEBAPP_URL", "")
     if url:
@@ -115,7 +114,6 @@ def generate_quiz_from_gemini(extracted_text):
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-# --- BOT HANDLER ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if os.getenv("WEBAPP_URL"):
