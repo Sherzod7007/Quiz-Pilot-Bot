@@ -4,7 +4,6 @@ import json
 import os
 import time
 import sqlite3
-from threading import Thread
 from pypdf import PdfReader
 import docx
 import telebot
@@ -14,15 +13,16 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, UploadFile, File, Form, status
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+# Webhook holatida threaded=False qilish majburiy (konflikt oldini oladi)
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
@@ -85,10 +85,8 @@ def generate_quiz_from_gemini(extracted_text):
     system_instruction = (
         "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. "
         "Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. "
-        "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri (lekin mantiqan to'g'riga yaqin) variant yarating. "
-        "Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shing. "
-        "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin. "
-        "Savollar soni aniq 50 ta bo'lishi shart."
+        "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating. Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. "
+        "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -114,6 +112,7 @@ def generate_quiz_from_gemini(extracted_text):
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
+# --- BOT HANDLER ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if os.getenv("WEBAPP_URL"):
@@ -136,6 +135,31 @@ def send_welcome(message):
         "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
         reply_markup=get_side_by_side_keyboard()
     )
+
+# --- FASTAPI WEBHOOK INTEGRATION (MUHIM!) ---
+@app.post(f"/{TELEGRAM_BOT_TOKEN}")
+async def process_webhook(request: Request):
+    """Telegramdan kelgan xabarlarni to'g'ridan-to'g'ri FastAPI qabul qiladi"""
+    try:
+        json_string = await request.json()
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return JSONResponse(content={"status": "ok"})
+    except Exception as e:
+        logging.error(f"Webhook error: {e}")
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(e)})
+
+@app.on_event("startup")
+def startup_event():
+    """Server yoqilganda eski pollingni o'chirib, toza Webhook o'rnatadi"""
+    url = os.getenv("WEBAPP_URL", "")
+    if url:
+        url = url if url.startswith("http") else f"https://{url}"
+        webhook_url = f"{url}/{TELEGRAM_BOT_TOKEN}"
+        bot.remove_webhook()
+        time.sleep(0.5)
+        bot.set_webhook(url=webhook_url)
+        logging.info(f"Webhook muvaffaqiyatli o'rnatildi: {webhook_url}")
 
 # --- WEBAPP API ENDPOINTS ---
 @app.get("/", response_class=HTMLResponse)
@@ -192,10 +216,8 @@ async def create_quiz_web(
         conn.commit()
         conn.close()
 
-        try: 
-            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
-        except: 
-            pass
+        try: bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+        except: pass
 
         return {"status": "ok"}
     except Exception as e:
@@ -231,21 +253,3 @@ def get_quiz_details(quiz_id: str):
     row = cursor.fetchone()
     conn.close()
     if row: return {"id": row[0], "title": row[1], "quizzes": json.loads(row[2])["quizzes"]}
-    return {"error": "Not found"}
-
-@app.post("/api/update-progress")
-def update_progress(req: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
-    row = cursor.fetchone()
-    if row and row[0] < row[1]:
-        cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (row[0] + 1, req.quiz_id))
-        conn.commit()
-    conn.close()
-    return {"status": "updated"}
-
-if __name__ == "__main__":
-    Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
