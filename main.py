@@ -4,11 +4,9 @@ import json
 import os
 import time
 import sqlite3
-from threading import Thread
 from pypdf import PdfReader
 import docx
 import telebot
-from telebot import types
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
@@ -22,7 +20,7 @@ import uvicorn
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=True)
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
@@ -55,7 +53,7 @@ init_db()
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
+    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami")
     explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida")
 
 class QuizResponse(BaseModel):
@@ -65,28 +63,14 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
-def get_side_by_side_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    url = os.getenv("WEBAPP_URL", "")
-    if url:
-        url = url if url.startswith("http") else f"https://{url}"
-        markup.add(
-            types.KeyboardButton('/start'),
-            types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
-        )
-    else:
-        markup.add(types.KeyboardButton('/start'))
-    return markup
-
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
     system_instruction = (
         "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. "
-        "Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. "
-        "Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating. Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. "
-        "Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."
+        "Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE savol tuzing. "
+        "Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. Matn tili darslik bilan bir xil bo'lsin."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -112,31 +96,6 @@ def generate_quiz_from_gemini(extracted_text):
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-# --- BOT HANDLER ---
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    if os.getenv("WEBAPP_URL"):
-        try:
-            url = os.getenv("WEBAPP_URL")
-            url = url if url.startswith("http") else f"https://{url}"
-            bot.set_chat_menu_button(
-                chat_id=message.chat.id,
-                menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
-            )
-        except Exception as e:
-            logging.error(f"Menu xatosi: {e}")
-    
-    user_name = message.from_user.first_name
-    bot.send_message(
-        message.chat.id, 
-        f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
-        "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
-        reply_markup=get_side_by_side_keyboard()
-    )
-
-# --- WEBAPP API ENDPOINTS ---
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -214,7 +173,7 @@ def get_user_quizzes(user_id: int):
             elif diff < 3600: time_str = f"{diff//60}m oldin"
             elif diff < 86400: time_str = f"{diff//3600}soat oldin"
             else: time_str = f"{diff//86400}kun oldin"
-            result.append({"id": r[0], "title": r[2], "total": r[3], "answered": r[4], "time_ago": time_str})
+            result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
         return result
     except Exception as e:
         logging.error(f"Quizzes API xatosi: {e}")
@@ -245,16 +204,6 @@ def update_progress(req: ProgressUpdateRequest):
     conn.close()
     return {"status": "updated"}
 
-def run_bot():
-    try:
-        bot.remove_webhook()
-        time.sleep(0.5)
-        bot.polling(none_stop=True, timeout=60, long_polling_timeout=60)
-    except Exception as e:
-        logging.error(f"Bot Polling xatosi: {e}")
-        time.sleep(5)
-
 if __name__ == "__main__":
-    Thread(target=run_bot, daemon=True).start()
     port = int(os.getenv("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
