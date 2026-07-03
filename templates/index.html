@@ -38,16 +38,9 @@
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
         .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; }
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
-        .circle-progress { position: relative; width: 42px; height: 42px; }
-        .circle-progress svg { width: 42px; height: 42px; transform: rotate(-90deg); }
-        .circle-progress circle { fill: none; stroke-width: 4; }
-        .circle-bg { stroke: #2c2c35; }
-        .circle-val { stroke-linecap: round; transition: stroke-dashoffset 0.3s; }
-        .circle-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 11px; font-weight: bold; }
         .screen { display: none; }
         .screen.active { display: block; }
         .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
-        .upload-box:hover { border-color: var(--accent-blue); }
         .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
         .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
         #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
@@ -68,7 +61,7 @@
 </head>
 <body>
 
-    <!-- YARATISH SAHIFASI -->
+    <!-- YARATISH -->
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -77,12 +70,12 @@
             <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
         </div>
         <div style="text-align: center; color: var(--text-hint); margin-bottom: 20px;">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="6" placeholder="Bu yerga test mavzusi yoki konspekt matnini joylang..."></textarea>
+        <textarea id="text-input" class="input-text" rows="6" placeholder="Mavzu yoki konspekt matnini joylang..."></textarea>
         <button id="generate-btn" class="submit-btn" onclick="startGeneration()">AI yordamida yaratish 🚀</button>
-        <div id="loading-status" class="loader">⏳ Sun'iy intellekt darslikni o'qib test tayyorlamoqda, iltimos kuting...</div>
+        <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- KUTUBXONA SAHIFASI -->
+    <!-- KUTUBXONA -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div class="tabs">
@@ -95,7 +88,7 @@
         </div>
     </div>
 
-    <!-- PLAY TEST GAME SCREEN -->
+    <!-- PLAY GAME -->
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -108,7 +101,6 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
     </div>
 
-    <!-- BOTTOM BAR -->
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
@@ -148,3 +140,22 @@
         }
 
         async function startGeneration() {
+            const textInput = document.getElementById('text-input').value;
+            if(!selectedFile && !textInput.trim()) {
+                alert("Iltimos, fayl yuklang yoki matn kiriting!");
+                return;
+            }
+
+            document.getElementById('generate-btn').style.display = 'none';
+            document.getElementById('loading-status').style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('user_id', userId);
+            if(selectedFile) {
+                formData.append('file', selectedFile);
+            }
+            if(textInput.trim()) {
+                formData.append('text', textInput);
+            }
+
+            try {
