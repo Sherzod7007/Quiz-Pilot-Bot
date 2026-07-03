@@ -1,4 +1,17 @@
-
+# -*- coding: utf-8 -*-
+import logging
+import json
+import os
+import time
+import sqlite3
+from threading import Thread
+from pypdf import PdfReader
+import docx
+import telebot
+from telebot import types
+from google import genai
+from google.genai import types as genai_types
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, Form
@@ -58,7 +71,6 @@ def get_side_by_side_keyboard():
     url = os.getenv("WEBAPP_URL", "")
     if url:
         url = url if url.startswith("http") else f"https://{url}"
-        # Ikkala tugma bitta qatorda yonma-yon joylashadi
         markup.add(
             types.KeyboardButton('/start'),
             types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
