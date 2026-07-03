@@ -108,7 +108,7 @@ def send_admin_stats(message):
         cursor.execute("SELECT COUNT(*) FROM quizzes")
         q_count = cursor.fetchone()
         conn.close()
-        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count} ta**\n📝 Jami yaratilgan testlar: **{q_count} ta**")
+        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count[0]} ta**\n📝 Jami yaratilgan testlar: **{q_count[0]} ta**")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Statistikani olishda xato: {e}")
 
@@ -116,9 +116,11 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
-    system_instruction = (
-        "Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz. Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing. Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating. Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing. Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."
-    )
+    system_instruction = """Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz.
+Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
+Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
+Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
+Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -130,7 +132,12 @@ def generate_quiz_from_gemini(extracted_text):
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=extracted_text[:80000],
-                config=genai_types.GenerateContentConfig(system_instruction=system_instruction, response_mime_type="application/json", response_schema=QuizResponse, temperature=0.6)
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=QuizResponse,
+                    temperature=0.6
+                )
             )
             if response and response.text: return response.text
         except Exception as e:
@@ -232,7 +239,3 @@ def get_user_quizzes(user_id: int):
     cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
-    return {"status": "ok", "quizzes": quizzes}
-
-@app.get("/api/quiz-detail")
