@@ -65,9 +65,16 @@ class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
 
-def get_main_keyboard():
+def get_webapp_keyboard():
+    """Klaviatura o'rnida qotib turuvchi maxsus doimiy WebApp tugmasi"""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add(types.KeyboardButton('/start'))
+    url = os.getenv("WEBAPP_URL", "")
+    if url:
+        url = url if url.startswith("http") else f"https://{url}"
+        # Oddiy /start tugmasi o'rniga doimiy ilovani ochuvchi Reply tugma
+        markup.add(types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
+    else:
+        markup.add(types.KeyboardButton('/start'))
     return markup
 
 def generate_quiz_from_gemini(extracted_text):
@@ -115,24 +122,19 @@ def send_welcome(message):
             url = url if url.startswith("http") else f"https://{url}"
             bot.set_chat_menu_button(
                 chat_id=message.chat.id,
-                menu_button=types.MenuButtonWebApp(
-                    type="web_app", 
-                    text="Ilovani ochish 🚀", 
-                    web_app=types.WebAppInfo(url=url)
-                )
+                menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
             )
         except Exception as e:
-            logging.error(f"Menu tugmasini sozlashda xato: {e}")
+            logging.error(f"Menu xatosi: {e}")
     
     user_name = message.from_user.first_name
     bot.send_message(
         message.chat.id, 
         f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "ℹ️ Katta darsliklardan test tayyorlash biroz ko'proq vaqt olishi mumkin, barcha testlar to'g'ridan-to'g'ri Mini Ilova ichiga joylanadi.\n\n"
-        "🚀 Marhamat, pastdagi **'Ilovani ochish'** tugmasini bosing, darslik yuklang va test ishlashni boshlang!",
-        reply_markup=get_main_keyboard()
+        "🔥 Endi tizimimiz bitta darslikdan **100% xatosiz va to'liq 50 tagacha test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
+        "🚀 Marhamat, pastdagi qo'zg'almas **'Ilovani ochish 🚀'** tugmasini bosing, darsligingizni yuklang va testlarni silliq ishlang!",
+        reply_markup=get_webapp_keyboard()
     )
 
 # --- WEBAPP API ENDPOINTS ---
@@ -176,7 +178,7 @@ async def create_quiz_web(
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI katta hajmli test generatsiya qila olmadi. API kalitlarni tekshiring."}
+        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -191,7 +193,7 @@ async def create_quiz_web(
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi va Kutubxonangizga saqlandi! Ilovani ochib ishlashingiz mumkin.")
+            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
         except: 
             pass
 
@@ -210,7 +212,7 @@ def get_user_quizzes(user_id: int):
     for r in rows:
         diff = int(time.time()) - r[4]
         if diff < 60: time_str = "Hozirgina"
-        elif diff < 3600: time_str = f"{diff//60}h oldin"
+        elif diff < 3600: time_str = f"{diff//60}m oldin"
         elif diff < 86400: time_str = f"{diff//3600}soat oldin"
         else: time_str = f"{diff//86400}kun oldin"
         result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
@@ -238,14 +240,7 @@ def update_progress(req: ProgressUpdateRequest):
     conn.close()
     return {"status": "updated"}
 
-def run_bot():
-    while True:
-        try: 
-            bot.polling(none_stop=True, timeout=60)
-        except Exception: 
-            time.sleep(5)
-
 if __name__ == "__main__":
-    Thread(target=run_bot, daemon=True).start()
+    Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
     port = int(os.getenv("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
