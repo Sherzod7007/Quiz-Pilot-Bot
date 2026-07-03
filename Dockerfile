@@ -13,4 +13,5 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["python", "main.py"]
+# Katta yangilanish: Bir vaqtning o'zida ham main.py veb-serverini, ham bot.py ni fonda mustaqil yoqadi!
+CMD python bot.py & python main.py
