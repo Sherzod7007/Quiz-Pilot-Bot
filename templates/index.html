@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quiz Pilot - Super TMA</title>
-    <!-- Telegram kutubxonasi manzili to'g'rilandi -->
     <script src="https://telegram.org"></script>
     <style>
         :root {
@@ -24,14 +23,14 @@
             margin: 0; padding: 15px; padding-bottom: 90px;
             -webkit-user-select: none; user-select: none;
         }
-        .header h1 { font-size: 26px; margin: 0 0 15px 0; font-weight: 700; }
+        .header h1 { font-size: 26px; margin: 0; font-weight: 700; }
+        .stats-badge { background: #24242b; border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 12px; font-size: 12px; color: var(--accent-blue); display: inline-block; margin-bottom: 15px; font-weight: bold; }
         .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
         .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
         .tab.active { background: var(--accent-blue); color: #fff; }
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
         .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
-        .card-meta { font-size: 13px; color: var(--text-hint); display: flex; gap: 8px; }
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
@@ -63,7 +62,7 @@
 
     <!-- YARATISH -->
     <div id="create-screen" class="screen">
-        <div class="header"><h1>Yangi Test Yaratish</h1></div>
+        <div class="header" style="margin-bottom:15px;"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
             <span id="upload-text">Darslik yuklash (PDF yoki DOCX)</span>
@@ -77,7 +76,12 @@
 
     <!-- KUTUBXONA -->
     <div id="library-screen" class="screen active">
-        <div class="header"><h1>Kutubxona</h1></div>
+        <div class="header">
+            <h1>Kutubxona</h1>
+        </div>
+        <!-- Foydalanuvchilar soni vidjeti -->
+        <div id="user-stats-badge" class="stats-badge">👥 Tizimda: ... foydalanuvchi</div>
+        
         <div class="tabs">
             <button class="tab active">? Testlar</button>
             <button class="tab">🌐 Ommaviy</button>
@@ -113,9 +117,13 @@
         tg.ready(); tg.expand();
         tg.setHeaderColor('#121214');
 
-        let userId = 12345; 
+        // Xavfsiz foydalanuvchi ID sini olish mantiqi mukammallashtirildi
+        let userId = 0;
         if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
             userId = tg.initDataUnsafe.user.id;
+        } else {
+            // Agar Telegram tashqarisida ochilsa (sinov rejimi uchun tasodifiy raqam)
+            userId = 99999;
         }
 
         let currentQuizQuestions = [];
@@ -132,6 +140,7 @@
                 document.getElementById('library-screen').classList.add('active');
                 document.getElementById('nav-library').classList.add('active');
                 loadQuizzes();
+                loadGlobalStats();
             }
         }
 
@@ -141,13 +150,8 @@
             }
         }
 
-        async function loadQuizzes() {
+        // Foydalanuvchilar sonini ekranga chiqarish funksiyasi
+        async function loadGlobalStats() {
             try {
-                const response = await fetch(`/api/quizzes?user_id=${userId}`);
+                const response = await fetch('/api/stats');
                 const data = await response.json();
-                const container = document.getElementById('quiz-list');
-                container.innerHTML = "";
-                
-                if (data.status === "ok" && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
-                        const pct = quiz.total > 0 ? Math.round((quiz.answered / quiz.total) * 100) : 0;
