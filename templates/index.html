@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quiz Pilot - Super TMA</title>
+    <!-- Telegram kutubxonasi manzili to'g'rilandi -->
     <script src="https://telegram.org"></script>
     <style>
         :root {
@@ -35,7 +36,7 @@
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
-        .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; }
+        .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
         .screen { display: none; }
         .screen.active { display: block; }
@@ -112,29 +113,19 @@
         tg.ready(); tg.expand();
         tg.setHeaderColor('#121214');
 
-        // Xavfsiz foydalanuvchi ID sini aniqlash
         let userId = 12345; 
-        try {
-            if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
-                userId = tg.initDataUnsafe.user.id;
-            }
-        } catch(e) {
-            console.log("Telegram ID aniqlashda xato, standart ID ishlatiladi.");
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+            userId = tg.initDataUnsafe.user.id;
         }
 
-        let selectedFile = null;
-        let currentQuizData = null;
+        let currentQuizQuestions = [];
         let currentQuestionIdx = 0;
+        let currentQuizId = "";
 
-        document.addEventListener("DOMContentLoaded", function() {
-            loadQuizzes();
-        });
-
-        function switchScreen(screenName) {
+        function switchScreen(screen) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            
-            if(screenName === 'create') {
+            if(screen === 'create') {
                 document.getElementById('create-screen').classList.add('active');
                 document.getElementById('nav-create').classList.add('active');
             } else {
@@ -146,19 +137,17 @@
 
         function fileSelected(input) {
             if(input.files.length > 0) {
-                selectedFile = input.files[0];
-                document.getElementById('upload-text').innerText = "Tanlandi: " + selectedFile.name;
+                document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
             }
         }
 
-        async function startGeneration() {
-            const textInput = document.getElementById('text-input').value;
-            if(!selectedFile && !textInput.trim()) {
-                alert("Iltimos, fayl yuklang yoki matn kiriting!");
-                return;
-            }
-
-            document.getElementById('generate-btn').style.display = 'none';
-            document.getElementById('loading-status').style.display = 'block';
-
-            const formData = new FormData();
+        async function loadQuizzes() {
+            try {
+                const response = await fetch(`/api/quizzes?user_id=${userId}`);
+                const data = await response.json();
+                const container = document.getElementById('quiz-list');
+                container.innerHTML = "";
+                
+                if (data.status === "ok" && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
+                        const pct = quiz.total > 0 ? Math.round((quiz.answered / quiz.total) * 100) : 0;
