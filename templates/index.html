@@ -23,14 +23,14 @@
             margin: 0; padding: 15px; padding-bottom: 90px;
             -webkit-user-select: none; user-select: none;
         }
-        .header h1 { font-size: 26px; margin: 0 0 5px 0; font-weight: 700; }
-        .stats-badge { background: #24242b; border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 12px; font-size: 12px; color: var(--accent-blue); display: inline-block; margin-bottom: 15px; font-weight: bold; }
+        .header h1 { font-size: 26px; margin: 0 0 15px 0; font-weight: 700; }
         .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
         .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
         .tab.active { background: var(--accent-blue); color: #fff; }
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
         .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
+        .card-meta { font-size: 13px; color: var(--text-hint); display: flex; gap: 8px; }
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
@@ -77,14 +77,13 @@
     <!-- KUTUBXONA -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
-        <div id="user-stats-badge" class="stats-badge">👥 Tizimda: ... foydalanuvchi</div>
         <div class="tabs">
             <button class="tab active">❓ Testlar</button>
             <button class="tab" onclick="alert('Tez kunda ommaviy bo\'lim ishga tushadi!')">🌐 Ommaviy</button>
             <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
+            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Yuklanmoqda...</div>
         </div>
     </div>
 
@@ -113,7 +112,7 @@
         tg.ready(); tg.expand();
         tg.setHeaderColor('#121214');
 
-        let userId = 99999;
+        let userId = 99999; 
         if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
             userId = tg.initDataUnsafe.user.id;
         }
@@ -132,7 +131,6 @@
                 document.getElementById('library-screen').classList.add('active');
                 document.getElementById('nav-library').classList.add('active');
                 loadQuizzes();
-                loadGlobalStats();
             }
         }
 
@@ -142,8 +140,13 @@
             }
         }
 
-        async function loadGlobalStats() {
+        async function loadQuizzes() {
             try {
-                const response = await fetch('/api/stats?_t=' + Date.now());
+                const response = await fetch('/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
                 const data = await response.json();
-                if (data && data.status === "ok") {
+                const container = document.getElementById('quiz-list');
+                if (!container) return;
+                container.innerHTML = "";
+                
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
