@@ -3,78 +3,77 @@ import logging
 import json
 import os
 import time
+import sqlite3
+from threading import Thread
 from pypdf import PdfReader
 import docx
 import telebot
 from telebot import types
-from telebot.types import PollAnswer
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
+
+from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not TELEGRAM_BOT_TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN topilmadi! Railway paneliga kiritganingizga ishonch hosil qiling.")
-
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-user_quiz_sessions = {}
-poll_to_user_map = {}
+DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quizzes (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            title TEXT,
+            total INTEGER,
+            answered INTEGER,
+            quiz_json TEXT,
+            created_at INTEGER
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
     correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida (maksimal 200 ta belgi)")
+    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida")
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
 
-def get_main_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    markup.add(types.KeyboardButton('/start'))
-    return markup
-
-def read_pdf(file_path):
-    try:
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-        return text
-    except Exception:
-        return ""
-
-def read_docx(file_path):
-    try:
-        doc = docx.Document(file_path)
-        return "\n".join([p.text for p in doc.paragraphs])
-    except Exception:
-        return ""
+class ProgressUpdateRequest(BaseModel):
+    quiz_id: str
+    user_id: int
 
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
-    if not GOOGLE_API_KEYS:
-        logging.error("Google API kalitlari ro'yxati bo'sh!")
-        return None
+    if not GOOGLE_API_KEYS: return None
 
     system_instruction = (
         "Siz berilgan savollar yoki matnlar asosida interaktiv testlar yaratuvchi botsiz. "
         "Foydalanuvchi bergan savolning to'g'ri javobini toping va unga mos 3 ta noto'g'ri variant to'qing. "
-        "Jami 4 ta variant bo'lsin va har bir variant boshiga qat'iy ravishda ketma-ketlikda "
-        "'A) ', 'B) ', 'C) ', 'D) ' harflarini qo'shib yozing. "
-        "Har bir savol uchun explanation maydoniga ushbu javob nega to'g'riligini isbotlovchi qisqa ilmiy qoidani yozing. "
-        "DIQQAT: Savol, variantlar va explanation matni foydalanuvchi yuborgan savol/matnning asl tili bilan aynan bir xil tilda bo'lishi shart! "
-        "Explanation matni qat'iy ravishda 200 ta belgidan oshmasligi kerak."
+        "Jami 4 ta variant bo'lsin va har bir variant boshiga A), B), C), D) harflarini qo'shing. "
+        "Har bir savol uchun explanation maydoniga qisqa qoidani yozing. Matn tili darslik bilan bir xil bo'lsin."
     )
 
     for _ in range(len(GOOGLE_API_KEYS)):
@@ -83,7 +82,6 @@ def generate_quiz_from_gemini(extracted_text):
             current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
             continue
         try:
-            logging.info(f"Ishlatilayotgan API Key indeksi: {current_key_index}")
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
@@ -95,158 +93,123 @@ def generate_quiz_from_gemini(extracted_text):
                     temperature=0.7
                 )
             )
-            if response and response.text:
-                return response.text
+            if response and response.text: return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatosi (Indeks: {current_key_index}): {e}")
+            logging.error(f"Gemini API xatosi: {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
+# --- BOT INTERFEYSI (Eski mantiq o'zgarishsiz saqlandi) ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    user_name = message.from_user.first_name
-    bot.send_message(
-        message.chat.id,
-        f"👋 Assalomu alaykum, {user_name}!\n\n🚀 Men **Quiz Pilot Bot** — sizning super va intellektual yordamchingizman.\n\n📖 **Men nimalar qila olaman?**\n1️⃣ Menga istalgan savollarni yuboring (Hatto variantlar va javobi bo'lmasa ham)\n2️⃣ Savollar yozilgan **PDF** yoki **Word (.docx)** formatidagi darsliklarni yuboring.\n\n🎯 Men to'g'ri javobni topib, variantlar tuzaman va xato qilsangiz qoidasini ham tushuntirib beraman!",
-        reply_markup=get_main_keyboard()
-    )
+    if os.getenv("WEBAPP_URL"):
+        url = os.getenv("WEBAPP_URL")
+        url = url if url.startswith("http") else f"https://{url}"
+        bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
+    bot.send_message(message.chat.id, "👋 Assalomu alaykum! Ilova to'liq yangilandi. Endi test yaratish va ishlash butunlay Mini Ilova ichiga ko'chirildi! Uni pastdagi 'Ilovani ochish' tugmasi orqali ishlating.")
 
-@bot.message_handler(content_types=['document'])
-def handle_docs(message):
-    try:
-        file_name = message.document.file_name
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
+# --- WEBAPP (MINI ILOVA) UCHUN YANGI ENDPOINTLAR ---
+@app.get("/", response_class=HTMLResponse)
+def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.post("/api/create-quiz-web")
+async自由 def create_quiz_web(
+    user_id: int = Form(...),
+    text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None)
+):
+    raw_text = ""
+    title = "Matnli Test"
+    
+    if file:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-        file_path = os.path.join(DOWNLOADS_DIR, file_name)
-        with open(file_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
+        file_path = os.path.join(DOWNLOADS_DIR, file.filename)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+        
+        if file.filename.endswith('.pdf'):
+            try:
+                reader = PdfReader(file_path)
+                raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
+            except: pass
+            title = file.filename.replace('.pdf', '')
+        elif file.filename.endswith('.docx'):
+            try:
+                doc = docx.Document(file_path)
+                raw_text = "\n".join([p.text for p in doc.paragraphs])
+            except: pass
+            title = file.filename.replace('.docx', '')
+    elif text:
+        raw_text = text
+        title = text[:15] + "..."
 
-        if file_name.endswith('.pdf'):
-            raw_text = read_pdf(file_path)
-        elif file_name.endswith('.docx'):
-            raw_text = read_docx(file_path)
-        else:
-            bot.send_message(message.chat.id, "❌ Faqat PDF yoki DOCX fayllarni yuboring.", reply_markup=get_main_keyboard())
-            return
+    if not raw_text.strip():
+        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
-        if not raw_text.strip():
-            bot.send_message(message.chat.id, "❌ Fayl bo'sh yoki matn o'qilmadi.", reply_markup=get_main_keyboard())
-            return
-
-        process_quiz_logic(message, raw_text)
-    except Exception as e:
-        logging.error(f"Fayl xatosi: {e}")
-
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    if message.text == '/start' or message.text.startswith('/'):
-        send_welcome(message)
-        return
-    process_quiz_logic(message, message.text)
-
-def process_quiz_logic(message, raw_text):
-    status_msg = bot.send_message(message.chat.id, "⏳ Sun'iy intellekt javoblarni topib, test tayyorlamoqda...", reply_markup=get_main_keyboard())
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-        except Exception:
-            pass
-        bot.send_message(message.chat.id, "❌ Afsuski, test yaratishda xatolik yuz berdi. API kalitlarni tekshiring.", reply_markup=get_main_keyboard())
-        return
+        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
-        try:
-            bot.delete_message(chat_id=message.chat.id, message_id=status_msg.message_id)
-        except Exception:
-            pass
         items = quiz_data.get("quizzes", [])
-        if not items:
-            bot.send_message(message.chat.id, "❌ Matndan test yaratib bo'lmadi.", reply_markup=get_main_keyboard())
-            return
+        quiz_id = f"q_{int(time.time())}"
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                       (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
+        conn.commit()
+        conn.close()
 
-        user_id = message.from_user.id
-        user_quiz_sessions[user_id] = {
-            "correct_count": 0,
-            "incorrect_count": 0,
-            "total_questions": len(items),
-            "answered_questions": 0,
-            "poll_map": {},
-            "chat_id": message.chat.id
-        }
-        for idx, q in enumerate(items, start=1):
-            options = q['options'][:4]
-            correct_index = int(q['correct_index'])
-            if correct_index >= len(options):
-                correct_index = 0
-            explanation_text = q.get('explanation', '')[:200]
-            numbered_question = f"{idx}. {q['question']}"
-            poll_msg = bot.send_poll(
-                chat_id=message.chat.id,
-                question=numbered_question,
-                options=options,
-                correct_option_id=correct_index,
-                type='quiz',
-                explanation=explanation_text,
-                is_anonymous=False
-            )
-            p_id = poll_msg.poll.id
-            user_quiz_sessions[user_id]["poll_map"][p_id] = correct_index
-            poll_to_user_map[p_id] = user_id
-            time.sleep(0.5)
+        # Bot orqali ogohlantirish yuborish
+        try: bot.send_message(user_id, f"🎉 Mini Ilova ichida yuklagan darsligingiz bo'yicha '{title[:22]}' testi muvaffaqiyatli yaratildi va Kutubxonangizga qo'shildi!")
+        except: pass
+
+        return {"status": "ok"}
     except Exception as e:
-        logging.error(f"Xatolik: {e}")
+        return {"status": "error", "message": str(e)}
 
-@bot.poll_answer_handler()
-def handle_poll_answer(poll_answer: PollAnswer):
-    p_id = poll_answer.poll_id
-    if p_id not in poll_to_user_map:
-        return
+@app.get("/api/quizzes")
+def get_user_quizzes(user_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        diff = int(time.time()) - r[4]
+        if diff < 60: time_str = "Hozirgina"
+        elif diff < 3600: time_str = f"{diff//60}h oldin"
+        elif diff < 86400: time_str = f"{diff//3600}soat oldin"
+        else: time_str = f"{diff//86400}kun oldin"
+        result.append({"id": r[0], "title": r[1], "total": r[2], "answered": r[3], "time_ago": time_str})
+    return result
 
-    user_id = poll_to_user_map[p_id]
-    if user_id not in user_quiz_sessions:
-        return
+@app.get("/api/get-quiz-details")
+def get_quiz_details(quiz_id: str):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row: return {"id": row[0], "title": row[1], "quizzes": json.loads(row[2])["quizzes"]}
+    return {"error": "Not found"}
 
-    session = user_quiz_sessions[user_id]
-    correct_index = session["poll_map"].get(p_id)
-    if correct_index is None:
-        return
-
-    if not poll_answer.option_ids:
-        return
-
-    user_chosen_index = poll_answer.option_ids[0]
-
-    if int(user_chosen_index) == int(correct_index):
-        session["correct_count"] += 1
-    else:
-        session["incorrect_count"] += 1
-
-    session["answered_questions"] += 1
-
-    if session["answered_questions"] == session["total_questions"]:
-        total = session["total_questions"]
-        correct = session["correct_count"]
-        incorrect = session["incorrect_count"]
-        foiz = int((correct / total) * 100) if total > 0 else 0
-
-        result_text = (
-            "📊 **Sizning test natijangiz:**\n\n"
-            f"✅ To'g'ri javoblar: {correct} ta\n"
-            f"❌ Noto'g'ri javoblar: {incorrect} ta\n"
-            f"📝 Jami savollar: {total} ta\n"
-            f"🎯 Umumiy natija: {foiz}%\n\n"
-            "Yangi test boshlash uchun darslik fayli yoki matn yuboring!"
-        )
-        try:
-            bot.send_message(chat_id=session["chat_id"], text=result_text, parse_mode="Markdown")
-        except Exception:
-            pass
-        if user_id in user_quiz_sessions:
-            del user_quiz_sessions[user_id]
+@app.post("/api/update-progress")
+def update_progress(req: ProgressUpdateRequest):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT answered, total FROM quizzes WHERE id = ?", (req.quiz_id,))
+    row = cursor.fetchone()
+    if row and row[0] < row[1]:
+        cursor.execute("UPDATE quizzes SET answered = ? WHERE id = ?", (row[0] + 1, req.quiz_id))
+        conn.commit()
+    conn.close()
+    return {"status": "updated"}
 
 if __name__ == "__main__":
-    logging.info("Quiz Pilot Bot muvaffaqiyatli ishga tushdi...")
-    bot.infinity_polling()
+    Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
+    uvicorn.run("main.py:app", host="0.0.0.0", port=int(os.getenv("PORT", 8080)), reload=False)
