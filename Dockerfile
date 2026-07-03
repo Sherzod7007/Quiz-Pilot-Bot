@@ -13,5 +13,5 @@ COPY . .
 
 EXPOSE 8080
 
-# Katta yangilanish: Bir vaqtning o'zida ham main.py veb-serverini, ham bot.py ni fonda mustaqil yoqadi!
-CMD python bot.py & python main.py
+# To'g'ri Linux buyrug'i: bot.py fonda (nohup bilan) mustaqil ketadi, main.py esa asosiy oqimda yonadi!
+CMD nohup python bot.py > bot.log 2>&1 & uvicorn main:app --host 0.0.0.0 --port 8080
