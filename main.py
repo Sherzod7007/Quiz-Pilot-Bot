@@ -14,7 +14,7 @@ from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,25 +38,8 @@ def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    # Testlar jadvali
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS quizzes (
-            id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            title TEXT,
-            total INTEGER,
-            answered INTEGER,
-            quiz_json TEXT,
-            created_at INTEGER
-        )
-    ''')
-    # Foydalanuvchilar jadvali
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            created_at INTEGER
-        )
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (id TEXT PRIMARY KEY, user_id INTEGER, title TEXT, total INTEGER, answered INTEGER, quiz_json TEXT, created_at INTEGER)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, created_at INTEGER)''')
     conn.commit()
     conn.close()
 
@@ -84,17 +67,14 @@ def add_user_to_db(user_id: int):
         conn.commit()
         conn.close()
     except Exception as e:
-        logging.error(f"Foydalanuvchini qo'shishda xato: {e}")
+        logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
 def get_side_by_side_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
     url = os.getenv("WEBAPP_URL", "")
     if url:
         url = url if url.startswith("http") else f"https://{url}"
-        markup.add(
-            types.KeyboardButton('/start'),
-            types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
-        )
+        markup.add(types.KeyboardButton('/start'), types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
     else:
         markup.add(types.KeyboardButton('/start'))
     return markup
@@ -106,10 +86,7 @@ def send_welcome(message):
         try:
             url = os.getenv("WEBAPP_URL")
             url = url if url.startswith("http") else f"https://{url}"
-            bot.set_chat_menu_button(
-                chat_id=message.chat.id,
-                menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url))
-            )
+            bot.set_chat_menu_button(chat_id=message.chat.id, menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
         except Exception as e:
             logging.error(f"Menu xatosi: {e}")
     
@@ -130,19 +107,13 @@ def send_admin_stats(message):
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
+        u_count = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM quizzes")
-        total_quizzes = cursor.fetchone()[0]
+        q_count = cursor.fetchone()[0]
         conn.close()
-        
-        bot.send_message(
-            message.chat.id,
-            f"📊 **Quiz Pilot Loyihasi Statistikasi:**\n\n"
-            f"👤 Jami foydalanuvchilar: **{total_users} ta**\n"
-            f"📝 Jami yaratilgan testlar: **{total_quizzes} ta**"
-        )
+        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count} ta**\n📝 Jami yaratilgan testlar: **{q_count} ta**")
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Statistikani yuklashda xato: {e}")
+        bot.send_message(message.chat.id, f"❌ Statistikani olishda xato: {e}")
 
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
@@ -165,12 +136,7 @@ def generate_quiz_from_gemini(extracted_text):
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=extracted_text[:80000],
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=QuizResponse,
-                    temperature=0.6
-                )
+                config=genai_types.GenerateContentConfig(system_instruction=system_instruction, response_mime_type="application/json", response_schema=QuizResponse, temperature=0.6)
             )
             if response and response.text: return response.text
         except Exception as e:
@@ -209,11 +175,7 @@ def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/api/create-quiz-web")
-async def create_quiz_web(
-    user_id: int = Form(...),
-    text: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None)
-):
+async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
     add_user_to_db(user_id)
     raw_text = ""
     title = "Matnli Test"
@@ -255,8 +217,7 @@ async def create_quiz_web(
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                       (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
+        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
         conn.commit()
         conn.close()
 
@@ -270,4 +231,11 @@ async def create_quiz_web(
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
-    try:
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
