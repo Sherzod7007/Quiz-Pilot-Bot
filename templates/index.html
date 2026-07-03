@@ -24,17 +24,9 @@
             -webkit-user-select: none; user-select: none;
         }
         .header h1 { font-size: 26px; margin: 0 0 15px 0; font-weight: 700; }
-        
-        /* Tabs */
         .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-        .tab {
-            background: #24242b; border: none; padding: 10px 16px;
-            border-radius: 20px; color: var(--text-hint); font-weight: 600;
-            font-size: 14px; cursor: pointer; flex: 1; text-align: center;
-        }
+        .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
         .tab.active { background: var(--accent-blue); color: #fff; }
-
-        /* Quiz Cards */
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
         .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
@@ -42,42 +34,22 @@
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
         .badge-new { background: var(--accent-blue); color: white; padding: 4px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; }
-        
-        /* Progress */
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
         .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; }
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
-
         .circle-progress { position: relative; width: 42px; height: 42px; }
         .circle-progress svg { width: 42px; height: 42px; transform: rotate(-90deg); }
         .circle-progress circle { fill: none; stroke-width: 4; }
         .circle-bg { stroke: #2c2c35; }
         .circle-val { stroke-linecap: round; transition: stroke-dashoffset 0.3s; }
         .circle-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 11px; font-weight: bold; }
-
-        /* Screens */
         .screen { display: none; }
         .screen.active { display: block; }
-
-        /* Create Screen Styles */
-        .upload-box {
-            border: 2px dashed var(--border-color); border-radius: 20px;
-            padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg);
-            margin-bottom: 20px; color: var(--text-hint);
-        }
+        .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
         .upload-box:hover { border-color: var(--accent-blue); }
-        .input-text {
-            width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color);
-            border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px;
-        }
-        .submit-btn {
-            background: var(--accent-blue); color: #fff; border: none; width: 100%;
-            padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer;
-        }
-        .submit-btn:disabled { background: #3a3a44; color: var(--text-hint); }
-
-        /* Game Screen */
+        .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
+        .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
         #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
         .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
         .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
@@ -87,24 +59,16 @@
         .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
         .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-
-        /* Bottom Nav */
-        .bottom-nav {
-            position: fixed; bottom: 0; left: 0; right: 0; height: 75px;
-            background: #16161a; display: flex; justify-content: space-around;
-            border-top: 1px solid var(--border-color); align-items: center; z-index: 99;
-        }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-item.active { color: var(--accent-blue); }
         .nav-icon { font-size: 20px; margin-bottom: 4px; }
-        
-        /* Loader */
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <!-- 1. YARATISH SAHIFASI -->
+    <!-- YARATISH SAHIFASI -->
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -118,7 +82,7 @@
         <div id="loading-status" class="loader">⏳ Sun'iy intellekt darslikni o'qib test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- 2. KUTUBXONA SAHIFASI -->
+    <!-- KUTUBXONA SAHIFASI -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div class="tabs">
@@ -131,7 +95,7 @@
         </div>
     </div>
 
-    <!-- TEST PROGRAMMA OYNASI -->
+    <!-- PLAY TEST GAME SCREEN -->
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -170,3 +134,17 @@
                 document.getElementById('create-screen').classList.add('active');
                 document.getElementById('nav-create').classList.add('active');
             } else {
+                document.getElementById('library-screen').classList.add('active');
+                document.getElementById('nav-library').classList.add('active');
+                loadQuizzes();
+            }
+        }
+
+        function fileSelected(input) {
+            if(input.files.length > 0) {
+                selectedFile = input.files[0];
+                document.getElementById('upload-text').innerText = "Tanlandi: " + selectedFile.name;
+            }
+        }
+
+        async function startGeneration() {
