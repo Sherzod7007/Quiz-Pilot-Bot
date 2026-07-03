@@ -144,15 +144,6 @@ Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik b
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-def run_bot_safe():
-    try:
-        bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(2)
-        logging.info("🚀 Bot Active Polling oqimi muvaffaqiyatli boshlandi!")
-        bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
-    except Exception as e:
-        logging.error(f"Bot oqimida kutilmagan xato: {e}")
-
 app = FastAPI()
 
 app.add_middleware(
@@ -162,12 +153,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-def startup_event():
-    # Faqat bitta jarayon ishlashini ta'minlash uchun xavfsiz Thread ochamiz
-    bot_thread = Thread(target=run_bot_safe, daemon=True)
-    bot_thread.start()
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
@@ -238,3 +223,17 @@ def get_user_quizzes(user_id: int):
     rows = cursor.fetchall()
     conn.close()
     quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
+    return {"status": "ok", "quizzes": quizzes}
+
+@app.get("/api/quiz-detail")
+def get_quiz_detail(quiz_id: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+    raise HTTPException(status_code=404, detail="Test topilmadi")
