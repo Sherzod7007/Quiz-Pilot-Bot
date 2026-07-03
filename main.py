@@ -107,11 +107,11 @@ def send_admin_stats(message):
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("SELECT COUNT(*) FROM users")
-        u_count = cursor.fetchone()[0]
+        u_count = cursor.fetchone()
         cursor.execute("SELECT COUNT(*) FROM quizzes")
-        q_count = cursor.fetchone()[0]
+        q_count = cursor.fetchone()
         conn.close()
-        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count} ta**\n📝 Jami yaratilgan testlar: **{q_count} ta**")
+        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count[0]} ta**\n📝 Jami yaratilgan testlar: **{q_count[0]} ta**")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Statistikani olishda xato: {e}")
 
@@ -147,11 +147,12 @@ def generate_quiz_from_gemini(extracted_text):
 def run_bot_safe():
     while True:
         try:
-            bot.remove_webhook()
-            bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
+            # 409 xatolarini majburiy bartaraf etish uchun barcha eski Pollinglarni o'chiramiz
+            bot.delete_webhook(drop_pending_updates=True)
+            bot.polling(none_stop=True, timeout=10, long_polling_timeout=10, skip_pending_updates=True)
         except Exception as e:
             logging.error(f"Bot Polling qulflanish xatosi: {e}")
-            time.sleep(3)
+            time.sleep(5)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -238,4 +239,3 @@ def get_user_quizzes(user_id: int):
     cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
