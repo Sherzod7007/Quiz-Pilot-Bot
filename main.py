@@ -67,7 +67,6 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
-# Konflikt yaratmasligi uchun FastAPI ichida barcha polling oqimlari (Thread/lifespan) butunlay o'chirildi
 app = FastAPI()
 
 app.add_middleware(
@@ -148,7 +147,7 @@ def generate_quiz_from_gemini(extracted_text):
 Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
 Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
 Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
-Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
+Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan vi xil bo'lsin."""
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -201,26 +200,16 @@ def get_quiz_detail(quiz_id: str):
 
 @app.post("/api/update-progress")
 def update_progress(data: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET answered = total WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-@app.get("/api/stats")
-def get_web_stats():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT COUNT(*) FROM users")
-    u_count = cursor.fetchone()
-    cursor.execute("SELECT COUNT(*) FROM quizzes")
-    q_count = cursor.fetchone()
-    conn.close()
-    return {"status": "ok", "total_users": u_count, "total_quizzes": q_count}
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("UPDATE quizzes SET answered = answered + 1 WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
