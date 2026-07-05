@@ -100,8 +100,8 @@
     </div>
 
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <button class="nav-item btn-nav-create" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
+        <button class="nav-item active btn-nav-library" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
         <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
         <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
@@ -126,10 +126,10 @@
             
             if(screen === 'create') {
                 document.getElementById('create-screen').classList.add('active');
-                document.getElementById('nav-create').classList.add('active');
+                document.querySelector('.btn-nav-create').classList.add('active');
             } else if(screen === 'library') {
                 document.getElementById('library-screen').classList.add('active');
-                document.getElementById('nav-library').classList.add('active');
+                document.querySelector('.btn-nav-library').classList.add('active');
                 loadQuizzes();
             }
         }
