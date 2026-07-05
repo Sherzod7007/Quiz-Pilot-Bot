@@ -54,12 +54,10 @@
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         
-        /* Navigatsiya ranglari sozlamasi */
         .nav-item.active { color: var(--accent-blue); }
-        /* Faqat faol rejimda Yaratish bo'limidagi + ikonkasini sariq qiladi */
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); transition: color 0.2s; }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
@@ -117,7 +115,6 @@
         tg.ready(); tg.expand();
         tg.setHeaderColor('#121214');
 
-        // Brauzer domenini avtomatik to'liq aniqlash (Telegram xavfsizlik qoidasi uchun)
         const BASE_URL = window.location.origin;
 
         let userId = 99999; 
@@ -142,3 +139,6 @@
                 const container = document.getElementById('quiz-list');
                 if (!container) return;
                 container.innerHTML = "";
+                
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
