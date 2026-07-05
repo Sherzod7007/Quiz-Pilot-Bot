@@ -156,11 +156,15 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
-    system_instruction = """Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz.
-Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
-Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
-Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
-Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
+    # Majburiy til qoidasi va qat'iy tizim buyrug'i
+    system_instruction = """You are an advanced AI quiz generator. Your main goal is to create test questions based STRICTLY on the language of the input text.
+CRITICAL LANGUAGE RULE: 
+- Detect the language of the provided textbook/text.
+- You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
+- If the input text is in English, the questions, options (A, B, C, D), and explanation MUST BE IN ENGLISH. Do NOT translate into Uzbek or Russian.
+- If the input text is in Uzbek, everything must be in Uzbek.
+
+Task: Create 50 unique multiple-choice questions based on the text. Each question must have 1 correct answer and 3 incorrect options. Prefix each option with 'A) ', 'B) ', 'C) ', 'D) '. Write a scientific, brief explanation for the correct choice inside the explanation field (in the same language as the quiz)."""
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -176,7 +180,7 @@ Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik b
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=QuizResponse,
-                    temperature=0.6
+                    temperature=0.3
                 )
             )
             if response and response.text: return response.text
