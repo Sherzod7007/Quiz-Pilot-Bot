@@ -55,19 +55,18 @@
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         
-        /* Faqat faol bo'limdagi matn rangini belgilaydi */
         .nav-item.active { color: var(--accent-blue); }
-        /* Faqat faol rejimda Yaratish bo'limidagi + ikonkasining o'zini sariq qiladi */
-        .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
+        /* Yaratish bo'limi tugmasining + ikonkasini har doim yorqin sariq qilish sozlamasi */
+        #nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
 <body>
 
     <!-- YARATISH -->
-    <div id="create-screen" class="screen active">
+    <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
@@ -81,7 +80,7 @@
     </div>
 
     <!-- KUTUBXONA -->
-    <div id="library-screen" class="screen">
+    <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div class="tabs">
             <button class="tab active">❓ Testlar</button>
@@ -107,8 +106,8 @@
     </div>
 
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item active" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
-        <button id="nav-library" class="nav-item" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
         <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
         <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
@@ -143,3 +142,4 @@
                 if (!container) return;
                 container.innerHTML = "";
                 
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
