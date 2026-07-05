@@ -4,7 +4,6 @@ import json
 import os
 import time
 import sqlite3
-from threading import Thread
 from pypdf import PdfReader
 import docx
 import telebot
@@ -18,7 +17,6 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -69,82 +67,6 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
-def get_side_by_side_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
-    url = os.getenv("WEBAPP_URL", "")
-    if url:
-        url = url if url.startswith("http") else f"https://{url}"
-        markup.add(types.KeyboardButton('/start'), types.KeyboardButton(text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
-    else:
-        markup.add(types.KeyboardButton('/start'))
-    return markup
-
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    add_user_to_db(message.from_user.id)
-    if os.getenv("WEBAPP_URL"):
-        try:
-            url = os.getenv("WEBAPP_URL")
-            url = url if url.startswith("http") else f"https://{url}"
-            bot.set_chat_menu_button(chat_id=message.chat.id, menu_button=types.MenuButtonWebApp(type="web_app", text="Ilovani ochish 🚀", web_app=types.WebAppInfo(url=url)))
-        except Exception as e:
-            logging.error(f"Menu xatosi: {e}")
-    
-    user_name = message.from_user.first_name
-    bot.send_message(
-        message.chat.id, 
-        f"👋 Salom, {user_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n⚡ **Yangi Yangilanish:**\n🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!",
-        reply_markup=get_side_by_side_keyboard()
-    )
-
-@bot.message_handler(commands=['admin'])
-def send_admin_stats(message):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT COUNT(*) FROM users")
-        u_count = cursor.fetchone()
-        cursor.execute("SELECT COUNT(*) FROM quizzes")
-        q_count = cursor.fetchone()
-        conn.close()
-        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count} ta**\n📝 Jami yaratilgan testlar: **{q_count} ta**")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Statistikani olishda xato: {e}")
-
-def generate_quiz_from_gemini(extracted_text):
-    global current_key_index
-    if not GOOGLE_API_KEYS: return None
-
-    system_instruction = """Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz.
-Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
-Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
-Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
-Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
-
-    for _ in range(len(GOOGLE_API_KEYS)):
-        api_key = GOOGLE_API_KEYS[current_key_index].strip()
-        if not api_key:
-            current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-            continue
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=extracted_text[:80000],
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=QuizResponse,
-                    temperature=0.6
-                )
-            )
-            if response and response.text: return response.text
-        except Exception as e:
-            logging.error(f"Gemini API xatosi: {e}")
-        current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-    return None
-
 app = FastAPI()
 
 app.add_middleware(
@@ -157,7 +79,11 @@ app.add_middleware(
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    response = templates.TemplateResponse("index.html", {"request": request})
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
@@ -165,7 +91,7 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
     raw_text = ""
     title = "Matnli Test"
     
-    if file:
+    if file and file.filename:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         file_path = os.path.join(DOWNLOADS_DIR, file.filename)
         with open(file_path, "wb") as f:
@@ -206,12 +132,47 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
         conn.commit()
         conn.close()
 
-        try: bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
-        except: pass
+        try: 
+            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+        except: 
+            pass
 
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+def generate_quiz_from_gemini(extracted_text):
+    global current_key_index
+    if not GOOGLE_API_KEYS: return None
+
+    system_instruction = """Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz.
+Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
+Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
+Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
+Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
+
+    for _ in range(len(GOOGLE_API_KEYS)):
+        api_key = GOOGLE_API_KEYS[current_key_index].strip()
+        if not api_key:
+            current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            continue
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=extracted_text[:80000],
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=QuizResponse,
+                    temperature=0.6
+                )
+            )
+            if response and response.text: return response.text
+        except Exception as e:
+            logging.error(f"Gemini API xatosi: {e}")
+        current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+    return None
 
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
@@ -237,3 +198,17 @@ def get_quiz_detail(quiz_id: str):
     conn.close()
     if row:
         return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+    raise HTTPException(status_code=404, detail="Test topilmadi")
+
+@app.post("/api/update-progress")
+def update_progress(data: ProgressUpdateRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("UPDATE quizzes SET answered = answered + 1 WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
