@@ -7,7 +7,6 @@ import sqlite3
 from pypdf import PdfReader
 import docx
 import telebot
-from telebot import types
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
@@ -36,8 +35,26 @@ def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (id TEXT PRIMARY KEY, user_id INTEGER, title TEXT, total INTEGER, answered INTEGER, quiz_json TEXT, created_at INTEGER)''')
+    # last_score va last_percent ustunlari jadvalda borligini tekshirish va yaratish
+    cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
+                        id TEXT PRIMARY KEY, 
+                        user_id INTEGER, 
+                        title TEXT, 
+                        total INTEGER, 
+                        answered INTEGER, 
+                        quiz_json TEXT, 
+                        created_at INTEGER,
+                        last_score INTEGER DEFAULT -1,
+                        last_percent INTEGER DEFAULT -1)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, created_at INTEGER)''')
+    
+    # Agar eski jadval bo'lsa, ustunlarni qo'shib qo'yamiz xatolik bermasligi uchun
+    try:
+        cursor.execute("ALTER TABLE quizzes ADD COLUMN last_score INTEGER DEFAULT -1")
+        cursor.execute("ALTER TABLE quizzes ADD COLUMN last_percent INTEGER DEFAULT -1")
+    except:
+        pass
+        
     conn.commit()
     conn.close()
 
@@ -45,9 +62,9 @@ init_db()
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
-    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida")
+    options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz: A), B) qo'shmang)")
+    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami (0 dan 3 gacha)")
+    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
@@ -55,6 +72,8 @@ class QuizResponse(BaseModel):
 class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
+    correct_count: int
+    percent: int
 
 def add_user_to_db(user_id: int):
     try:
@@ -122,11 +141,11 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
         title = text[:15] + "..."
 
     if not raw_text.strip():
-        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi. Iltimos matn kiriting yoki fayl yuklang."}
+        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI test generatsiya qila olmadi. Kalitlarni yoki matnni tekshiring."}
+        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -139,12 +158,13 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
+        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                       (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
         conn.commit()
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+            bot.send_message(user_id, f"🎉 Test tayyorlandi! Jami: {len(items)} ta savol.")
         except Exception as e: 
             logging.error(f"Telegram xabari yuborilmadi: {e}")
 
@@ -156,15 +176,13 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
-    # Majburiy til qoidasi va qat'iy tizim buyrug'i
-    system_instruction = """You are an advanced AI quiz generator. Your main goal is to create test questions based STRICTLY on the language of the input text.
-CRITICAL LANGUAGE RULE: 
-- Detect the language of the provided textbook/text.
-- You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-- If the input text is in English, the questions, options (A, B, C, D), and explanation MUST BE IN ENGLISH. Do NOT translate into Uzbek or Russian.
-- If the input text is in Uzbek, everything must be in Uzbek.
+    # Savollar sonini qat'iy cheklash qoidasi kiritildi
+    system_instruction = """You are an advanced AI quiz generator. 
+CRITICAL RULES:
+1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text. If the input text is in English, EVERYTHING must be in English. No Uzbek translations allowed for English text!
+2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions (e.g., 5, 10, or 15 questions), you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. Do NOT generate extra questions, do NOT inflate the count to 50 if the text only contains a few questions. Format ONLY what is given. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
 
-Task: Create 50 unique multiple-choice questions based on the text. Each question must have 1 correct answer and 3 incorrect options. Prefix each option with 'A) ', 'B) ', 'C) ', 'D) '. Write a scientific, brief explanation for the correct choice inside the explanation field (in the same language as the quiz)."""
+Task: Create a multiple-choice quiz based on the text. Each question must have exactly 4 choices (1 correct, 3 incorrect). Do NOT prefix options with letters like A), B), C), D) inside the JSON array. Write a brief explanation for the correct choice inside the explanation field."""
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -180,12 +198,12 @@ Task: Create 50 unique multiple-choice questions based on the text. Each questio
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=QuizResponse,
-                    temperature=0.3
+                    temperature=0.2
                 )
             )
             if response and response.text: return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatosi (Key index {current_key_index}): {e}")
+            logging.error(f"Gemini API xatosi: {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
@@ -196,10 +214,18 @@ def get_user_quizzes(user_id: int):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
+    quizzes = [{
+        "id": r["id"], 
+        "title": r["title"], 
+        "total": r["total"], 
+        "answered": r["answered"], 
+        "created_at": r["created_at"],
+        "last_score": r["last_score"],
+        "last_percent": r["last_percent"]
+    } for r in rows]
     return {"status": "ok", "quizzes": quizzes}
 
 @app.get("/api/quiz-detail")
@@ -220,23 +246,12 @@ def update_progress(data: ProgressUpdateRequest):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET answered = total WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
+    # Har gal test yopilganda oxirgi natijalarni yozib ketadi
+    cursor.execute("UPDATE quizzes SET answered = total, last_score = ?, last_percent = ? WHERE id = ? AND user_id = ?", 
+                   (data.correct_count, data.percent, data.quiz_id, data.user_id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
-@app.get("/api/stats")
-def get_web_stats():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT COUNT(*) FROM users")
-    u_count = cursor.fetchone()
-    cursor.execute("SELECT COUNT(*) FROM quizzes")
-    q_count = cursor.fetchone()
-    conn.close()
-    return {"status": "ok", "total_users": u_count[0] if u_count else 0, "total_quizzes": q_count[0] if q_count else 0}
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
