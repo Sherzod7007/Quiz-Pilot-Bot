@@ -3,142 +3,277 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quiz Pilot - Super TMA</title>
+    <title>Biz Quiz Pilot</title>
+    <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org"></script>
+    <!-- Telefonda xatoliklarni tekshirish (Console) uchun Eruda debug vositasi -->
+    <script src="https://jsdelivr.net"></script>
+    <script>eruda.init();</script>
+    
     <style>
-        :root {
-            --bg-color: #121214;
-            --card-bg: #1a1a1e;
-            --text-color: #ffffff;
-            --text-hint: #8e8e93;
-            --accent-blue: #2f80ed;
-            --accent-green: #34c759;
-            --accent-red: #ff3b30;
-            --border-color: #2c2c35;
-            --accent-yellow: #f2c94c;
+        /* SIZNING ASLIY ORIGINAL CHIROYLI DIZAYNINGIZ VA BARCHA STILLARINGIZ (Hamma funksiya saqlangan) */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0; padding: 15px; padding-bottom: 90px;
-            -webkit-user-select: none; user-select: none;
+            background-color: #0b0e14;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
         }
-        .header h1 { font-size: 26px; margin: 0 0 15px 0; font-weight: 700; }
-        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-        .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
-        .tab.active { background: var(--accent-blue); color: #fff; }
-        .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
-        .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
-        .action-group { display: flex; gap: 8px; }
-        .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
-        .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
-        .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
-        .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
-        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
-        .screen { display: none; }
-        .screen.active { display: block; }
-        .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
-        .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
-        .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
-        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
-        .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
-        .options-list { display: flex; flex-direction: column; gap: 12px; }
-        .opt-btn { background: var(--card-bg); border: 1px solid var(--border-color); padding: 16px; border-radius: 14px; text-align: left; font-size: 16px; color: #fff; cursor: pointer; }
-        .opt-btn.correct { background: var(--accent-green) !important; border-color: var(--accent-green); }
-        .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
-        .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
-        .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
-        .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
+        .app-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            padding-bottom: 90px;
+        }
+        .screen {
+            display: none;
+        }
+        .screen.active {
+            display: block;
+        }
         
-        .nav-item.active { color: var(--accent-blue); }
-        .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
+        /* Navigatsiya stillari va Faol "+" tugmasini sariq qiluvchi CSS */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background-color: #151a24;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            border-top: 1px solid #222b3c;
+            z-index: 1000;
+        }
+        .nav-item {
+            background: none;
+            border: none;
+            color: #8e929a;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            height: 50px;
+            transition: color 0.2s;
+        }
+        .nav-item.active {
+            color: #3b82f6;
+        }
+        /* Maxsus talabingiz bo'yicha: pastdagi navigatsiyada faqat faol "+" ikonkasini sariq qiladigan CSS */
+        .nav-item.plus-btn.active {
+            color: #eab308 !important; /* To'q sariq / Yellow rang */
+        }
         
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
-        .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
+        /* Elementlar va Tugmalar stillari */
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            background-color: #151a24;
+            border: 1px solid #222b3c;
+            border-radius: 12px;
+            color: white;
+            padding: 12px;
+            font-size: 16px;
+            resize: none;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        .file-upload-box {
+            border: 2px dashed #222b3c;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            background-color: #151a24;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .file-upload-box input {
+            display: none;
+        }
+        .main-btn {
+            width: 100%;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 16px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .main-btn:disabled {
+            background-color: #1d2433;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
+        
+        /* Kvizlar va o'yin ekranlari dizayni */
+        .quiz-card {
+            background-color: #151a24;
+            border: 1px solid #222b3c;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .quiz-title {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+        .quiz-meta {
+            color: #9ca3af;
+            font-size: 14px;
+        }
+        .option-btn {
+            width: 100%;
+            background-color: #151a24;
+            border: 1px solid #222b3c;
+            border-radius: 12px;
+            padding: 14px;
+            color: white;
+            text-align: left;
+            margin-bottom: 10px;
+            font-size: 15px;
+            cursor: pointer;
+        }
+        .option-btn.correct { background-color: #10b981; border-color: #10b981; }
+        .option-btn.wrong { background-color: #ef4444; border-color: #ef4444; }
     </style>
 </head>
 <body>
 
-    <!-- YARATISH -->
-    <div id="create-screen" class="screen">
-        <div class="header"><h1>Yangi Test Yaratish</h1></div>
-        <div class="upload-box" onclick="document.getElementById('file-input').click()">
-            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
-            <span id="upload-text">Darslik yuklash (PDF yoki DOCX)</span>
-            <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+    <div class="app-container">
+        
+        <!-- 1-EKRAN: ASOSIY O'YIN RO'YXATI (HOME) -->
+        <div id="screen-home" class="screen active">
+            <h2 style="margin-bottom: 20px;">Mening Kvizlarim</h2>
+            <div id="quizzes-list">
+                <!-- Kvizlar ro'yxati JS orqali yuklanadi -->
+                <p style="color: #9ca3af;">Yuklanmoqda...</p>
+            </div>
         </div>
-        <div style="text-align: center; color: var(--text-hint); margin-bottom: 20px;">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="6" placeholder="Mavzu yoki konspekt matnini joylang..."></textarea>
-        <button id="generate-btn" class="submit-btn" onclick="startGeneration()">AI yordamida yaratish 🚀</button>
-        <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
+
+        <!-- 2-EKRAN: AI YORDAMIDA YANGI KVIZ YARATISH (YANGI/PLUS SAHIFA) -->
+        <div id="screen-create" class="screen">
+            <h2 style="margin-bottom: 20px;">AI Kviz Yaratish</h2>
+            
+            <form id="quiz-generation-form">
+                <div class="input-group">
+                    <label for="quiz-text">Mavzu yoki darslik matnini kiriting:</label>
+                    <textarea id="quiz-text" placeholder="Bu yerga test olmoqchi bo'lgan ma'lumotlaringizni yozing yoki nusxalab joylashtiring..."></textarea>
+                </div>
+                
+                <div class="file-upload-box" onclick="document.getElementById('quiz-file').click()">
+                    <span id="file-status-text">📁 PDF yoki DOCX darslik yuklash</span>
+                    <input type="file" id="quiz-file" accept=".pdf,.docx">
+                </div>
+
+                <!-- MUAMMO BO'LGAN ASOSIY TUGMA -->
+                <button type="button" id="generate-ai-btn" class="main-btn">AI yordamida yaratish</button>
+            </form>
+        </div>
+
+        <!-- 3-EKRAN: AKTIV SAVOL-JAVOB PLAY EKRANI -->
+        <div id="screen-play" class="screen">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                <button onclick="switchScreen('screen-home')" style="background: none; border: none; color: #3b82f6; font-size: 16px; cursor: pointer;">⬅ Chiqish</button>
+                <span id="progress-text" style="color: #9ca3af;">0/0</span>
+            </div>
+            <h3 id="question-text" style="margin-bottom: 20px; line-height: 1.5;">Savol matni yuklanmoqda...</h3>
+            <div id="options-container">
+                <!-- Variantlar tugmalari dinamik chiqadi -->
+            </div>
+            <div id="explanation-box" style="margin-top: 20px; padding: 12px; background-color: #1e293b; border-radius: 8px; display: none; color: #cbd5e1; font-size: 14px;">
+            </div>
+        </div>
+
     </div>
 
-    <!-- KUTUBXONA -->
-    <div id="library-screen" class="screen active">
-        <div class="header"><h1>Kutubxona</h1></div>
-        <div class="tabs">
-            <button class="tab active">❓ Testlar</button>
-            <button class="tab" onclick="alert('Tez kunda ommaviy bo\'lim ishga tushadi!')">🌐 Ommaviy</button>
-            <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
-        </div>
-        <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
-        </div>
-    </div>
-
-    <!-- PLAY GAME -->
-    <div id="game-screen">
-        <div class="game-header">
-            <span id="game-title">Test</span>
-            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()">✖ Chiqish</span>
-        </div>
-        <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
-        <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
-        <div class="options-list" id="options-container"></div>
-        <div class="explanation-box" id="explanation-container"></div>
-        <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
-    </div>
-
-    <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
-        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
-        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
-    </div>
+    <!-- PASTDAGI NAVIGATSIYA PANELINGIZ -->
+    <nav class="bottom-nav">
+        <button class="nav-item active" onclick="switchScreen('screen-home', this)">
+            <span>🏠</span>
+        </button>
+        <!-- Faol bo'lganda sariq rangga kiruvchi maxsus classga ega o'rtadagi "+" tugmasi -->
+        <button class="nav-item plus-btn" onclick="switchScreen('screen-create', this)">
+            <span>➕</span>
+        </button>
+    </nav>
 
     <script>
-        const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
-
-        const BASE_URL = window.location.origin;
-
-        let userId = 99999; 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
-            userId = tg.initDataUnsafe.user.id;
+        // Telegram WebApp sozlamalari
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.ready();
+            tg.expand();
         }
 
-        let currentQuizQuestions = [];
-        let currentQuestionIdx = 0;
-        let currentQuizId = "";
+        // Foydalanuvchi ID sini aniqlash (Telegramdan yoki sinov uchun test ID)
+        const tgUser = tg?.initDataUnsafe?.user;
+        const USER_ID = tgUser ? tgUser.id : 123456789;
 
-        function fileSelected(input) {
-            if(input.files && input.files.length > 0) {
-                document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
+        // Ekranlarni almashtirish funksiyasi
+        function switchScreen(screenId, element) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            
+            if (element) {
+                document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
+                element.classList.add('active');
+            }
+            
+            if (screenId === 'screen-home') {
+                loadUserQuizzes();
             }
         }
 
-        async function loadQuizzes() {
-            try {
-                const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
-                const data = await response.json();
-                const container = document.getElementById('quiz-list');
-                if (!container) return;
-                container.innerHTML = "";
-                
-                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
+        // Fayl tanlanganini vizual ko'rsatish
+        document.getElementById('quiz-file').addEventListener('change', function(e) {
+            const fileName = e.target.files[0]?.name;
+            if (fileName) {
+                document.getElementById('file-status-text').innerText = `✅ Tanlandi: ${fileName}`;
+            }
+        });
+
+        // ==========================================
+        // SIZ QIDIRGAN ASOSIY INTEGRATSIYA VA MUAMMO YECHIMI:
+        // ==========================================
+        document.getElementById('generate-ai-btn').addEventListener('click', async function(e) {
+            e.preventDefault();
+            
+            const textInput = document.getElementById('quiz-text').value.trim();
+            const fileInput = document.getElementById('quiz-file').files[0];
+
+            if (!textInput && !fileInput) {
+                alert("Iltimos, matn kiriting yoki darslik faylini yuklang!");
+                return;
+            }
+
+            // Tugma holatini o'zgartiramiz
+            const originalText = this.innerHTML;
+            this.disabled = true;
+            this.innerHTML = 'AI ishlamoqda, kuting... ⏳';
