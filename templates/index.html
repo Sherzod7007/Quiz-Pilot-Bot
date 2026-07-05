@@ -15,6 +15,7 @@
             --accent-green: #34c759;
             --accent-red: #ff3b30;
             --border-color: #2c2c35;
+            --accent-yellow: #f2c94c; /* Yorqin sariq rang */
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -52,7 +53,9 @@
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
-        .nav-item.active { color: var(--accent-blue); }
+        /* Faol rejimda Yaratish tugmasini yorqin sariq qilish */
+        .nav-item.active#nav-create { color: var(--accent-yellow); }
+        .nav-item.active#nav-library { color: var(--accent-blue); }
         .nav-icon { font-size: 20px; margin-bottom: 4px; }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
@@ -100,7 +103,6 @@
     </div>
 
     <div class="bottom-nav">
-        <!-- Inline buyruqlar qo'shildi, keshni chetlab o'tib to'g'ridan-to'g'ri ekran elementini boshqaradi -->
         <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
         <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
@@ -138,4 +140,3 @@
                 if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
                         const pct = quiz.total > 0 ? Math.round((quiz.answered / quiz.total) * 100) : 0;
-                        const card = document.createElement('div');
