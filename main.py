@@ -67,6 +67,7 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
+# Konflikt yaratmasligi uchun FastAPI ichida barcha polling oqimlari (Thread/lifespan) butunlay o'chirildi
 app = FastAPI()
 
 app.add_middleware(
@@ -91,7 +92,7 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
     raw_text = ""
     title = "Matnli Test"
     
-    if file and file.filename:
+    if file:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         file_path = os.path.join(DOWNLOADS_DIR, file.filename)
         with open(file_path, "wb") as f:
@@ -132,10 +133,8 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
         conn.commit()
         conn.close()
 
-        try: 
-            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
-        except: 
-            pass
+        try: bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+        except: pass
 
         return {"status": "ok"}
     except Exception as e:
@@ -205,10 +204,23 @@ def update_progress(data: ProgressUpdateRequest):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET answered = answered + 1 WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
+    cursor.execute("UPDATE quizzes SET answered = total WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
+@app.get("/api/stats")
+def get_web_stats():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT COUNT(*) FROM users")
+    u_count = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM quizzes")
+    q_count = cursor.fetchone()
+    conn.close()
+    return {"status": "ok", "total_users": u_count, "total_quizzes": q_count}
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
