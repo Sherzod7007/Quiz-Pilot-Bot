@@ -58,6 +58,7 @@
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
@@ -124,13 +125,16 @@
         let currentQuizId = "";
         let isAnswered = false;
 
+        // Statisika uchun yangi global o'zgaruvchilar
+        let correctAnswersCount = 0;
+        let wrongAnswersCount = 0;
+
         function fileSelected(input) {
             if(input.files && input.files.length > 0) {
                 document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
             }
         }
 
-        // --- TEST GENERATSIYA QILISH (TUGMANING ASOSIY FUNKSIYASI) ---
         async function startGeneration() {
             const textInput = document.getElementById('text-input').value.trim();
             const fileInput = document.getElementById('file-input');
@@ -163,7 +167,6 @@
                     fileInput.value = "";
                     document.getElementById('upload-text').innerText = "Darslik yuklash (PDF yoki DOCX)";
                     
-                    // Avtomatik ravishda kutubxona bo'limiga o'tkazish
                     document.getElementById('create-screen').classList.remove('active');
                     document.getElementById('library-screen').classList.add('active');
                     document.getElementById('nav-create').classList.remove('active');
@@ -181,7 +184,6 @@
             }
         }
 
-        // --- KUTUBXONANI YUKLASH ---
         async function loadQuizzes() {
             try {
                 const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
@@ -223,7 +225,6 @@
             }
         }
 
-        // --- TESTNI BOSHLASH (O'YIN REJIMi) ---
         async function playQuiz(quizId) {
             try {
                 const response = await fetch(BASE_URL + '/api/quiz-detail?quiz_id=' + quizId);
@@ -232,6 +233,11 @@
                     currentQuizId = quizId;
                     currentQuizQuestions = data.quiz_json.quizzes;
                     currentQuestionIdx = 0;
+                    
+                    // Har safar o'yin boshlanganda hisoblagichlarni nollash
+                    correctAnswersCount = 0;
+                    wrongAnswersCount = 0;
+
                     document.getElementById('game-screen').style.display = 'block';
                     showQuestion();
                 } else {
@@ -275,8 +281,10 @@
 
             if (idx === correctIdx) {
                 btn.classList.add('correct');
+                correctAnswersCount++; // To'g'ri javobni oshirish
             } else {
                 btn.classList.add('wrong');
+                wrongAnswersCount++; // Noto'g'ri javobni oshirish
                 if (buttons[correctIdx]) {
                     buttons[correctIdx].classList.add('correct');
                 }
@@ -301,7 +309,19 @@
                     body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId })
                 });
             } catch (e) {}
-            alert("🎉 Tabriklaymiz! Testni muvaffaqiyatli yakunladingiz.");
+            
+            // Yakuniy natijani hisoblash va alert orqali chiroyli chiqarish
+            const total = currentQuizQuestions.length;
+            const scorePercent = Math.round((correctAnswersCount / total) * 100);
+            
+            alert(
+                `🏁 Test yakunlandi!\n\n` +
+                `📊 Umumiy savollar: ${total} ta\n` +
+                `✅ To'g'ri javoblar: ${correctAnswersCount} ta\n` +
+                `❌ Noto'g'ri javoblar: ${wrongAnswersCount} ta\n` +
+                `🎯 Natija: ${scorePercent}%`
+            );
+            
             closeGame();
         }
 
@@ -310,7 +330,6 @@
             loadQuizzes();
         }
 
-        // Sahifa ilk bor ochilganda kutubxonani avtomatik yuklash
         window.onload = function() {
             loadQuizzes();
         };
