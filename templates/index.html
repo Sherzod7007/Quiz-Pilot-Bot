@@ -100,8 +100,9 @@
     </div>
 
     <div class="bottom-nav">
-        <button class="nav-item btn-nav-create" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
-        <button class="nav-item active btn-nav-library" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <!-- Inline buyruqlar qo'shildi, keshni chetlab o'tib to'g'ridan-to'g'ri ekran elementini boshqaradi -->
+        <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
         <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
         <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
@@ -120,20 +121,6 @@
         let currentQuestionIdx = 0;
         let currentQuizId = "";
 
-        function switchScreen(screen) {
-            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            
-            if(screen === 'create') {
-                document.getElementById('create-screen').classList.add('active');
-                document.querySelector('.btn-nav-create').classList.add('active');
-            } else if(screen === 'library') {
-                document.getElementById('library-screen').classList.add('active');
-                document.querySelector('.btn-nav-library').classList.add('active');
-                loadQuizzes();
-            }
-        }
-
         function fileSelected(input) {
             if(input.files && input.files.length > 0) {
                 document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
@@ -150,3 +137,5 @@
                 
                 if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
+                        const pct = quiz.total > 0 ? Math.round((quiz.answered / quiz.total) * 100) : 0;
+                        const card = document.createElement('div');
