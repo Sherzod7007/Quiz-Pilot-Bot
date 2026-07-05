@@ -55,7 +55,7 @@
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         
         .nav-item.active { color: var(--accent-blue); }
-        /* Faqat faol holatda Yaratish bo'limidagi + ikonkasini sariq qiladi */
+        /* Faqat faol rejimda Yaratish bo'limidagi + ikonkasini sariq qiladi */
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
@@ -112,17 +112,23 @@
     </div>
 
     <script>
-        const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
+        // Xavfsiz yuklash bloklari mutlaqo to'g'rilandi
+        let tg = null;
+        let userId = 99999;
+
+        try {
+            if (window.Telegram && window.Telegram.WebApp) {
+                tg = window.Telegram.WebApp;
+                tg.ready();
+                tg.expand();
+                tg.setHeaderColor('#121214');
+                if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+                    userId = tg.initDataUnsafe.user.id;
+                }
+            }
+        } catch(e) { console.log("Telegram API xatosi chetlab o'tildi"); }
 
         const BASE_URL = window.location.origin;
-
-        let userId = 99999; 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
-            userId = tg.initDataUnsafe.user.id;
-        }
-
         let currentQuizQuestions = [];
         let currentQuestionIdx = 0;
         let currentQuizId = "";
@@ -137,9 +143,3 @@
             try {
                 const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
                 const data = await response.json();
-                const container = document.getElementById('quiz-list');
-                if (!container) return;
-                container.innerHTML = "";
-                
-                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
