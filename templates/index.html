@@ -37,11 +37,14 @@
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
         .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
+        
         .screen { display: none; }
         .screen.active { display: block; }
+        
         .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
         .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
         .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        
         #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
         .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
         .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
@@ -51,20 +54,24 @@
         .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
         .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
+        
+        /* BOTTOM NAVIGATION */
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         
+        /* + IKONKANI AKTIFF HOLATDA SARIQ QILISH */
         .nav-item.active { color: var(--accent-blue); }
+        .nav-item.active#nav-create { color: var(--accent-yellow) !important; }
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <!-- YARATISH -->
-    <div id="create-screen" class="screen">
+    <!-- YARATISH EKRANI (Skrinshotdagi oyna boshlang'ich faol qilindi) -->
+    <div id="create-screen" class="screen active">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
@@ -77,8 +84,8 @@
         <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- KUTUBXONA -->
-    <div id="library-screen" class="screen active">
+    <!-- KUTUBXONA EKRANI -->
+    <div id="library-screen" class="screen">
         <div class="header"><h1>Kutubxona</h1></div>
         <div class="tabs">
             <button class="tab active">❓ Testlar</button>
@@ -90,7 +97,33 @@
         </div>
     </div>
 
-    <!-- PLAY GAME -->
+    <!-- PREMIUM EKRANI -->
+    <div id="premium-screen" class="screen">
+        <div class="header"><h1>Quiz Pilot Premium</h1></div>
+        <div class="quiz-card" style="text-align: center; padding: 30px;">
+            <span style="font-size: 50px;">👑</span>
+            <h2>Cheksiz Imkoniyatlar</h2>
+            <p style="color: var(--text-hint); line-height: 1.6;">Premium obuna bilan AI orqali cheksiz darsliklarni testga aylantiring.</p>
+            <button class="submit-btn" style="background: var(--accent-yellow); color: #000;" onclick="alert('Tez kunda ulanadi!')">Faollashtirish - $4.99</button>
+        </div>
+    </div>
+
+    <!-- SOZLAMALAR EKRANI -->
+    <div id="settings-screen" class="screen">
+        <div class="header"><h1>Sozlamalar</h1></div>
+        <div class="quiz-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border-color);">
+                <span>Tildan foydalanish</span>
+                <span style="color: var(--text-hint);">O'zbekcha 🇺🇿</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; margin-top: 10px;">
+                <span>Dastur versiyasi</span>
+                <span style="color: var(--text-hint);">v1.0.4</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- PLAY GAME EKRANI -->
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -103,42 +136,12 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
     </div>
 
+    <!-- BOTTOM NAV PANEL (Boshlang'ich Yaratish faol) -->
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
-        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
-        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
+        <button id="nav-create" class="nav-item active" onclick="switchTab('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
+        <button id="nav-library" class="nav-item" onclick="switchTab('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <button id="nav-settings" class="nav-item" onclick="switchTab('settings')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
+        <button id="nav-premium" class="nav-item" onclick="switchTab('premium')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
 
     <script>
-        const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
-
-        const BASE_URL = window.location.origin;
-
-        let userId = 99999; 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
-            userId = tg.initDataUnsafe.user.id;
-        }
-
-        let currentQuizQuestions = [];
-        let currentQuestionIdx = 0;
-        let currentQuizId = "";
-
-        function fileSelected(input) {
-            if(input.files && input.files.length > 0) {
-                document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
-            }
-        }
-
-        async function loadQuizzes() {
-            try {
-                const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
-                const data = await response.json();
-                const container = document.getElementById('quiz-list');
-                if (!container) return;
-                container.innerHTML = "";
-                
-                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
