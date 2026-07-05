@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -22,6 +23,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
+templates = Jinja2Templates(directory="templates")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
@@ -65,6 +67,7 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
+# Konflikt yaratmasligi uchun FastAPI ichida barcha polling oqimlari (Thread/lifespan) butunlay o'chirildi
 app = FastAPI()
 
 app.add_middleware(
@@ -75,98 +78,149 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Keshni yo'q qilish uchun HTML to'g'ridan-to'g'ri shu yerga joylashtirildi
-HTML_CONTENT = """<!DOCTYPE html>
-<html lang="uz">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quiz Pilot - Super TMA</title>
-    <script src="https://telegram.org"></script>
-    <style>
-        :root {
-            --bg-color: #121214;
-            --card-bg: #1a1a1e;
-            --text-color: #ffffff;
-            --text-hint: #8e8e93;
-            --accent-blue: #2f80ed;
-            --accent-green: #34c759;
-            --accent-red: #ff3b30;
-            --border-color: #2c2c35;
-            --accent-yellow: #f2c94c;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0; padding: 15px; padding-bottom: 90px;
-            -webkit-user-select: none; user-select: none;
-        }
-        .header h1 { font-size: 26px; margin: 0 0 15px 0; font-weight: 700; }
-        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-        .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
-        .tab.active { background: var(--accent-blue); color: #fff; }
-        .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
-        .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
-        .action-group { display: flex; gap: 8px; }
-        .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
-        .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
-        .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
-        .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
-        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
-        .screen { display: none; }
-        .screen.active { display: block; }
-        .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
-        .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
-        .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
-        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
-        .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
-        .options-list { display: flex; flex-direction: column; gap: 12px; }
-        .opt-btn { background: var(--card-bg); border: 1px solid var(--border-color); padding: 16px; border-radius: 14px; text-align: left; font-size: 16px; color: #fff; cursor: pointer; }
-        .opt-btn.correct { background: var(--accent-green) !important; border-color: var(--accent-green); }
-        .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
-        .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
-        .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
-        .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
+@app.get("/", response_class=HTMLResponse)
+def read_root(request: Request):
+    response = templates.TemplateResponse("index.html", {"request": request})
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+@app.post("/api/create-quiz-web")
+async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
+    add_user_to_db(user_id)
+    raw_text = ""
+    title = "Matnli Test"
+    
+    if file:
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        file_path = os.path.join(DOWNLOADS_DIR, file.filename)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
         
-        .nav-item.active { color: var(--accent-blue); }
-        .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
-        .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div id="create-screen" class="screen">
-        <div class="header"><h1>Yangi Test Yaratish</h1></div>
-        <div class="upload-box" onclick="document.getElementById('file-input').click()">
-            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
-            <span id="upload-text">Darslik yuklash (PDF yoki DOCX)</span>
-            <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
-        </div>
-        <div style="text-align: center; color: var(--text-hint); margin-bottom: 20px;">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="6" placeholder="Mavzu yoki konspekt matnini joylang..."></textarea>
-        <button id="generate-btn" class="submit-btn" onclick="startGeneration()">AI yordamida yaratish 🚀</button>
-        <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
-    </div>
+        if file.filename.endswith('.pdf'):
+            try:
+                reader = PdfReader(file_path)
+                raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
+            except: pass
+            title = file.filename.replace('.pdf', '')
+        elif file.filename.endswith('.docx'):
+            try:
+                doc = docx.Document(file_path)
+                raw_text = "\n".join([p.text for p in doc.paragraphs])
+            except: pass
+            title = file.filename.replace('.docx', '')
+    elif text:
+        raw_text = text
+        title = text[:15] + "..."
 
-    <div id="library-screen" class="screen active">
-        <div class="header"><h1>Kutubxona</h1></div>
-        <div class="tabs">
-            <button class="tab active">❓ Testlar</button>
-            <button class="tab" onclick="alert('Tez kunda ommaviy bo\'lim ishga tushadi!')">🌐 Ommaviy</button>
-            <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
-        </div>
-        <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
-        </div>
-    </div>
+    if not raw_text.strip():
+        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
-    <div id="game-screen">
-        <div class="game-header">
-            <span id="game-title">Test</span>
-            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()">✖ Chiqish</span>
-        </div>
-        <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
+    quiz_json_raw = generate_quiz_from_gemini(raw_text)
+    if not quiz_json_raw:
+        return {"status": "error", "message": "AI katta hajmli test generatsiya qila olmadi."}
+
+    try:
+        quiz_data = json.loads(quiz_json_raw)
+        items = quiz_data.get("quizzes", [])
+        quiz_id = f"q_{int(time.time())}"
+        
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
+        conn.commit()
+        conn.close()
+
+        try: bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+        except: pass
+
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+def generate_quiz_from_gemini(extracted_text):
+    global current_key_index
+    if not GOOGLE_API_KEYS: return None
+
+    system_instruction = """Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz.
+Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
+Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
+Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
+Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
+
+    for _ in range(len(GOOGLE_API_KEYS)):
+        api_key = GOOGLE_API_KEYS[current_key_index].strip()
+        if not api_key:
+            current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            continue
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=extracted_text[:80000],
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=QuizResponse,
+                    temperature=0.6
+                )
+            )
+            if response and response.text: return response.text
+        except Exception as e:
+            logging.error(f"Gemini API xatosi: {e}")
+        current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+    return None
+
+@app.get("/api/quizzes")
+def get_user_quizzes(user_id: int):
+    add_user_to_db(user_id)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
+    return {"status": "ok", "quizzes": quizzes}
+
+@app.get("/api/quiz-detail")
+def get_quiz_detail(quiz_id: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+    raise HTTPException(status_code=404, detail="Test topilmadi")
+
+@app.post("/api/update-progress")
+def update_progress(data: ProgressUpdateRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("UPDATE quizzes SET answered = total WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.get("/api/stats")
+def get_web_stats():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT COUNT(*) FROM users")
+    u_count = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM quizzes")
+    q_count = cursor.fetchone()
+    conn.close()
+    return {"status": "ok", "total_users": u_count, "total_quizzes": q_count}
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
