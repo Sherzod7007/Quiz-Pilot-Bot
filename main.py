@@ -67,7 +67,6 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
-# Konflikt yaratmasligi uchun FastAPI ichida barcha polling oqimlari (Thread/lifespan) butunlay o'chirildi
 app = FastAPI()
 
 app.add_middleware(
@@ -86,8 +85,13 @@ def read_root(request: Request):
     response.headers["Expires"] = "0"
     return response
 
+# BU YERDA PARAMETR FILE CHALALIKLARIDAN TO'LIQ TOZALANDI VA STANDARTLASHTIRILDI
 @app.post("/api/create-quiz-web")
-async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
+async def create_quiz_web(
+    user_id: int = Form(...), 
+    text: Optional[str] = Form(None), 
+    file: Optional[UploadFile] = None
+):
     add_user_to_db(user_id)
     raw_text = ""
     title = "Matnli Test"
