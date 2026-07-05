@@ -82,7 +82,7 @@
             <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
+            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q.</div>
         </div>
     </div>
 
@@ -173,7 +173,7 @@
                 }
             } catch (error) {
                 console.error(error);
-                alert("Tizimda xatolik yuz berdi. Backend ulanishini tekshiring.");
+                alert("Tizimda xatolik yuz berdi.");
             } finally {
                 genBtn.style.display = "block";
                 loader.style.display = "none";
@@ -190,7 +190,11 @@
                 
                 if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
-                        const percent = quiz.total > 0 ? Math.round((quiz.answered / quiz.total) * 100) : 0;
+                        // Agar oldin o'ynalgan bo'lsa o'sha foizni, bo'lmasa 0% ko'rsatadi
+                        const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
+                        const displayPercent = hasScore ? quiz.last_percent : 0;
+                        const scoreText = hasScore ? `Oxirgi natija: ${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `Savollar: ${quiz.total} ta`;
+
                         const card = document.createElement('div');
                         card.className = 'quiz-card';
                         card.innerHTML = `
@@ -202,12 +206,12 @@
                             </div>
                             <div class="progress-row">
                                 <div class="progress-line-container">
-                                    <div class="progress-line-bar" style="width: ${percent}%;"></div>
+                                    <div class="progress-line-bar" style="width: ${displayPercent}%;"></div>
                                 </div>
-                                <span style="font-size: 14px; font-weight: bold;">${percent}%</span>
+                                <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
                             </div>
                             <div class="card-footer">
-                                <span>Savollar: ${quiz.total} ta</span>
+                                <span>${scoreText}</span>
                                 <span>Faol</span>
                             </div>
                         `;
@@ -258,10 +262,13 @@
             document.getElementById('explanation-container').style.display = 'none';
             document.getElementById('next-question-btn').style.display = 'none';
 
+            // Variant harflarini frontendda dinamik tarzda chiroyli qilib qo'shamiz (A, B, C, D)
+            const prefixes = ["A) ", "B) ", "C) ", "D) "];
             q.options.forEach((opt, idx) => {
                 const btn = document.createElement('button');
                 btn.className = 'opt-btn';
-                btn.innerText = opt;
+                // Variant toza matn bo'lsa harf qo'shadi, aks holda o'zini chiqaradi
+                btn.innerText = opt.startsWith("A)") || opt.startsWith("B)") ? opt : (prefixes[idx] ? prefixes[idx] : "") + opt;
                 btn.onclick = () => selectOption(btn, idx, q.correct_index, q.explanation);
                 container.appendChild(btn);
             });
@@ -285,7 +292,7 @@
                 if (buttons[correctIdx]) {
                     buttons[correctIdx].classList.add('correct');
                 }
-                expBox.innerText = "💡 Izoh: " + (explanation || "Bu variant xato. To'g'ri javob belgilandi.");
+                expBox.innerText = "💡 Izoh: " + (explanation || "Wrong choice. Correct answer highlighted.");
                 expBox.style.display = 'block';
             }
 
@@ -298,16 +305,22 @@
         }
 
         async function finishQuiz() {
+            const total = currentQuizQuestions.length;
+            const scorePercent = Math.round((correctAnswersCount / total) * 100);
+
             try {
+                // To'g'ri va xato javoblar sonini backendga yuborib saqlaymistan
                 await fetch(BASE_URL + '/api/update-progress', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId })
+                    body: JSON.stringify({ 
+                        quiz_id: currentQuizId, 
+                        user_id: userId,
+                        correct_count: correctAnswersCount,
+                        percent: scorePercent
+                    })
                 });
             } catch (e) {}
-            
-            const total = currentQuizQuestions.length;
-            const scorePercent = Math.round((correctAnswersCount / total) * 100);
             
             alert(
                 `🏁 Test yakunlandi!\n\n` +
