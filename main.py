@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import uvicorn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -107,7 +108,7 @@ def send_admin_stats(message):
         cursor.execute("SELECT COUNT(*) FROM quizzes")
         q_count = cursor.fetchone()
         conn.close()
-        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count[0]} ta**\n📝 Jami yaratilgan testlar: **{q_count[0]} ta**")
+        bot.send_message(message.chat.id, f"📊 **Quiz Pilot loyihasi statistikasi:**\n\n👤 Jami foydalanuvchilar: **{u_count} ta**\n📝 Jami yaratilgan testlar: **{q_count} ta**")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Statistikani olishda xato: {e}")
 
@@ -144,7 +145,22 @@ Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik b
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
-app = FastAPI()
+def run_bot_safe():
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(1)
+        bot.polling(none_stop=True, timeout=20, long_polling_timeout=20)
+    except Exception as e:
+        logging.error(f"Bot xatosi: {e}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    bot_thread = Thread(target=run_bot_safe, daemon=True)
+    bot_thread.start()
+    logging.info("🚀 Bot parallel xavfsiz oqimda ishga tushdi!")
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -154,9 +170,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Keshni majburan o'chiruvchi sarlavhalar (No-Cache Headers) qo'shilgan bosh sahifa routeri
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    response = templates.TemplateResponse("index.html", {"request": request})
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
@@ -219,21 +240,3 @@ def get_user_quizzes(user_id: int):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
-    return {"status": "ok", "quizzes": quizzes}
-
-@app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-    raise HTTPException(status_code=404, detail="Test topilmadi")
