@@ -60,11 +60,11 @@
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         
-        /* AKTIV MENYU RANGI (KO'K) */
+        /* AKTIV MENYU KO'K RANGDA */
         .nav-item.active { color: var(--accent-blue); }
         .nav-item.active .nav-icon { color: var(--accent-blue); }
         
-        /* FAQATGINA "+" IKONKASINI SARIQ QILISH VA YOZUVNI KO'K SAQLASH */
+        /* FAQATGINA "+" IKONKASINI SARIQ QILISH, YOZUVNI KO'K SAQLASH */
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         .nav-item.active#nav-create span { color: var(--accent-blue) !important; }
         
@@ -73,7 +73,7 @@
 </head>
 <body>
 
-    <!-- YARATISH EKRANI (Boshlang'ich faol holatda) -->
+    <!-- YARATISH EKRANI -->
     <div id="create-screen" class="screen active">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -139,7 +139,7 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
     </div>
 
-    <!-- ASL TO'LIQ NAVIGATSIYA PANEL -->
+    <!-- PASTKI PANEL -->
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item active" onclick="switchTab('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item" onclick="switchTab('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
