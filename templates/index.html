@@ -31,7 +31,6 @@
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
         .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
-        .card-meta { font-size: 13px; color: var(--text-hint); display: flex; gap: 8px; }
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
@@ -56,10 +55,9 @@
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         
         .nav-item.active { color: var(--accent-blue); }
-        /* Yaratish bo'limi tugmasining + ikonkasini har doim yorqin sariq qilish sozlamasi */
-        #nav-create .nav-icon { color: var(--accent-yellow) !important; }
+        .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
-        .nav-icon { font-size: 20px; margin-bottom: 4px; }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
@@ -88,7 +86,7 @@
             <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Yuklanmoqda...</div>
+            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
         </div>
     </div>
 
@@ -143,3 +141,4 @@
                 container.innerHTML = "";
                 
                 if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
