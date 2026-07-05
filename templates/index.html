@@ -30,7 +30,6 @@
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
         .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
-        .card-meta { font-size: 13px; color: var(--text-hint); display: flex; gap: 8px; }
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
@@ -83,7 +82,7 @@
             <button class="tab" onclick="alert('Tez kunda flesh-kartochkalar qo\'shiladi!')">🗂️ Kartochkalar</button>
         </div>
         <div id="quiz-list">
-            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Yuklanmoqda...</div>
+            <div style="text-align: center; color: var(--text-hint); padding: 40px;">Sizda hali testlar yo'q. "Yaratish" bo'limidan yangi test qo'shing!</div>
         </div>
     </div>
 
@@ -103,8 +102,8 @@
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
-        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
-        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi')"><span class="nav-icon">👑</span><span>Premium</span></button>
+        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
+        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
 
     <script>
