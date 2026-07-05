@@ -85,49 +85,55 @@ def read_root(request: Request):
     response.headers["Expires"] = "0"
     return response
 
-# BU YERDA PARAMETR FILE CHALALIKLARIDAN TO'LIQ TOZALANDI VA STANDARTLASHTIRILDI
 @app.post("/api/create-quiz-web")
-async def create_quiz_web(
-    user_id: int = Form(...), 
-    text: Optional[str] = Form(None), 
-    file: Optional[UploadFile] = None
-):
+async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
     add_user_to_db(user_id)
     raw_text = ""
     title = "Matnli Test"
     
-    if file and file.filename:
+    if file and file.filename and len(file.filename.strip()) > 0:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         file_path = os.path.join(DOWNLOADS_DIR, file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
-        
-        if file.filename.endswith('.pdf'):
-            try:
-                reader = PdfReader(file_path)
-                raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
-            except: pass
-            title = file.filename.replace('.pdf', '')
-        elif file.filename.endswith('.docx'):
-            try:
-                doc = docx.Document(file_path)
-                raw_text = "\n".join([p.text for p in doc.paragraphs])
-            except: pass
-            title = file.filename.replace('.docx', '')
-    elif text:
+        try:
+            contents = await file.read()
+            if len(contents) > 0:
+                with open(file_path, "wb") as f:
+                    f.write(contents)
+                
+                if file.filename.endswith('.pdf'):
+                    try:
+                        reader = PdfReader(file_path)
+                        raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
+                    except Exception as e:
+                        logging.error(f"PDF o'qishda xato: {e}")
+                    title = file.filename.replace('.pdf', '')
+                elif file.filename.endswith('.docx'):
+                    try:
+                        doc = docx.Document(file_path)
+                        raw_text = "\n".join([p.text for p in doc.paragraphs])
+                    except Exception as e:
+                        logging.error(f"DOCX o'qishda xato: {e}")
+                    title = file.filename.replace('.docx', '')
+        except Exception as e:
+            logging.error(f"Faylni yuklashda umumiy xato: {e}")
+            
+    if not raw_text.strip() and text:
         raw_text = text
         title = text[:15] + "..."
 
     if not raw_text.strip():
-        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
+        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi. Iltimos matn kiriting yoki fayl yuklang."}
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI katta hajmli test generatsiya qila olmadi."}
+        return {"status": "error", "message": "AI test generatsiya qila olmadi. Kalitlarni yoki matnni tekshiring."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
         items = quiz_data.get("quizzes", [])
+        if not items:
+            return {"status": "error", "message": "AI savollar ro'yxatini bo'sh qaytardi."}
+            
         quiz_id = f"q_{int(time.time())}"
         
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -137,8 +143,10 @@ async def create_quiz_web(
         conn.commit()
         conn.close()
 
-        try: bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
-        except: pass
+        try: 
+            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+        except Exception as e: 
+            logging.error(f"Telegram xabari yuborilmadi: {e}")
 
         return {"status": "ok"}
     except Exception as e:
@@ -173,7 +181,7 @@ Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik b
             )
             if response and response.text: return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatosi: {e}")
+            logging.error(f"Gemini API xatosi (Key index {current_key_index}): {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
@@ -208,10 +216,23 @@ def update_progress(data: ProgressUpdateRequest):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET answered = answered + 1 WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
+    cursor.execute("UPDATE quizzes SET answered = total WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
+@app.get("/api/stats")
+def get_web_stats():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT COUNT(*) FROM users")
+    u_count = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM quizzes")
+    q_count = cursor.fetchone()
+    conn.close()
+    return {"status": "ok", "total_users": u_count[0] if u_count else 0, "total_quizzes": q_count[0] if q_count else 0}
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
