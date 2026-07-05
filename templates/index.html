@@ -55,22 +55,25 @@
         .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
         
-        /* BOTTOM NAVIGATION */
+        /* BOTTOM NAVIGATION BASE */
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         
-        /* + IKONKANI AKTIFF HOLATDA SARIQ QILISH */
+        /* AKTIV MENYU RANGI (KO'K) */
         .nav-item.active { color: var(--accent-blue); }
-        .nav-item.active#nav-create { color: var(--accent-yellow) !important; }
+        .nav-item.active .nav-icon { color: var(--accent-blue); }
+        
+        /* FAQATGINA "+" IKONKASINI SARIQ QILISH VA YOZUVNI KO'K SAQLASH */
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
+        .nav-item.active#nav-create span { color: var(--accent-blue) !important; }
         
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <!-- YARATISH EKRANI (Skrinshotdagi oyna boshlang'ich faol qilindi) -->
+    <!-- YARATISH EKRANI (Boshlang'ich faol holatda) -->
     <div id="create-screen" class="screen active">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -136,12 +139,8 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
     </div>
 
-    <!-- BOTTOM NAV PANEL (Boshlang'ich Yaratish faol) -->
+    <!-- ASL TO'LIQ NAVIGATSIYA PANEL -->
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item active" onclick="switchTab('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
         <button id="nav-library" class="nav-item" onclick="switchTab('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
         <button id="nav-settings" class="nav-item" onclick="switchTab('settings')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
-        <button id="nav-premium" class="nav-item" onclick="switchTab('premium')"><span class="nav-icon">👑</span><span>Premium</span></button>
-    </div>
-
-    <script>
