@@ -49,21 +49,19 @@
         .opt-btn { background: var(--card-bg); border: 1px solid var(--border-color); padding: 16px; border-radius: 14px; text-align: left; font-size: 16px; color: #fff; cursor: pointer; }
         .opt-btn.correct { background: var(--accent-green) !important; border-color: var(--accent-green); }
         .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
-        .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
+        .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-red); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
-        
         .nav-item.active { color: var(--accent-blue); }
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
-        
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
 <body>
 
+    <!-- YARATISH -->
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -77,6 +75,7 @@
         <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
+    <!-- KUTUBXONA -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div class="tabs">
@@ -89,6 +88,7 @@
         </div>
     </div>
 
+    <!-- PLAY GAME -->
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -125,7 +125,6 @@
         let currentQuizId = "";
         let isAnswered = false;
 
-        // Statisika uchun yangi global o'zgaruvchilar
         let correctAnswersCount = 0;
         let wrongAnswersCount = 0;
 
@@ -212,7 +211,7 @@
                             </div>
                             <div class="card-footer">
                                 <span>Savollar: ${quiz.total} ta</span>
-                                <span>Yopilgan</span>
+                                <span>Faol</span>
                             </div>
                         `;
                         container.appendChild(card);
@@ -234,7 +233,6 @@
                     currentQuizQuestions = data.quiz_json.quizzes;
                     currentQuestionIdx = 0;
                     
-                    // Har safar o'yin boshlanganda hisoblagichlarni nollash
                     correctAnswersCount = 0;
                     wrongAnswersCount = 0;
 
@@ -278,21 +276,23 @@
             
             const container = document.getElementById('options-container');
             const buttons = container.getElementsByClassName('opt-btn');
+            const expBox = document.getElementById('explanation-container');
 
             if (idx === correctIdx) {
                 btn.classList.add('correct');
-                correctAnswersCount++; // To'g'ri javobni oshirish
+                correctAnswersCount++;
+                expBox.style.display = 'none'; // To'g'ri bo'lsa izoh yashiriladi
             } else {
                 btn.classList.add('wrong');
-                wrongAnswersCount++; // Noto'g'ri javobni oshirish
+                wrongAnswersCount++;
                 if (buttons[correctIdx]) {
                     buttons[correctIdx].classList.add('correct');
                 }
+                // Noto'g'ri bo'lsa izoh ko'rsatiladi
+                expBox.innerText = "💡 Izoh: " + (explanation || "Bu variant xato. To'g'ri javob belgilandi.");
+                expBox.style.display = 'block';
             }
 
-            const expBox = document.getElementById('explanation-container');
-            expBox.innerText = "💡 Izoh: " + (explanation || "To'g'ri javob tasdiqlandi.");
-            expBox.style.display = 'block';
             document.getElementById('next-question-btn').style.display = 'block';
         }
 
@@ -303,6 +303,7 @@
 
         async function finishQuiz() {
             try {
+                // Qayta o'ynash uchun progressni yangilash so'rovini yuboramiz
                 await fetch(BASE_URL + '/api/update-progress', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -310,7 +311,6 @@
                 });
             } catch (e) {}
             
-            // Yakuniy natijani hisoblash va alert orqali chiroyli chiqarish
             const total = currentQuizQuestions.length;
             const scorePercent = Math.round((correctAnswersCount / total) * 100);
             
