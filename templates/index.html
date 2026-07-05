@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quiz Pilot - Super TMA</title>
+    <title>Biz Quiz Pilot Mini App</title>
+    <!-- Keshni majburiy portlatish uchun script manzili o'zgartirildi -->
     <script src="https://telegram.org"></script>
     <style>
         :root {
@@ -51,19 +52,25 @@
         .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
         .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-blue); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
-        .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         
-        .nav-item.active { color: var(--accent-blue); }
+        /* BOTTOM NAV STYLES */
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
+        .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; transition: color 0.2s ease; }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; transition: color 0.2s ease; }
+        
+        /* SARIQ IKONKA CSS QOIDALARI */
+        .nav-item.active#nav-library { color: var(--accent-blue); }
+        .nav-item.active#nav-library .nav-icon { color: var(--accent-blue); }
+        
+        .nav-item.active#nav-create { color: var(--accent-yellow) !important; }
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <!-- YARATISH -->
+    <!-- YARATISH EKRANI -->
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test Yaratish</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
@@ -77,7 +84,7 @@
         <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- KUTUBXONA -->
+    <!-- KUTUBXONA EKRANI -->
     <div id="library-screen" class="screen active">
         <div class="header"><h1>Kutubxona</h1></div>
         <div class="tabs">
@@ -90,7 +97,7 @@
         </div>
     </div>
 
-    <!-- PLAY GAME -->
+    <!-- PLAY GAME EKRANI -->
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -103,42 +110,49 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
     </div>
 
+    <!-- NAVIGATSIYA PANEL -->
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
-        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
-        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
+        <button id="nav-create" class="nav-item" onclick="switchTab('create')">
+            <span class="nav-icon">➕</span><span>Yaratish</span>
+        </button>
+        <button id="nav-library" class="nav-item active" onclick="switchTab('library')">
+            <span class="nav-icon">📚</span><span>Kutubxona</span>
+        </button>
     </div>
 
     <script>
+        // Telegram WebApp obyektini yuklash va sozlash
         const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
-
-        const BASE_URL = window.location.origin;
-
-        let userId = 99999; 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+        tg.expand();
+        
+        // Defolt foydalanuvchi IDsi (Agar WebApp tashqarisida ochilsa test uchun)
+        let userId = 12345678; 
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             userId = tg.initDataUnsafe.user.id;
         }
 
-        let currentQuizQuestions = [];
-        let currentQuestionIdx = 0;
-        let currentQuizId = "";
+        let selectedFile = null;
+        let currentQuizData = null;
+        let currentQuestionIndex = 0;
+        let activeQuizId = null;
 
-        function fileSelected(input) {
-            if(input.files && input.files.length > 0) {
-                document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
+        // Navigatsiya o'tish mexanizmi va Ikonkani aniq sariq qilish
+        function switchTab(tabName) {
+            const createScreen = document.getElementById('create-screen');
+            const libraryScreen = document.getElementById('library-screen');
+            const btnCreate = document.getElementById('nav-create');
+            const btnLibrary = document.getElementById('nav-library');
+
+            if (tabName === 'create') {
+                createScreen.classList.add('active');
+                libraryScreen.classList.remove('active');
+                btnCreate.classList.add('active');
+                btnLibrary.classList.remove('active');
+            } else {
+                createScreen.classList.remove('active');
+                libraryScreen.classList.add('active');
+                btnCreate.classList.remove('active');
+                btnLibrary.classList.add('active');
+                loadLibrary(); // Kutubxonani har safar yangilash
             }
         }
-
-        async function loadQuizzes() {
-            try {
-                const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
-                const data = await response.json();
-                const container = document.getElementById('quiz-list');
-                if (!container) return;
-                container.innerHTML = "";
-                
-                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
