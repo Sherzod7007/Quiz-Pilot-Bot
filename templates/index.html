@@ -123,10 +123,11 @@
         function switchScreen(screen) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            
             if(screen === 'create') {
                 document.getElementById('create-screen').classList.add('active');
                 document.getElementById('nav-create').classList.add('active');
-            } else {
+            } else if(screen === 'library') {
                 document.getElementById('library-screen').classList.add('active');
                 document.getElementById('nav-library').classList.add('active');
                 loadQuizzes();
