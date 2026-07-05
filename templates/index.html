@@ -4,11 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Quiz Pilot - Super TMA</title>
-    <!-- Telegram WebApp SDK -->
     <script src="https://telegram.org"></script>
-    <!-- Mobil qurilmalarda konsol xatolarini ko'rish uchun debug vositasi -->
-    <script src="https://jsdelivr.net"></script>
-    <script>eruda.init();</script>
     <style>
         :root {
             --bg-color: #121214;
@@ -46,7 +42,6 @@
         .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
         .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
         .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        .submit-btn:disabled { background-color: #2c2c35; color: var(--text-hint); cursor: not-allowed; }
         #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
         .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
         .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
@@ -60,7 +55,6 @@
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         
         .nav-item.active { color: var(--accent-blue); }
-        /* SIZNING SARIQ PLUS KODINGIZ */
         .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
@@ -109,52 +103,42 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()">Keyingi savol ➡️</button>
     </div>
 
-    <!-- BOTTOM NAVIGATION -->
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="switchTab('create')">
-            <span class="nav-icon">➕</span>
-            <span>Yaratish</span>
-        </button>
-        <button id="nav-library" class="nav-item active" onclick="switchTab('library')">
-            <span class="nav-icon">📁</span>
-            <span>Kutubxona</span>
-        </button>
+        <button id="nav-create" class="nav-item" onclick="document.getElementById('library-screen').classList.remove('active'); document.getElementById('create-screen').classList.add('active'); document.getElementById('nav-library').classList.remove('active'); this.classList.add('active');"><span class="nav-icon">➕</span><span>Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="document.getElementById('create-screen').classList.remove('active'); document.getElementById('library-screen').classList.add('active'); document.getElementById('nav-create').classList.remove('active'); this.classList.add('active'); loadQuizzes();"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <button class="nav-item" onclick="alert('Sozlamalar tez kunda qo\'shiladi!')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
+        <button class="nav-item" onclick="alert('Premium rejim tez kunda ochiladi!')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
 
     <script>
-        // Telegram WebApp init
-        const tg = window.Telegram?.WebApp;
-        if (tg) {
-            tg.ready();
-            tg.expand();
+        const tg = window.Telegram.WebApp;
+        tg.ready(); tg.expand();
+        tg.setHeaderColor('#121214');
+
+        const BASE_URL = window.location.origin;
+
+        let userId = 99999; 
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+            userId = tg.initDataUnsafe.user.id;
         }
 
-        // Foydalanuvchi ID sini olish
-        const USER_ID = tg?.initDataUnsafe?.user?.id || 123456789;
+        let currentQuizQuestions = [];
+        let currentQuestionIdx = 0;
+        let currentQuizId = "";
 
-        // Tablar almashinuvi boshqaruvi
-        function switchTab(tabName) {
-            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-
-            if (tabName === 'create') {
-                document.getElementById('create-screen').classList.add('active');
-                document.getElementById('nav-create').classList.add('active');
-            } else if (tabName === 'library') {
-                document.getElementById('library-screen').classList.add('active');
-                document.getElementById('nav-library').classList.add('active');
-                loadQuizzes(); // Kutubxonaga o'tganda ro'yxatni yuklash
-            }
-        }
-
-        // Fayl tanlanganda matnni yangilash
         function fileSelected(input) {
-            if (input.files && input.files[0]) {
-                document.getElementById('upload-text').innerText = "✅ Tanlandi: " + input.files[0].name;
+            if(input.files && input.files.length > 0) {
+                document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
             }
         }
 
-        // AI ORQALI GENERATSIYA QILISH (POST SO'ROV INTEGRATSIYASI)
-        async function startGeneration() {
-            const textInput = document.getElementById('text-input').value.trim();
-            const fileInput = document.getElementById('file-input').files[0];
+        async function loadQuizzes() {
+            try {
+                const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
+                const data = await response.json();
+                const container = document.getElementById('quiz-list');
+                if (!container) return;
+                container.innerHTML = "";
+                
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
