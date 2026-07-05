@@ -35,7 +35,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    # last_score va last_percent ustunlari jadvalda borligini tekshirish va yaratish
     cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
                         id TEXT PRIMARY KEY, 
                         user_id INTEGER, 
@@ -48,7 +47,6 @@ def init_db():
                         last_percent INTEGER DEFAULT -1)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, created_at INTEGER)''')
     
-    # Agar eski jadval bo'lsa, ustunlarni qo'shib qo'yamiz xatolik bermasligi uchun
     try:
         cursor.execute("ALTER TABLE quizzes ADD COLUMN last_score INTEGER DEFAULT -1")
         cursor.execute("ALTER TABLE quizzes ADD COLUMN last_percent INTEGER DEFAULT -1")
@@ -74,6 +72,10 @@ class ProgressUpdateRequest(BaseModel):
     user_id: int
     correct_count: int
     percent: int
+
+class DeleteQuizRequest(BaseModel):
+    quiz_id: str
+    user_id: int
 
 def add_user_to_db(user_id: int):
     try:
@@ -105,10 +107,15 @@ def read_root(request: Request):
     return response
 
 @app.post("/api/create-quiz-web")
-async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
+async def create_quiz_web(
+    user_id: int = Form(...), 
+    text: Optional[str] = Form(None), 
+    custom_title: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None)
+):
     add_user_to_db(user_id)
     raw_text = ""
-    title = "Matnli Test"
+    default_title = "Matnli Test"
     
     if file and file.filename and len(file.filename.strip()) > 0:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -125,20 +132,20 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
                         raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
                     except Exception as e:
                         logging.error(f"PDF o'qishda xato: {e}")
-                    title = file.filename.replace('.pdf', '')
+                    default_title = file.filename.replace('.pdf', '')
                 elif file.filename.endswith('.docx'):
                     try:
                         doc = docx.Document(file_path)
                         raw_text = "\n".join([p.text for p in doc.paragraphs])
                     except Exception as e:
                         logging.error(f"DOCX o'qishda xato: {e}")
-                    title = file.filename.replace('.docx', '')
+                    default_title = file.filename.replace('.docx', '')
         except Exception as e:
             logging.error(f"Faylni yuklashda umumiy xato: {e}")
             
     if not raw_text.strip() and text:
         raw_text = text
-        title = text[:15] + "..."
+        default_title = text[:15] + "..."
 
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
@@ -155,16 +162,19 @@ async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(N
             
         quiz_id = f"q_{int(time.time())}"
         
+        # Agar foydalanuvchi o'z nomi kiritgan bo'lsa, o'shani tanlaydi
+        final_title = custom_title.strip() if custom_title and custom_title.strip() else default_title
+        
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                       (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
+                       (quiz_id, user_id, final_title[:24], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
         conn.commit()
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 Test tayyorlandi! Jami: {len(items)} ta savol.")
+            bot.send_message(user_id, f"🎉 '{final_title[:24]}' testi tayyorlandi! Jami: {len(items)} ta savol.")
         except Exception as e: 
             logging.error(f"Telegram xabari yuborilmadi: {e}")
 
@@ -176,7 +186,6 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
-    # Savollar sonini qat'iy cheklash qoidasi kiritildi
     system_instruction = """You are an advanced AI quiz generator. 
 CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text. If the input text is in English, EVERYTHING must be in English. No Uzbek translations allowed for English text!
@@ -246,9 +255,18 @@ def update_progress(data: ProgressUpdateRequest):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    # Har gal test yopilganda oxirgi natijalarni yozib ketadi
     cursor.execute("UPDATE quizzes SET answered = total, last_score = ?, last_percent = ? WHERE id = ? AND user_id = ?", 
                    (data.correct_count, data.percent, data.quiz_id, data.user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.post("/api/delete-quiz")
+def delete_quiz(data: DeleteQuizRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
