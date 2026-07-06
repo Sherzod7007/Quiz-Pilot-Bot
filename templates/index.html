@@ -30,9 +30,10 @@
         .tab.active { background: var(--accent-blue); color: #fff; }
         .quiz-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; }
+        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 65%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .action-group { display: flex; gap: 8px; }
         .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
+        .btn-delete { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: var(--accent-red); }
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
         .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
@@ -190,7 +191,6 @@
                 
                 if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
-                        // Agar oldin o'ynalgan bo'lsa o'sha foizni, bo'lmasa 0% ko'rsatadi
                         const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
                         const displayPercent = hasScore ? quiz.last_percent : 0;
                         const scoreText = hasScore ? `Oxirgi natija: ${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `Savollar: ${quiz.total} ta`;
@@ -201,6 +201,7 @@
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
                                 <div class="action-group">
+                                    <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')" title="O'chirish">🗑️</button>
                                     <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
                                 </div>
                             </div>
@@ -222,6 +223,28 @@
                 }
             } catch (error) {
                 console.error(error);
+            }
+        }
+
+        // YANGI QO'SHILGAN: Testni o'chirish funksiyasi
+        async function deleteQuiz(quizId) {
+            if (!confirm("Ushbu testni butunlay o'chirib tashlamoqchimisiz?")) {
+                return;
+            }
+            try {
+                const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                if (data && data.status === "ok") {
+                    alert("🗑️ Test muvaffaqiyatli o'chirildi.");
+                    loadQuizzes(); // Ro'yxatni real vaqtda yangilash
+                } else {
+                    alert("Xato: Testni o'chirib bo'lmadi.");
+                }
+            } catch (error) {
+                console.error(error);
+                alert("O'chirish jarayonida xatolik yuz berdi.");
             }
         }
 
@@ -262,12 +285,10 @@
             document.getElementById('explanation-container').style.display = 'none';
             document.getElementById('next-question-btn').style.display = 'none';
 
-            // Variant harflarini frontendda dinamik tarzda chiroyli qilib qo'shamiz (A, B, C, D)
             const prefixes = ["A) ", "B) ", "C) ", "D) "];
             q.options.forEach((opt, idx) => {
                 const btn = document.createElement('button');
                 btn.className = 'opt-btn';
-                // Variant toza matn bo'lsa harf qo'shadi, aks holda o'zini chiqaradi
                 btn.innerText = opt.startsWith("A)") || opt.startsWith("B)") ? opt : (prefixes[idx] ? prefixes[idx] : "") + opt;
                 btn.onclick = () => selectOption(btn, idx, q.correct_index, q.explanation);
                 container.appendChild(btn);
@@ -309,7 +330,6 @@
             const scorePercent = Math.round((correctAnswersCount / total) * 100);
 
             try {
-                // To'g'ri va xato javoblar sonini backendga yuborib saqlaymistan
                 await fetch(BASE_URL + '/api/update-progress', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
