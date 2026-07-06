@@ -1,591 +1,89 @@
-<!DOCTYPE html>
-<html lang="uz">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quiz Pilot - Super TMA</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        :root {
-            --bg-color: #121214;
-            --card-bg: #1a1a1e;
-            --text-color: #ffffff;
-            --text-hint: #8e8e93;
-            --accent-blue: #2f80ed;
-            --accent-green: #34c759;
-            --accent-red: #ff3b30;
-            --border-color: #2c2c35;
-            --accent-yellow: #f2c94c;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0; padding: 15px; padding-bottom: 90px;
-            -webkit-user-select: none; user-select: none;
-        }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .header h1 { font-size: 26px; margin: 0; font-weight: 700; }
-        .user-badge { font-size: 13px; color: var(--text-hint); background: #24242b; padding: 4px 10px; border-radius: 12px; font-weight: 500; border: 1px solid var(--border-color); }
-        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-        .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
-        .tab.active { background: var(--accent-blue); color: #fff; }
-        .quiz-card, .flash-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
-        .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
-        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .action-group { display: flex; gap: 8px; align-items: center; }
-        .btn-circle { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: #fff; }
-        .btn-delete { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: var(--accent-red); }
-        .btn-public { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; color: var(--text-hint); }
-        .btn-public.is-active { color: var(--accent-yellow); background: #2c2c35; }
-        .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
-        .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
-        .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
-        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
-        .screen { display: none; }
-        .screen.active { display: block; }
-        .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 30px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 15px; color: var(--text-hint); }
-        .input-title, .input-card { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; color: #fff; font-size: 15px; margin-bottom: 15px; outline: none; transition: border-color 0.2s; }
-        .input-title:focus, .input-card:focus { border-color: var(--accent-blue); }
-        .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
-        .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
-        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
-        .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
-        .options-list { display: flex; flex-direction: column; gap: 12px; }
-        .opt-btn { background: var(--card-bg); border: 1px solid var(--border-color); padding: 16px; border-radius: 14px; text-align: left; font-size: 16px; color: #fff; cursor: pointer; }
-        .opt-btn.correct { background: var(--accent-green) !important; border-color: var(--accent-green); }
-        .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
-        .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-red); display: none; }
-        .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
-        .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
-        .nav-item.active { color: var(--accent-blue); }
-        .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
-        .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
-        
-        /* Sozlamalar dizayni */
-        .settings-box { background: var(--card-bg); border-radius: 20px; padding: 20px; border: 1px solid var(--border-color); margin-top: 15px; }
-        .lang-group { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
-        .lang-btn { background: #24242b; border: 1px solid var(--border-color); color: #fff; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-        .lang-btn.active { border-color: var(--accent-blue); background: rgba(47, 128, 237, 0.1); color: var(--accent-blue); }
-        
-        /* Flesh kartochka interfeysi */
-        .fc-display { font-size: 18px; font-weight: bold; padding: 25px; text-align: center; background: #24242b; border-radius: 12px; margin: 10px 0; border: 1px dashed var(--border-color); cursor: pointer; }
-        
-        /* Premium dizayni */
-        .premium-box { background: linear-gradient(135deg, #2c1a4d 0%, #1a1a1e 100%); border-radius: 20px; padding: 25px; border: 1px solid #ffb800; text-align: center; margin-top: 15px; }
-        .premium-title { font-size: 22px; font-weight: bold; color: #ffb800; margin-bottom: 10px; }
-        .premium-feature { text-align: left; margin: 15px 0; font-size: 14px; color: #e0e0e0; line-height: 1.6; }
-    </style>
-</head>
-<body>
-
-    <div id="create-screen" class="screen">
-        <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
-        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
-        <div class="upload-box" onclick="document.getElementById('file-input').click()">
-            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
-            <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
-            <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
-        </div>
-        <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
-        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
-        <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
+<div id="premium-section" class="container" style="padding: 15px; color: #fff; font-family: sans-serif;">
+    
+    <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); padding: 15px; border-radius: 16px; margin-bottom: 20px; border: 1px solid #f1c40f; text-align: center; box-shadow: 0 4px 15px rgba(241,196,15,0.1);">
+        <h3 style="margin: 0 0 8px 0; color: #f1c40f; font-size: 18px;">💎 Sizning Statusingiz</h3>
+        <p id="user-status-text" style="font-size: 16px; margin: 5px 0; font-weight: bold; color: #fff;">Yuklanmoqda...</p>
+        <p id="user-limit-text" style="font-size: 13px; color: #e0b0ff; margin: 5px 0;"></p>
     </div>
 
-    <div id="library-screen" class="screen active">
-        <div class="header">
-            <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
-            <span id="user-count-badge" class="user-badge">0 active users</span>
-        </div>
-        <div class="tabs">
-            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
-            <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
-            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
-        </div>
-        
-        <div id="lib-content-area">
-            <div id="quiz-list"></div>
-        </div>
+    <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #f1c40f; border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); margin-bottom: 25px;">
+        <h2 style="margin: 0 0 10px 0; color: #f1c40f; font-size: 22px; letter-spacing: 1px;">Quiz Pilot PRO 👑</h2>
+        <p style="margin: 0; color: #e0b0ff; font-size: 13px; line-height: 1.4;">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
     </div>
 
-    <div id="settings-screen" class="screen">
-        <div class="header"><h1 data-lang="nav_settings">Sozlamalar</h1></div>
-        <div class="settings-box">
-            <span style="font-weight: bold; font-size: 16px;" data-lang="select_lang">Tizim tilini tanlang:</span>
-            <div class="lang-group">
-                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha <span class="check-mark"></span></button>
-                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский <span class="check-mark"></span></button>
-                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English <span class="check-mark"></span></button>
+    <div style="display: flex; flex-direction: column; gap: 15px;">
+        
+        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #3d3d63; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+            <div>
+                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">⚡ Kunlik Cheksiz</h4>
+                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">24 soat mutlaqo cheksiz test yaratish</p>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">7 000 so'm</div>
+                <button onclick="openPaymentModal('⚡ Kunlik Cheksiz', '7 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold; transition: 0.2s;">Faollashtirish</button>
             </div>
         </div>
-    </div>
 
-    <div id="premium-screen" class="screen">
-        <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
-        <div class="premium-box">
-            <div class="premium-title">Quiz Pilot PRO 👑</div>
-            <div class="premium-feature">
-                • ✨ <span data-lang="p1">Cheksiz sun'iy intellekt orqali test yaratish</span><br>
-                • 📁 <span data-lang="p2">Katta hajmdagi PDF/Word fayllarni yuklash</span><br>
-                • 📊 <span data-lang="p3">To'liq statistika va ommaviy testlar lentasi</span>
+        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(241,196,15,0.15); position: relative; overflow: hidden;">
+            <div style="position: absolute; top: 0; right: 0; background: #f1c40f; color: #1a103c; font-size: 9px; padding: 2px 10px; border-bottom-left-radius: 8px; font-weight: bold;">OMMABOP</div>
+            <div>
+                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">📅 Haftalik Cheksiz</h4>
+                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">7 kun davomida cheksiz foydalanish</p>
             </div>
-            <button class="submit-btn" style="background: var(--accent-yellow); color:#121214; margin-top:15px;" onclick="alert('Tez kunda: Click / Payme integratsiyasi')" data-lang="btn_buy">Tez kunda faollashadi</button>
+            <div style="text-align: right;">
+                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">30 000 so'm</div>
+                <button onclick="openPaymentModal('📅 Haftalik Cheksiz', '30 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+            </div>
+        </div>
+
+        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #3d3d63; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+            <div>
+                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">🌙 Oylik Cheksiz</h4>
+                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kun davomida eng qulay cheksiz rejim</p>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">60 000 so'm</div>
+                <button onclick="openPaymentModal('🌙 Oylik Cheksiz', '60 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+            </div>
+        </div>
+
+        <div style="background: linear-gradient(135deg, #3d226b, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(155,89,182,0.2);">
+            <div>
+                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">👨‍🏫 O'qituvchilar Uchun</h4>
+                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kunlik kengaytirilgan guruh rejimi</p>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">90 000 so'm</div>
+                <button onclick="openPaymentModal('👨‍🏫 O'qituvchilar Uchun', '90 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="paymentModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box;">
+        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 2px solid #f1c40f; border-radius: 20px; width: 100%; max-width: 380px; padding: 22px; text-align: center; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.6);">
+            
+            <h3 style="margin-top: 0; color: #f1c40f; font-size: 18px;" id="modalTariffName">Tarif</h3>
+            <p style="color: #e0b0ff; font-size: 14px; margin: 5px 0 15px 0;">To'lov miqdori: <b id="modalTariffPrice" style="color: #fff; font-size: 18px;">0</b> so'm</p>
+            
+            <p style="font-size: 13px; color: #fff; margin-bottom: 10px;">Karta raqami ustiga bosib **nusxa oling**:</p>
+            
+            <div onclick="copyCardNumber()" style="background: linear-gradient(135deg, #f1c40f, #b8860b); padding: 18px; border-radius: 12px; cursor: pointer; margin-bottom: 15px; position: relative; transition: transform 0.1s;" onmousedown="this.style.transform='scale(0.97)'" onmouseup="this.style.transform='scale(1)'">
+                <div style="font-size: 11px; text-align: left; color: #1a103c; font-weight: bold; opacity: 0.8; letter-spacing: 1px;">HUMO CARD</div>
+                <div id="cardNumberText" style="font-size: 21px; font-weight: bold; letter-spacing: 2px; margin: 12px 0; color: #1a103c;">9860 0601 3135 0575</div>
+                <div style="font-size: 10px; text-align: right; color: #1a103c; font-weight: bold; opacity: 0.7;">BOSING - NUSXA OLINADI</div>
+                <div id="copyTooltip" style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #2ecc71; color: white; font-size: 11px; padding: 3px 10px; border-radius: 6px; display: none; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">Nusxalandi! ✨</div>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; text-align: left; font-size: 12px; color: #e0b0ff; line-height: 1.5; margin-bottom: 20px; border-left: 3px solid #f1c40f;">
+                <b>📌 To'lov tartibi:</b><br>
+                1. Karta raqamini ko'chirib oling va istalgan ilovadan (Click, Payme, Uzum) pul o'tkazing.<br>
+                2. O'tkazma **cheki yoki skrinshotini** to'g'ridan-to'g'ri shu Telegram botga yuboring.<br>
+                3. Admin chekni tekshirib, tarifingizni faollashtiradi!
+            </div>
+
+            <button onclick="closePaymentModal()" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #3d3d63; padding: 10px 20px; border-radius: 10px; font-size: 14px; cursor: pointer; width: 100%; font-weight: bold; transition: 0.2s;">Orqaga qaytish</button>
         </div>
     </div>
 
-    <div id="game-screen">
-        <div class="game-header">
-            <span id="game-title">Test</span>
-            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
-        </div>
-        <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
-        <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
-        <div class="options-list" id="options-container"></div>
-        <div class="explanation-box" id="explanation-container"></div>
-        <button class="next-btn" id="next-question-btn" onclick="nextQuestion()"></button>
-    </div>
-
-    <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span data-lang="nav_create">Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
-        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
-        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
-    </div>
-
-    <script>
-        const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
-
-        const BASE_URL = window.location.origin;
-        let userId = 99999; 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
-            userId = tg.initDataUnsafe.user.id;
-        }
-
-        let currentLang = 'uz';
-        let currentTab = 'personal'; // personal, public, cards
-        let currentQuizQuestions = [];
-        let currentQuestionIdx = 0;
-        let currentQuizId = "";
-        let isAnswered = false;
-        let correctAnswersCount = 0;
-        let wrongAnswersCount = 0;
-
-        // 3 TILLI LUG'AT
-        const langPack = {
-            uz: {
-                nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
-                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
-                placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
-                placeholder_text: "Mavzu yoki konspekt matnini joylang...",
-                upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
-                btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", p1: "Cheksiz AI orqali test yaratish", p2: "Katta darsliklarni yuklash",
-                p3: "To'liq tahlillar va statistika", btn_buy: "Tez kunda integratsiya qilinadi", btn_exit: "✖ Chiqish",
-                msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
-                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
-                btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?",
-                alert_success: "🎉 Test muvaffaqiyatli yaratildi!", card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):",
-                btn_add_card: "Yangi kartochka qo'shish"
-            },
-            ru: {
-                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
-                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
-                placeholder_title: "Название теста (Например: Математика)...",
-                placeholder_text: "Вставьте текст темы или конспекта...",
-                upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
-                btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
-                select_lang: "Выберите язык системы:", p1: "Безлимитное создание тестов через ИИ", p2: "Загрузка больших учебников",
-                p3: "Полная аналитика и статистика", btn_buy: "Скоро будет интегрировано", btn_exit: "✖ Выход",
-                msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
-                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
-                btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", alert_del_quiz: "Вы хотите удалить этот тест?",
-                alert_success: "🎉 Тест успешно создан!", card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):",
-                btn_add_card: "Добавить карточку"
-            },
-            en: {
-                nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
-                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
-                placeholder_title: "Quiz title (e.g. Mathematics, History)...",
-                placeholder_text: "Paste your textbook content or notes here...",
-                upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
-                btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", p1: "Unlimited quiz generation via AI", p2: "Upload large textbooks",
-                p3: "Full analysis and global dashboard", btn_buy: "Coming soon", btn_exit: "✖ Exit",
-                msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
-                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
-                btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", alert_del_quiz: "Do you want to delete this quiz?",
-                alert_success: "🎉 Quiz successfully created!", card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):",
-                btn_add_card: "Add New Flashcard"
-            }
-        };
-
-        function applyLocalization() {
-            document.querySelectorAll('[data-lang]').forEach(el => {
-                const key = el.getAttribute('data-lang');
-                if (langPack[currentLang][key]) el.innerText = langPack[currentLang][key];
-            });
-            document.querySelectorAll('[data-placeholder]').forEach(el => {
-                const key = el.getAttribute('data-placeholder');
-                if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
-            });
-            
-            // Sozlamalardagi tugmalarni faollashtirish
-            document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-            const activeBtn = document.getElementById(`lang-${currentLang}`);
-            if(activeBtn) activeBtn.classList.add('active');
-        }
-
-        function switchScreen(screenName) {
-            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
-            
-            document.getElementById(`${screenName}-screen`).classList.add('active');
-            document.getElementById(`nav-${screenName}`).classList.add('active');
-            
-            if(screenName === 'library') {
-                loadQuizzes();
-            }
-        }
-
-        async function changeLanguage(lang) {
-            currentLang = lang;
-            applyLocalization();
-            try {
-                await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
-            } catch(e){}
-            if(currentTab === 'personal' || currentTab === 'public') switchLibTab(currentTab);
-        }
-
-        function switchLibTab(tabName) {
-            currentTab = tabName;
-            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
-            
-            if(tabName === 'personal') {
-                document.getElementById('tab-personal').classList.add('active');
-                loadQuizzes();
-            } else if(tabName === 'public') {
-                document.getElementById('tab-public').classList.add('active');
-                loadPublicQuizzes();
-            } else if(tabName === 'cards') {
-                document.getElementById('tab-cards').classList.add('active');
-                loadFlashcards();
-            }
-        }
-
-        function fileSelected(input) {
-            if(input.files && input.files.length > 0) {
-                document.getElementById('upload-text').innerText = "Selected: " + input.files[0].name;
-            }
-        }
-
-        async function startGeneration() {
-            const textInput = document.getElementById('text-input').value.trim();
-            const quizTitleInput = document.getElementById('quiz-title-input').value.trim();
-            const fileInput = document.getElementById('file-input');
-            const genBtn = document.getElementById('generate-btn');
-            const loader = document.getElementById('loading-status');
-
-            if (!textInput && fileInput.files.length === 0) {
-                alert("Please enter text or upload a file!");
-                return;
-            }
-
-            genBtn.style.display = "none";
-            loader.style.display = "block";
-
-            const formData = new FormData();
-            formData.append('user_id', userId);
-            if (textInput) formData.append('text', textInput);
-            if (fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
-            if (quizTitleInput) formData.append('quiz_title', quizTitleInput);
-
-            try {
-                const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData });
-                const data = await response.json();
-                if (data && data.status === "ok") {
-                    alert(langPack[currentLang].alert_success);
-                    document.getElementById('text-input').value = "";
-                    document.getElementById('quiz-title-input').value = "";
-                    fileInput.value = "";
-                    document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
-                    switchScreen('library');
-                } else {
-                    alert("Error: " + (data.message || "Failed."));
-                }
-            } catch (error) {
-                alert("System error.");
-            } finally {
-                genBtn.style.display = "block";
-                loader.style.display = "none";
-            }
-        }
-
-        // LOOD PERSONAL QUIZZES
-        async function loadQuizzes() {
-            try {
-                const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
-                const data = await response.json();
-                
-                if (data && data.total_users !== undefined) {
-                    document.getElementById('user-count-badge').innerText = `${data.total_users} active users`;
-                }
-                if (data && data.user_lang) {
-                    currentLang = data.user_lang;
-                    applyLocalization();
-                }
-
-                const container = document.getElementById('lib-content-area');
-                container.innerHTML = `<div id="quiz-list"></div>`;
-                const listDiv = document.getElementById('quiz-list');
-                
-                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
-                        const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
-                        const displayPercent = hasScore ? quiz.last_percent : 0;
-                        const scoreText = hasScore ? `${langPack[currentLang].score_text}: ${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `${langPack[currentLang].q_count}: ${quiz.total} ta`;
-                        const pubClass = quiz.is_public ? 'is-active' : '';
-
-                        const card = document.createElement('div');
-                        card.className = 'quiz-card';
-                        card.innerHTML = `
-                            <div class="card-top">
-                                <div class="card-title">${quiz.title}</div>
-                                <div class="action-group">
-                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})" title="Global Share">🌐</button>
-                                    <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">🗑️</button>
-                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
-                                </div>
-                            </div>
-                            <div class="progress-row">
-                                <div class="progress-line-container">
-                                    <div class="progress-line-bar" style="width: ${displayPercent}%;"></div>
-                                </div>
-                                <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
-                            </div>
-                            <div class="card-footer"><span>${scoreText}</span><span>ID: ${quiz.id.replace('q_', '')}</span></div>
-                        `;
-                        listDiv.appendChild(card);
-                    });
-                } else {
-                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_tests}</div>`;
-                }
-            } catch (error) { console.error(error); }
-        }
-
-        // LOAD PUBLIC QUIZZES LENTA
-        async function loadPublicQuizzes() {
-            const container = document.getElementById('lib-content-area');
-            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Loading...</div>`;
-            try {
-                const response = await fetch(`${BASE_URL}/api/public-quizzes`);
-                const data = await response.json();
-                container.innerHTML = "";
-                
-                if(data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
-                    data.quizzes.forEach(quiz => {
-                        const card = document.createElement('div');
-                        card.className = 'quiz-card';
-                        card.innerHTML = `
-                            <div class="card-top">
-                                <div class="card-title">${quiz.title}</div>
-                                <div class="action-group">
-                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️ Play</button>
-                                </div>
-                            </div>
-                            <div class="card-footer">
-                                <span>${langPack[currentLang].q_count}: ${quiz.total}</span>
-                                <span>🌍 Global</span>
-                            </div>
-                        `;
-                        container.appendChild(card);
-                    });
-                } else {
-                    container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_public}</div>`;
-                }
-            } catch(e) { container.innerHTML = "Error."; }
-        }
-
-        // TOGGLE PUBLIC SYSTEM
-        async function togglePublic(quizId, newState) {
-            try {
-                const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
-                const data = await response.json();
-                if(data.status === 'ok') loadQuizzes();
-            } catch(e){}
-        }
-
-        async function deleteQuiz(quizId) {
-            if (!confirm(langPack[currentLang].alert_del_quiz)) return;
-            try {
-                const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
-                const data = await response.json();
-                if (data && data.status === "ok") loadQuizzes();
-            } catch (error) { alert("Error deleting."); }
-        }
-
-        // --- FLASHCARDS LOGIC ---
-        async function loadFlashcards() {
-            const container = document.getElementById('lib-content-area');
-            container.innerHTML = `
-                <div style="margin-bottom: 15px;">
-                    <input type="text" id="fc-front" class="input-card" placeholder="${langPack[currentLang].card_front}">
-                    <input type="text" id="fc-back" class="input-card" placeholder="${langPack[currentLang].card_back}">
-                    <button class="submit-btn" onclick="addFlashcard()">${langPack[currentLang].btn_add_card} 🗂️</button>
-                </div>
-                <div id="cards-list-div"></div>
-            `;
-            const listDiv = document.getElementById('cards-list-div');
-            try {
-                const res = await fetch(`${BASE_URL}/api/flashcards?user_id=${userId}`);
-                const data = await res.json();
-                if(data && data.cards && data.cards.length > 0) {
-                    data.cards.forEach(c => {
-                        const card = document.createElement('div');
-                        card.className = 'flash-card';
-                        card.innerHTML = `
-                            <div class="card-top">
-                                <div id="body-${c.id}" class="fc-display" onclick="flipCard('${c.id}', '${c.front}', '${c.back}')">${c.front}</div>
-                                <button class="btn-delete" onclick="deleteCard('${c.id}')">🗑️</button>
-                            </div>
-                        `;
-                        listDiv.appendChild(card);
-                    });
-                } else {
-                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 30px;">${langPack[currentLang].msg_no_cards}</div>`;
-                }
-            } catch(e){}
-        }
-
-        async function addFlashcard() {
-            const front = document.getElementById('fc-front').value.trim();
-            const back = document.getElementById('fc-back').value.trim();
-            if(!front || !back) return;
-            try {
-                const response = await fetch(`${BASE_URL}/api/create-flashcard`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId, front: front, back: back })
-                });
-                if((await response.json()).status === 'ok') loadFlashcards();
-            } catch(e){}
-        }
-
-        function flipCard(id, front, back) {
-            const el = document.getElementById(`body-${id}`);
-            if(el.innerText === front) {
-                el.innerText = back;
-                el.style.color = 'var(--accent-yellow)';
-            } else {
-                el.innerText = front;
-                el.style.color = '#fff';
-            }
-        }
-
-        async function deleteCard(id) {
-            try {
-                await fetch(`${BASE_URL}/api/delete-flashcard?card_id=${id}&user_id=${userId}`, { method: 'DELETE' });
-                loadFlashcards();
-            } catch(e){}
-        }
-
-        // --- GAME PLAY ENGINE ---
-        async function playQuiz(quizId) {
-            try {
-                const response = await fetch(BASE_URL + '/api/quiz-detail?quiz_id=' + quizId);
-                const data = await response.json();
-                if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
-                    currentQuizId = quizId;
-                    currentQuizQuestions = data.quiz_json.quizzes;
-                    currentQuestionIdx = 0;
-                    correctAnswersCount = 0;
-                    wrongAnswersCount = 0;
-                    document.getElementById('game-screen').style.display = 'block';
-                    showQuestion();
-                }
-            } catch (error) { alert("Load error."); }
-        }
-
-        function showQuestion() {
-            if (currentQuestionIdx >= currentQuizQuestions.length) {
-                finishQuiz();
-                return;
-            }
-            isAnswered = false;
-            const q = currentQuizQuestions[currentQuestionIdx];
-            document.getElementById('game-progress').innerText = `Savol: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
-            document.getElementById('question-text').innerText = q.question;
-            
-            const container = document.getElementById('options-container');
-            container.innerHTML = "";
-            document.getElementById('explanation-container').style.display = 'none';
-            
-            const nextBtn = document.getElementById('next-question-btn');
-            nextBtn.style.display = 'none';
-            nextBtn.innerText = (currentQuestionIdx === currentQuizQuestions.length - 1) ? langPack[currentLang].btn_finish : langPack[currentLang].btn_next;
-
-            const prefixes = ["A) ", "B) ", "C) ", "D) "];
-            q.options.forEach((opt, idx) => {
-                const btn = document.createElement('button');
-                btn.className = 'opt-btn';
-                btn.innerText = opt.startsWith("A)") || opt.startsWith("B)") ? opt : (prefixes[idx] || "") + opt;
-                btn.onclick = () => selectOption(btn, idx, q.correct_index, q.explanation);
-                container.appendChild(btn);
-            });
-        }
-
-        function selectOption(btn, idx, correctIdx, explanation) {
-            if (isAnswered) return;
-            isAnswered = true;
-            const container = document.getElementById('options-container');
-            const buttons = container.getElementsByClassName('opt-btn');
-            const expBox = document.getElementById('explanation-container');
-
-            if (idx === correctIdx) {
-                btn.classList.add('correct');
-                correctAnswersCount++;
-            } else {
-                btn.classList.add('wrong');
-                wrongAnswersCount++;
-                if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
-                expBox.innerText = "💡 Izoh: " + (explanation || "Correct answer highlighted.");
-                expBox.style.display = 'block';
-            }
-            document.getElementById('next-question-btn').style.display = 'block';
-        }
-
-        function nextQuestion() {
-            currentQuestionIdx++;
-            showQuestion();
-        }
-
-        async function finishQuiz() {
-            const total = currentQuizQuestions.length;
-            const scorePercent = Math.round((correctAnswersCount / total) * 100);
-            try {
-                await fetch(BASE_URL + '/api/update-progress', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
-                });
-            } catch (e) {}
-            alert(`🏁 Done!\n\n✅ Correct: ${correctAnswersCount}\n❌ Wrong: ${wrongAnswersCount}\n🎯 Score: ${scorePercent}%`);
-            closeGame();
-        }
-
-        function closeGame() {
-            document.getElementById('game-screen').style.display = 'none';
-            loadQuizzes();
-        }
-
-        window.onload = function() {
-            loadQuizzes();
-        };
-    </script>
-</body>
-</html>
+</div>
