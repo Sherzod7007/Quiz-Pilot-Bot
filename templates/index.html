@@ -20,7 +20,7 @@
             </div>
             <div style="text-align: right;">
                 <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">7 000 so'm</div>
-                <button onclick="openPaymentModal('⚡ Kunlik Cheksiz', '7 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold; transition: 0.2s;">Faollashtirish</button>
+                <button onclick="openPaymentModal('⚡ Kunlik Cheksiz', '7 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
             </div>
         </div>
 
@@ -50,7 +50,7 @@
         <div style="background: linear-gradient(135deg, #3d226b, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(155,89,182,0.2);">
             <div>
                 <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">👨‍🏫 O'qituvchilar Uchun</h4>
-                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kunlik kengaytirilgan guruh rejimi</p>
+                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kunlik guruh rejimi (kengaytirilgan)</p>
             </div>
             <div style="text-align: right;">
                 <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">90 000 so'm</div>
@@ -82,8 +82,85 @@
                 3. Admin chekni tekshirib, tarifingizni faollashtiradi!
             </div>
 
-            <button onclick="closePaymentModal()" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #3d3d63; padding: 10px 20px; border-radius: 10px; font-size: 14px; cursor: pointer; width: 100%; font-weight: bold; transition: 0.2s;">Orqaga qaytish</button>
+            <button onclick="closePaymentModal()" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #3d3d63; padding: 10px 20px; border-radius: 10px; font-size: 14px; cursor: pointer; width: 100%; font-weight: bold;">Orqaga qaytish</button>
         </div>
     </div>
 
 </div>
+
+<script>
+    // To'lov oynasini ochish funksiyasi
+    function openPaymentModal(tariffName, price) {
+        document.getElementById('modalTariffName').innerText = tariffName;
+        document.getElementById('modalTariffPrice').innerText = price;
+        document.getElementById('paymentModal').style.display = 'flex';
+    }
+
+    // To'lov oynasini yopish funksiyasi
+    function closePaymentModal() {
+        document.getElementById('paymentModal').style.display = 'none';
+    }
+
+    // Karta raqamini probellersiz toza holda nusxalash (Copy to Clipboard)
+    function copyCardNumber() {
+        const cardNum = "9860060131350575";
+        
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(cardNum).then(() => {
+                showTooltip();
+            });
+        } else {
+            // Eski brauzer va qurilmalar uchun zaxira usuli
+            const textArea = document.createElement("textarea");
+            textArea.value = cardNum;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                showTooltip();
+            } catch (err) {
+                console.error('Nusxalashda xato yuz berdi:', err);
+            }
+            document.body.removeChild(textArea);
+        }
+    }
+
+    // "Nusxalandi!" bildirishnomasini chiqarish
+    function showTooltip() {
+        const tooltip = document.getElementById('copyTooltip');
+        tooltip.style.display = 'block';
+        setTimeout(() => {
+            tooltip.style.display = 'none';
+        }, 1800);
+        
+        // Telegram WebApp ichida bo'lsa telefonda yoqimli qisqa tebranish beradi
+        if (window.Telegram?.WebApp?.HapticFeedback) {
+            window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+        }
+    }
+
+    // API'dan foydalanuvchi premium statusini olib ekranda aks ettirish
+    function loadPremiumStatus(userId) {
+        fetch(`/api/user-premium-status?user_id=${userId}`)
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('user-status-text').innerHTML = `<b>${data.status}</b>`;
+                if(data.is_premium) {
+                    document.getElementById('user-limit-text').innerText = `Tugash muddatiga: ${data.days_left} kun qoldi.`;
+                } else {
+                    document.getElementById('user-limit-text').innerText = `30 kunlik bepul limitingiz: ${data.free_clicks} / 3 ta`;
+                }
+            })
+            .catch(err => {
+                console.error("Premium statusni yuklashda xato:", err);
+            });
+    }
+
+    // Telegram WebApp orqali foydalanuvchini aniqlash
+    const tg_app = window.Telegram?.WebApp;
+    const MY_ADMIN_ID = 12345678; // <-- O'zingizning haqiqiy Telegram ID'ingizni shu yerga ham yozib qo'ying!
+    const current_user_id = tg_app?.initDataUnsafe?.user?.id || MY_ADMIN_ID;
+    
+    // Statusni avtomatik yuklash
+    loadPremiumStatus(current_user_id);
+</script>
