@@ -103,18 +103,14 @@ def get_users_count():
         logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
         return 0
 
-# Telegram Bot Buyruqlarini Tinglash Qismi
+# Telegram Bot Buyruqlarini Tinglash Qismi (O'zgartirildi: Foydalanuvchilar soni olib tashlandi)
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
     add_user_to_db(user_id)
     
-    # Real vaqtdagi foydalanuvchilar sonini olish
-    total_users = get_users_count()
-    
     welcome_text = (
         f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
-        f"👥 **Bizning foydalanuvchilar:** {total_users} ta active user\n\n"
         "⚡ **Yangi Yangilanish:**\n"
         "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
         "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!"
@@ -251,16 +247,20 @@ CRITICAL RULES:
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
+# O'zgartirildi: Jami foydalanuvchilar soni (total_users) javob tarkibiga qo'shildi
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
+    total_users = get_users_count()
+    
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent FROM quizzes WHERE user_id = ? ORDER BY CREATED_AT DESC", (user_id,))
+    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
+    
     quizzes = [{
         "id": r["id"], 
         "title": r["title"], 
@@ -270,7 +270,8 @@ def get_user_quizzes(user_id: int):
         "last_score": r["last_score"],
         "last_percent": r["last_percent"]
     } for r in rows]
-    return {"status": "ok", "quizzes": quizzes}
+    
+    return {"status": "ok", "quizzes": quizzes, "total_users": total_users}
 
 @app.get("/api/quiz-detail")
 def get_quiz_detail(quiz_id: str):
@@ -296,7 +297,6 @@ def update_progress(data: ProgressUpdateRequest):
     conn.close()
     return {"status": "ok"}
 
-# YANGA QO'SHILGAN: Testni o'chirib tashlash yo'nalishi
 @app.delete("/api/delete-quiz")
 def delete_quiz(quiz_id: str, user_id: int):
     try:
@@ -321,7 +321,7 @@ def start_bot_polling():
             logging.error(f"Polling siklida uzilish bo'ldi, 5 soniyadan keyin qayta urinadi: {e}")
             time.sleep(5)
 
-# FastAPI start-up hodisasi (Server yoqilganda botni ham fonda qo'shib ishga tushiradi)
+# FastAPI start-up hodisasi
 @app.on_event("startup")
 async def startup_event():
     polling_thread = threading.Thread(target=start_bot_polling, daemon=True)
