@@ -24,7 +24,9 @@
             margin: 0; padding: 15px; padding-bottom: 90px;
             -webkit-user-select: none; user-select: none;
         }
-        .header h1 { font-size: 26px; margin: 0 0 15px 0; font-weight: 700; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .header h1 { font-size: 26px; margin: 0; font-weight: 700; }
+        .user-badge { font-size: 13px; color: var(--text-hint); background: #24242b; padding: 4px 10px; border-radius: 12px; font-weight: 500; border: 1px solid var(--border-color); }
         .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
         .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
         .tab.active { background: var(--accent-blue); color: #fff; }
@@ -63,7 +65,7 @@
 <body>
 
     <div id="create-screen" class="screen">
-        <div class="header"><h1>Yangi Test Yaratish</h1></div>
+        <div class="header"><h1>Yangi Test</h1></div>
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
             <span id="upload-text">Darslik yuklash (PDF yoki DOCX)</span>
@@ -76,7 +78,10 @@
     </div>
 
     <div id="library-screen" class="screen active">
-        <div class="header"><h1>Kutubxona</h1></div>
+        <div class="header">
+            <h1>Kutubxona</h1>
+            <span id="user-count-badge" class="user-badge">0 active users</span>
+        </div>
         <div class="tabs">
             <button class="tab active">❓ Testlar</button>
             <button class="tab" onclick="alert('Tez kunda ommaviy bo\'lim ishga tushadi!')">🌐 Ommaviy</button>
@@ -185,6 +190,12 @@
             try {
                 const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
                 const data = await response.json();
+                
+                // O'zgartirildi: Jami foydalanuvchilar soni badgeda ko'rsatiladi
+                if (data && data.total_users !== undefined) {
+                    document.getElementById('user-count-badge').innerText = `${data.total_users} active users`;
+                }
+
                 const container = document.getElementById('quiz-list');
                 if (!container) return;
                 container.innerHTML = "";
@@ -226,7 +237,6 @@
             }
         }
 
-        // YANGI QO'SHILGAN: Testni o'chirish funksiyasi
         async function deleteQuiz(quizId) {
             if (!confirm("Ushbu testni butunlay o'chirib tashlamoqchimisiz?")) {
                 return;
@@ -238,7 +248,7 @@
                 const data = await response.json();
                 if (data && data.status === "ok") {
                     alert("🗑️ Test muvaffaqiyatli o'chirildi.");
-                    loadQuizzes(); // Ro'yxatni real vaqtda yangilash
+                    loadQuizzes();
                 } else {
                     alert("Xato: Testni o'chirib bo'lmadi.");
                 }
