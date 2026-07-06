@@ -36,6 +36,8 @@ def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
+    
+    # Quizzes jadvali (is_public ustuni qo'shildi)
     cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
                         id TEXT PRIMARY KEY, 
                         user_id INTEGER, 
@@ -45,8 +47,23 @@ def init_db():
                         quiz_json TEXT, 
                         created_at INTEGER,
                         last_score INTEGER DEFAULT -1,
-                        last_percent INTEGER DEFAULT -1)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, created_at INTEGER)''')
+                        last_percent INTEGER DEFAULT -1,
+                        is_public INTEGER DEFAULT 0)''')
+    
+    # Users jadvali (language ustuni qo'shildi)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                        user_id INTEGER PRIMARY KEY, 
+                        created_at INTEGER,
+                        language TEXT DEFAULT 'uz')''')
+    
+    # Flashcards jadvali (Yangi qo'shildi)
+    cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
+                        id TEXT PRIMARY KEY,
+                        user_id INTEGER,
+                        front TEXT,
+                        back TEXT,
+                        created_at INTEGER)''')
+                        
     conn.commit()
     conn.close()
 
@@ -67,12 +84,17 @@ class ProgressUpdateRequest(BaseModel):
     correct_count: int
     percent: int
 
+class FlashcardCreateRequest(BaseModel):
+    user_id: int
+    front: str
+    back: str
+
 def add_user_to_db(user_id: int):
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", (user_id, int(time.time())))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language) VALUES (?, ?, 'uz')", (user_id, int(time.time())))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -99,8 +121,8 @@ def send_welcome(message):
     welcome_text = (
         f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
-        "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!"
+        "🔥 Endi tizimimiz 3 xil tilda (UZ, RU, EN) ishlaydi, Ommaviy testlar va Flesh-kartochkalar to'liq ishga tushdi!\n\n"
+        "🚀 Marhamat, pastdagi tugmani bosib ilovani oching!"
     )
     
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -128,7 +150,6 @@ def read_root(request: Request):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# O'zgartirildi: quiz_title form maydoni orqali foydalanuvchi nomi qabul qilinadi
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...), 
@@ -179,20 +200,18 @@ async def create_quiz_web(
             return {"status": "error", "message": "AI savollar ro'yxatini bo'sh qaytardi."}
             
         quiz_id = f"q_{int(time.time())}"
-        
-        # Agar foydalanuvchi o'z maxsus nomini yozgan bo'lsa, uni ishlatamiz
         final_title = quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)", 
                        (quiz_id, user_id, final_title[:30], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
         conn.commit()
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 Ajoyib! **{final_title[:30]}** darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
+            bot.send_message(user_id, f"🎉 **{final_title[:30]}** darsligi bo'yicha jami **{len(items)} ta** test savoli muvaffaqiyatli tayyorlandi!")
         except Exception as e: 
             logging.error(f"Telegram xabari yuborilmadi: {e}")
 
@@ -241,8 +260,16 @@ def get_user_quizzes(user_id: int):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    rows = cursor.fetchall()
+    
+    # Shaxsiy testlar
+    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    personal_rows = cursor.fetchall()
+    
+    # Foydalanuvchi tanlagan tilini olish
+    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
+    lang_row = cursor.fetchone()
+    user_lang = lang_row["language"] if lang_row else "uz"
+    
     conn.close()
     
     quizzes = [{
@@ -252,10 +279,81 @@ def get_user_quizzes(user_id: int):
         "answered": r["answered"], 
         "created_at": r["created_at"],
         "last_score": r["last_score"],
-        "last_percent": r["last_percent"]
-    } for r in rows]
+        "last_percent": r["last_percent"],
+        "is_public": r["is_public"]
+    } for r in personal_rows]
     
-    return {"status": "ok", "quizzes": quizzes, "total_users": total_users}
+    return {"status": "ok", "quizzes": quizzes, "total_users": total_users, "user_lang": user_lang}
+
+# Ommaviy testlarni olish APIsi
+@app.get("/api/public-quizzes")
+def get_public_quizzes():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "created_at": r["created_at"]} for r in rows]
+    return {"status": "ok", "quizzes": quizzes}
+
+# Testni ommaviy qilish yoki shaxsiyga qaytarish toggle APIsi
+@app.post("/api/toggle-public")
+def toggle_public(quiz_id: str, user_id: int, is_public: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?", (is_public, quiz_id, user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+# Foydalanuvchi tilini o'zgartirish APIsi
+@app.post("/api/set-language")
+def set_language(user_id: int, lang: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+# --- FLASHCARDS APILARI ---
+@app.get("/api/flashcards")
+def get_flashcards(user_id: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
+    return {"status": "ok", "cards": cards}
+
+@app.post("/api/create-flashcard")
+def create_flashcard(req: FlashcardCreateRequest):
+    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)", (card_id, req.user_id, req.front, req.back, int(time.time())))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.delete("/api/delete-flashcard")
+def delete_flashcard(card_id: str, user_id: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
 @app.get("/api/quiz-detail")
 def get_quiz_detail(quiz_id: str):
