@@ -258,7 +258,7 @@ def get_user_quizzes(user_id: int):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent FROM quizzes WHERE user_id = ? ORDER BY CREATED_AT DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
     quizzes = [{
@@ -295,6 +295,21 @@ def update_progress(data: ProgressUpdateRequest):
     conn.commit()
     conn.close()
     return {"status": "ok"}
+
+# YANGA QO'SHILGAN: Testni o'chirib tashlash yo'nalishi
+@app.delete("/api/delete-quiz")
+def delete_quiz(quiz_id: str, user_id: int):
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Test muvaffaqiyatli o'chirildi."}
+    except Exception as e:
+        logging.error(f"Testni o'chirishda xatolik: {e}")
+        raise HTTPException(status_code=500, detail="Testni o'chirib bo'lmadi.")
 
 # Bot uzluksiz tinglashini fonda bajaradigan funksiya
 def start_bot_polling():
