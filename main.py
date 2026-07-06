@@ -30,14 +30,16 @@ GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_k
 current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
-DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
+
+# TUZATILDI: Eski volume muammosini chetlab o'tish uchun baza nomi quiz_pilot_v2.db ga o'zgartirildi
+DB_PATH = "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
-    # Quizzes jadvali (is_public ustuni to'g'rilandi)
+    # Quizzes jadvali (10 ta ustunli toza struktura)
     cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
                         id TEXT PRIMARY KEY, 
                         user_id INTEGER, 
@@ -179,7 +181,7 @@ async def create_quiz_web(
                     raw_text = "\n".join([p.text for p in doc.paragraphs])
                     auto_title = file.filename.replace('.docx', '')
         except Exception as e:
-            logging.error(f"Fayl yuklashda xato: {e}")
+            logging.error(f"Foydalanuvchi fayl yuklashda xato: {e}")
             
     if not raw_text.strip() and text:
         raw_text = text
@@ -206,7 +208,6 @@ async def create_quiz_web(
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         
-        # TUZATILDI: Ustunlar nomini aniq yozdik, xatolik to'liq bartaraf etildi
         cursor.execute(
             """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""", 
@@ -266,11 +267,9 @@ def get_user_quizzes(user_id: int):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
-    # Shaxsiy testlar
     cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     personal_rows = cursor.fetchall()
     
-    # Foydalanuvchi tanlagan tilini olish
     cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
     lang_row = cursor.fetchone()
     user_lang = lang_row["language"] if lang_row else "uz"
@@ -290,7 +289,6 @@ def get_user_quizzes(user_id: int):
     
     return {"status": "ok", "quizzes": quizzes, "total_users": total_users, "user_lang": user_lang}
 
-# Ommaviy testlarni olish APIsi
 @app.get("/api/public-quizzes")
 def get_public_quizzes():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -304,7 +302,6 @@ def get_public_quizzes():
     quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "created_at": r["created_at"]} for r in rows]
     return {"status": "ok", "quizzes": quizzes}
 
-# Testni ommaviy qilish yoki shaxsiyga qaytarish toggle APIsi
 @app.post("/api/toggle-public")
 def toggle_public(quiz_id: str, user_id: int, is_public: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -315,7 +312,6 @@ def toggle_public(quiz_id: str, user_id: int, is_public: int):
     conn.close()
     return {"status": "ok"}
 
-# Foydalanuvchi tilini o'zgartirish APIsi
 @app.post("/api/set-language")
 def set_language(user_id: int, lang: str):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -326,7 +322,6 @@ def set_language(user_id: int, lang: str):
     conn.close()
     return {"status": "ok"}
 
-# --- FLASHCARDS APILARI ---
 @app.get("/api/flashcards")
 def get_flashcards(user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
