@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -52,11 +52,13 @@ def init_db():
                         last_percent INTEGER DEFAULT -1,
                         is_public INTEGER DEFAULT 0)''')
     
-    # Users jadvali
+    # Users jadvali (PREMIUM va LIMIT ustunlari integratsiya qilindi)
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY, 
                         created_at INTEGER,
-                        language TEXT DEFAULT 'uz')''')
+                        language TEXT DEFAULT 'uz',
+                        is_premium INTEGER DEFAULT 0,
+                        premium_status_text TEXT DEFAULT 'Oddiy foydalanuvchi ⏳')''')
     
     # Flashcards jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
@@ -96,7 +98,7 @@ def add_user_to_db(user_id: int):
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language) VALUES (?, ?, 'uz')", (user_id, int(time.time())))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language, is_premium, premium_status_text) VALUES (?, ?, 'uz', 0, 'Oddiy foydalanuvchi ⏳')", (user_id, int(time.time())))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -113,6 +115,19 @@ def get_users_count():
         return count
     except Exception as e:
         logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
+        return 0
+
+def get_user_quiz_count(user_id: int) -> int:
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("SELECT COUNT(*) FROM quizzes WHERE user_id = ?", (user_id,))
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    except Exception as e:
+        logging.error(f"Foydalanuvchi testlar sonini olishda xato: {e}")
         return 0
 
 @bot.message_handler(commands=['start'])
@@ -152,6 +167,31 @@ def read_root(request: Request):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
+# YANGI PREMIUM STATUS API: Frontend dagi "undefined" muammolarini butkul hal qiladi
+@app.get("/api/user-premium-status")
+def get_premium_status(user_id: int):
+    add_user_to_db(user_id)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT is_premium, premium_status_text FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    is_premium = bool(row["is_premium"]) if row else False
+    status_text = row["premium_status_text"] if (row and row["premium_status_text"]) else "Oddiy foydalanuvchi ⏳"
+    
+    created_quizzes = get_user_quiz_count(user_id)
+    
+    return {
+        "is_premium": is_premium,
+        "status": "Premium Faol 👑" if is_premium else status_text,
+        "free_clicks": created_quizzes if created_quizzes <= 3 else 3,
+        "days_left": 30 if is_premium else 0
+    }
+
+# TO'G'RILANDI: Limitlar faqat yangi test yaratishda tekshiriladi, eskilarini qulflamaydi
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...), 
@@ -160,6 +200,25 @@ async def create_quiz_web(
     quiz_title: Optional[str] = Form(None)
 ):
     add_user_to_db(user_id)
+    
+    # Premiumlikka va limitga tekshirish
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT is_premium FROM users WHERE user_id = ?", (user_id,))
+    user_row = cursor.fetchone()
+    conn.close()
+    
+    is_premium = user_row[0] if user_row else 0
+    
+    if not is_premium:
+        current_quiz_count = get_user_quiz_count(user_id)
+        if current_quiz_count >= 3:
+            return {
+                "status": "error", 
+                "message": "Sizning 3 ta bepul test yaratish limitingiz tugadi! Yangi test yaratish uchun Premium tarifga o'ting."
+            }
+
     raw_text = ""
     auto_title = "Matnli Test"
     
