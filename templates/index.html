@@ -1,166 +1,271 @@
-<div id="premium-section" class="container" style="padding: 15px; color: #fff; font-family: sans-serif;">
-    
-    <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); padding: 15px; border-radius: 16px; margin-bottom: 20px; border: 1px solid #f1c40f; text-align: center; box-shadow: 0 4px 15px rgba(241,196,15,0.1);">
-        <h3 style="margin: 0 0 8px 0; color: #f1c40f; font-size: 18px;">💎 Sizning Statusingiz</h3>
-        <p id="user-status-text" style="font-size: 16px; margin: 5px 0; font-weight: bold; color: #fff;">Yuklanmoqda...</p>
-        <p id="user-limit-text" style="font-size: 13px; color: #e0b0ff; margin: 5px 0;"></p>
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Pilot Bot WebApp</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            padding-bottom: 70px; /* Navigatsiya paneli uchun joy */
+        }
+        .container {
+            padding: 15px;
+        }
+        /* Tab kontentlar boshqaruvi */
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        /* Pastki Navigatsiya Menyusi */
+        .nav-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            border-top: 1px solid #2d2d2d;
+            z-index: 1000;
+        }
+        .nav-item {
+            color: #888;
+            font-size: 11px;
+            text-align: center;
+            cursor: pointer;
+            text-decoration: none;
+            background: none;
+            border: none;
+            flex: 1;
+        }
+        .nav-item.active {
+            color: #3498db;
+        }
+        .nav-item.premium-tab.active {
+            color: #f1c40f;
+        }
+        .nav-item-icon {
+            font-size: 20px;
+            margin-bottom: 2px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="create-section" class="tab-content active container">
+        <h2 style="color: #3498db;">✨ Yangi Test Yaratish</h2>
+        <p style="color: #aaa; font-size: 14px;">Darslik yoki PDF faylingizni yuklang va AI yordamida tezkor testlar generatsiya qiling.</p>
+        </div>
+
+    <div id="library-section" class="tab-content container">
+        <h2 style="color: #2ecc71;">📚 Kutubxona</h2>
+        <p style="color: #aaa; font-size: 14px;">Siz yaratgan barcha testlar va natijalar (Ular doim cheksiz va ochiq).</p>
+        </div>
+
+    <div id="settings-section" class="tab-content container">
+        <h2 style="color: #9b59b6;">⚙️ Sozlamalar</h2>
+        <p style="color: #aaa; font-size: 14px;">Ilova tilini va bot sozlamalarini o'zgartiring.</p>
     </div>
 
-    <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #f1c40f; border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); margin-bottom: 25px;">
-        <h2 style="margin: 0 0 10px 0; color: #f1c40f; font-size: 22px; letter-spacing: 1px;">Quiz Pilot PRO 👑</h2>
-        <p style="margin: 0; color: #e0b0ff; font-size: 13px; line-height: 1.4;">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
-    </div>
-
-    <div style="display: flex; flex-direction: column; gap: 15px;">
+    <div id="premium-section" class="tab-content container" style="color: #fff;">
         
-        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #3d3d63; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
-            <div>
-                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">⚡ Kunlik Cheksiz</h4>
-                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">24 soat mutlaqo cheksiz test yaratish</p>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">7 000 so'm</div>
-                <button onclick="openPaymentModal('⚡ Kunlik Cheksiz', '7 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
-            </div>
+        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); padding: 15px; border-radius: 16px; margin-bottom: 20px; border: 1px solid #f1c40f; text-align: center; box-shadow: 0 4px 15px rgba(241,196,15,0.1);">
+            <h3 style="margin: 0 0 8px 0; color: #f1c40f; font-size: 18px;">💎 Sizning Statusingiz</h3>
+            <p id="user-status-text" style="font-size: 16px; margin: 5px 0; font-weight: bold; color: #fff;">Yuklanmoqda...</p>
+            <p id="user-limit-text" style="font-size: 13px; color: #e0b0ff; margin: 5px 0;"></p>
         </div>
 
-        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(241,196,15,0.15); position: relative; overflow: hidden;">
-            <div style="position: absolute; top: 0; right: 0; background: #f1c40f; color: #1a103c; font-size: 9px; padding: 2px 10px; border-bottom-left-radius: 8px; font-weight: bold;">OMMABOP</div>
-            <div>
-                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">📅 Haftalik Cheksiz</h4>
-                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">7 kun davomida cheksiz foydalanish</p>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">30 000 so'm</div>
-                <button onclick="openPaymentModal('📅 Haftalik Cheksiz', '30 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
-            </div>
+        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #f1c40f; border-radius: 16px; padding: 20px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); margin-bottom: 25px;">
+            <h2 style="margin: 0 0 10px 0; color: #f1c40f; font-size: 22px; letter-spacing: 1px;">Quiz Pilot PRO 👑</h2>
+            <p style="margin: 0; color: #e0b0ff; font-size: 13px; line-height: 1.4;">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
         </div>
 
-        <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #3d3d63; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
-            <div>
-                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">🌙 Oylik Cheksiz</h4>
-                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kun davomida eng qulay cheksiz rejim</p>
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            
+            <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #3d3d63; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+                <div>
+                    <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">⚡ Kunlik Cheksiz</h4>
+                    <p style="margin: 0; font-size: 12px; color: #e0b0ff;">24 soat mutlaqo cheksiz test yaratish</p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">7 000 so'm</div>
+                    <button onclick="openPaymentModal('⚡ Kunlik Cheksiz', '7 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+                </div>
             </div>
-            <div style="text-align: right;">
-                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">60 000 so'm</div>
-                <button onclick="openPaymentModal('🌙 Oylik Cheksiz', '60 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
-            </div>
-        </div>
 
-        <div style="background: linear-gradient(135deg, #3d226b, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(155,89,182,0.2);">
-            <div>
-                <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">👨‍🏫 O'qituvchilar Uchun</h4>
-                <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kunlik guruh rejimi (kengaytirilgan)</p>
+            <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(241,196,15,0.15); position: relative; overflow: hidden;">
+                <div style="position: absolute; top: 0; right: 0; background: #f1c40f; color: #1a103c; font-size: 9px; padding: 2px 10px; border-bottom-left-radius: 8px; font-weight: bold;">OMMABOP</div>
+                <div>
+                    <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">📅 Haftalik Cheksiz</h4>
+                    <p style="margin: 0; font-size: 12px; color: #e0b0ff;">7 kun davomida cheksiz foydalanish</p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">30 000 so'm</div>
+                    <button onclick="openPaymentModal('📅 Haftalik Cheksiz', '30 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+                </div>
             </div>
-            <div style="text-align: right;">
-                <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">90 000 so'm</div>
-                <button onclick="openPaymentModal('👨‍🏫 O'qituvchilar Uchun', '90 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
-            </div>
-        </div>
 
+            <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 1px solid #3d3d63; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+                <div>
+                    <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">🌙 Oylik Cheksiz</h4>
+                    <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kun davomida eng qulay cheksiz rejim</p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">60 000 so'm</div>
+                    <button onclick="openPaymentModal('🌙 Oylik Cheksiz', '60 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div style="background: linear-gradient(135deg, #3d226b, #1a103c); border: 1px solid #f1c40f; border-radius: 14px; padding: 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 15px rgba(155,89,182,0.2);">
+                <div>
+                    <h4 style="margin: 0 0 5px 0; color: #f1c40f; font-size: 16px;">👨‍🏫 O'qituvchilar Uchun</h4>
+                    <p style="margin: 0; font-size: 12px; color: #e0b0ff;">30 kunlik guruh va tahlillar rejimi</p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-weight: bold; font-size: 16px; color: #fff; margin-bottom: 5px;">90 000 so'm</div>
+                    <button onclick="openPaymentModal('👨‍🏫 O'qituvchilar Uchun', '90 000')" style="background: #f1c40f; color: #1a103c; border: none; padding: 7px 14px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: bold;">Faollashtirish</button>
+                </div>
+            </div>
+
+        </div>
     </div>
 
     <div id="paymentModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box;">
         <div style="background: linear-gradient(135deg, #2c1a4d, #1a103c); border: 2px solid #f1c40f; border-radius: 20px; width: 100%; max-width: 380px; padding: 22px; text-align: center; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.6);">
-            
             <h3 style="margin-top: 0; color: #f1c40f; font-size: 18px;" id="modalTariffName">Tarif</h3>
             <p style="color: #e0b0ff; font-size: 14px; margin: 5px 0 15px 0;">To'lov miqdori: <b id="modalTariffPrice" style="color: #fff; font-size: 18px;">0</b> so'm</p>
+            <p style="font-size: 13px; color: #fff; margin-bottom: 10px;">Karta raqami ustiga bosib nusxa oling:</p>
             
-            <p style="font-size: 13px; color: #fff; margin-bottom: 10px;">Karta raqami ustiga bosib **nusxa oling**:</p>
-            
-            <div onclick="copyCardNumber()" style="background: linear-gradient(135deg, #f1c40f, #b8860b); padding: 18px; border-radius: 12px; cursor: pointer; margin-bottom: 15px; position: relative; transition: transform 0.1s;" onmousedown="this.style.transform='scale(0.97)'" onmouseup="this.style.transform='scale(1)'">
-                <div style="font-size: 11px; text-align: left; color: #1a103c; font-weight: bold; opacity: 0.8; letter-spacing: 1px;">HUMO CARD</div>
+            <div onclick="copyCardNumber()" style="background: linear-gradient(135deg, #f1c40f, #b8860b); padding: 18px; border-radius: 12px; cursor: pointer; margin-bottom: 15px; position: relative;">
+                <div style="font-size: 11px; text-align: left; color: #1a103c; font-weight: bold; opacity: 0.8;">HUMO CARD</div>
                 <div id="cardNumberText" style="font-size: 21px; font-weight: bold; letter-spacing: 2px; margin: 12px 0; color: #1a103c;">9860 0601 3135 0575</div>
                 <div style="font-size: 10px; text-align: right; color: #1a103c; font-weight: bold; opacity: 0.7;">BOSING - NUSXA OLINADI</div>
-                <div id="copyTooltip" style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #2ecc71; color: white; font-size: 11px; padding: 3px 10px; border-radius: 6px; display: none; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">Nusxalandi! ✨</div>
+                <div id="copyTooltip" style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #2ecc71; color: white; font-size: 11px; padding: 3px 10px; border-radius: 6px; display: none;">Nusxalandi! ✨</div>
             </div>
 
             <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; text-align: left; font-size: 12px; color: #e0b0ff; line-height: 1.5; margin-bottom: 20px; border-left: 3px solid #f1c40f;">
                 <b>📌 To'lov tartibi:</b><br>
-                1. Karta raqamini ko'chirib oling va istalgan ilovadan (Click, Payme, Uzum) pul o'tkazing.<br>
-                2. O'tkazma **cheki yoki skrinshotini** to'g'ridan-to'g'ri shu Telegram botga yuboring.<br>
-                3. Admin chekni tekshirib, tarifingizni faollashtiradi!
+                1. Karta raqamini ko'chirib oling, Click/Payme orqali pul o'tkazing.<br>
+                2. Chek skrinshotini to'g'ridan-to'g'ri shu botga yuboring.
             </div>
-
-            <button onclick="closePaymentModal()" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #3d3d63; padding: 10px 20px; border-radius: 10px; font-size: 14px; cursor: pointer; width: 100%; font-weight: bold;">Orqaga qaytish</button>
+            <button onclick="closePaymentModal()" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid #3d3d63; padding: 10px 20px; border-radius: 10px; font-size: 14px; cursor: pointer; width: 100%; font-weight: bold;">Orqaga</button>
         </div>
     </div>
 
-</div>
+    <div class="nav-bar">
+        <button class="nav-item active" onclick="switchTab('create', this)">
+            <div class="nav-item-icon">➕</div>
+            <div>Yaratish</div>
+        </button>
+        <button class="nav-item" onclick="switchTab('library', this)">
+            <div class="nav-item-icon">📚</div>
+            <div>Kutubxona</div>
+        </button>
+        <button class="nav-item" onclick="switchTab('settings', this)">
+            <div class="nav-item-icon">⚙️</div>
+            <div>Sozlamalar</div>
+        </button>
+        <button class="nav-item premium-tab" onclick="switchTab('premium', this)">
+            <div class="nav-item-icon">👑</div>
+            <div>Premium</div>
+        </button>
+    </div>
 
-<script>
-    // To'lov oynasini ochish funksiyasi
-    function openPaymentModal(tariffName, price) {
-        document.getElementById('modalTariffName').innerText = tariffName;
-        document.getElementById('modalTariffPrice').innerText = price;
-        document.getElementById('paymentModal').style.display = 'flex';
-    }
-
-    // To'lov oynasini yopish funksiyasi
-    function closePaymentModal() {
-        document.getElementById('paymentModal').style.display = 'none';
-    }
-
-    // Karta raqamini probellersiz toza holda nusxalash (Copy to Clipboard)
-    function copyCardNumber() {
-        const cardNum = "9860060131350575";
+    <script>
+        // Telegram WebApp sozlamalari
+        const tg = window.Telegram?.WebApp;
+        if(tg) {
+            tg.ready();
+            tg.expand();
+        }
         
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(cardNum).then(() => {
-                showTooltip();
-            });
-        } else {
-            // Eski brauzer va qurilmalar uchun zaxira usuli
-            const textArea = document.createElement("textarea");
-            textArea.value = cardNum;
-            document.body.appendChild(textArea);
-            textArea.select();
-            try {
-                document.execCommand('copy');
-                showTooltip();
-            } catch (err) {
-                console.error('Nusxalashda xato yuz berdi:', err);
+        const DEFAULT_USER_ID = 12345678; // Test rejim uchun zaxira ID
+        const current_user_id = tg?.initDataUnsafe?.user?.id || DEFAULT_USER_ID;
+
+        // Sahifalarni (Tab) almashtirish funksiyasi
+        function switchTab(tabName, element) {
+            // Hamma bo'limlarni yashirish
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(c => c.classList.remove('active'));
+            
+            // Hamma menyu tugmalaridan active klassini olish
+            const items = document.querySelectorAll('.nav-item');
+            items.forEach(i => i.classList.remove('active'));
+
+            // Tanlangan bo'limni ko'rsatish
+            document.getElementById(tabName + '-section').classList.add('active');
+            if(element) element.classList.add('active');
+
+            // Agar Premium bo'limi bosilsa, ma'lumotlarni bazadan yangilab oladi
+            if(tabName === 'premium') {
+                loadPremiumStatus(current_user_id);
             }
-            document.body.removeChild(textArea);
         }
-    }
 
-    // "Nusxalandi!" bildirishnomasini chiqarish
-    function showTooltip() {
-        const tooltip = document.getElementById('copyTooltip');
-        tooltip.style.display = 'block';
-        setTimeout(() => {
-            tooltip.style.display = 'none';
-        }, 1800);
-        
-        // Telegram WebApp ichida bo'lsa telefonda yoqimli qisqa tebranish beradi
-        if (window.Telegram?.WebApp?.HapticFeedback) {
-            window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+        // Modal oynalar boshqaruvi
+        function openPaymentModal(tariffName, price) {
+            document.getElementById('modalTariffName').innerText = tariffName;
+            document.getElementById('modalTariffPrice').innerText = price;
+            document.getElementById('paymentModal').style.display = 'flex';
         }
-    }
 
-    // API'dan foydalanuvchi premium statusini olib ekranda aks ettirish
-    function loadPremiumStatus(userId) {
-        fetch(`/api/user-premium-status?user_id=${userId}`)
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('user-status-text').innerHTML = `<b>${data.status}</b>`;
-                if(data.is_premium) {
-                    document.getElementById('user-limit-text').innerText = `Tugash muddatiga: ${data.days_left} kun qoldi.`;
-                } else {
-                    document.getElementById('user-limit-text').innerText = `30 kunlik bepul limitingiz: ${data.free_clicks} / 3 ta`;
-                }
-            })
-            .catch(err => {
-                console.error("Premium statusni yuklashda xato:", err);
-            });
-    }
+        function closePaymentModal() {
+            document.getElementById('paymentModal').style.display = 'none';
+        }
 
-    // Telegram WebApp orqali foydalanuvchini aniqlash
-    const tg_app = window.Telegram?.WebApp;
-    const MY_ADMIN_ID = 12345678; // <-- O'zingizning haqiqiy Telegram ID'ingizni shu yerga ham yozib qo'ying!
-    const current_user_id = tg_app?.initDataUnsafe?.user?.id || MY_ADMIN_ID;
-    
-    // Statusni avtomatik yuklash
-    loadPremiumStatus(current_user_id);
-</script>
+        function copyCardNumber() {
+            const cardNum = "9860060131350575";
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(cardNum).then(() => showTooltip());
+            } else {
+                const textArea = document.createElement("textarea");
+                textArea.value = cardNum;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showTooltip();
+            }
+        }
+
+        function showTooltip() {
+            const tooltip = document.getElementById('copyTooltip');
+            tooltip.style.display = 'block';
+            setTimeout(() => tooltip.style.display = 'none', 1800);
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('success');
+            }
+        }
+
+        // API'dan Premium statusini tortib kelish
+        function loadPremiumStatus(userId) {
+            fetch(`/api/user-premium-status?user_id=${userId}`)
+                .then(res => {
+                    if(!res.ok) throw new Error("Tarmoq xatosi");
+                    return res.json();
+                })
+                .then(data => {
+                    document.getElementById('user-status-text').innerHTML = `<b>${data.status}</b>`;
+                    if(data.is_premium) {
+                        document.getElementById('user-limit-text').innerText = `Tugash muddatiga: ${data.days_left} kun qoldi.`;
+                    } else {
+                        document.getElementById('user-limit-text').innerText = `30 kunlik bepul limitingiz: ${data.free_clicks} / 3 ta`;
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('user-status-text').innerText = "Tekshirib bo'lmadi";
+                    document.getElementById('user-limit-text').innerText = "Qayta urinib ko'ring";
+                });
+        }
+    </script>
+</body>
+</html>
