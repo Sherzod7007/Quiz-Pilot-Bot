@@ -42,7 +42,9 @@
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
         .screen { display: none; }
         .screen.active { display: block; }
-        .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 40px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 20px; color: var(--text-hint); }
+        .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 30px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 15px; color: var(--text-hint); }
+        .input-title { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; color: #fff; font-size: 15px; margin-bottom: 15px; outline: none; transition: border-color 0.2s; }
+        .input-title:focus { border-color: var(--accent-blue); }
         .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
         .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
         #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
@@ -66,13 +68,16 @@
 
     <div id="create-screen" class="screen">
         <div class="header"><h1>Yangi Test</h1></div>
+        
+        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)...">
+        
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
             <span id="upload-text">Darslik yuklash (PDF yoki DOCX)</span>
             <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
         </div>
-        <div style="text-align: center; color: var(--text-hint); margin-bottom: 20px;">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="6" placeholder="Mavzu yoki konspekt matnini joylang..."></textarea>
+        <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;">yoki matn kiriting:</div>
+        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..."></textarea>
         <button id="generate-btn" class="submit-btn" onclick="startGeneration()">AI yordamida yaratish 🚀</button>
         <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
@@ -139,6 +144,7 @@
 
         async function startGeneration() {
             const textInput = document.getElementById('text-input').value.trim();
+            const quizTitleInput = document.getElementById('quiz-title-input').value.trim();
             const fileInput = document.getElementById('file-input');
             const genBtn = document.getElementById('generate-btn');
             const loader = document.getElementById('loading-status');
@@ -155,6 +161,7 @@
             formData.append('user_id', userId);
             if (textInput) formData.append('text', textInput);
             if (fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
+            if (quizTitleInput) formData.append('quiz_title', quizTitleInput);
 
             try {
                 const response = await fetch(BASE_URL + '/api/create-quiz-web', {
@@ -166,6 +173,7 @@
                 if (data && data.status === "ok") {
                     alert("🎉 Test muvaffaqiyatli yaratildi!");
                     document.getElementById('text-input').value = "";
+                    document.getElementById('quiz-title-input').value = "";
                     fileInput.value = "";
                     document.getElementById('upload-text').innerText = "Darslik yuklash (PDF yoki DOCX)";
                     
@@ -191,7 +199,6 @@
                 const response = await fetch(BASE_URL + '/api/quizzes?user_id=' + userId + '&_t=' + Date.now());
                 const data = await response.json();
                 
-                // O'zgartirildi: Jami foydalanuvchilar soni badgeda ko'rsatiladi
                 if (data && data.total_users !== undefined) {
                     document.getElementById('user-count-badge').innerText = `${data.total_users} active users`;
                 }
