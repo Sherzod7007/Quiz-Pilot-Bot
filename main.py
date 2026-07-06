@@ -4,10 +4,10 @@ import json
 import os
 import time
 import sqlite3
-import threading
 from pypdf import PdfReader
 import docx
 import telebot
+from telebot import types
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
@@ -36,34 +36,8 @@ def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    
-    # Quizzes jadvali (is_public ustuni qo'shildi)
-    cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
-                        id TEXT PRIMARY KEY, 
-                        user_id INTEGER, 
-                        title TEXT, 
-                        total INTEGER, 
-                        answered INTEGER, 
-                        quiz_json TEXT, 
-                        created_at INTEGER,
-                        last_score INTEGER DEFAULT -1,
-                        last_percent INTEGER DEFAULT -1,
-                        is_public INTEGER DEFAULT 0)''')
-    
-    # Users jadvali (language ustuni qo'shildi)
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-                        user_id INTEGER PRIMARY KEY, 
-                        created_at INTEGER,
-                        language TEXT DEFAULT 'uz')''')
-    
-    # Flashcards jadvali (Yangi qo'shildi)
-    cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
-                        id TEXT PRIMARY KEY,
-                        user_id INTEGER,
-                        front TEXT,
-                        back TEXT,
-                        created_at INTEGER)''')
-                        
+    cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (id TEXT PRIMARY KEY, user_id INTEGER, title TEXT, total INTEGER, answered INTEGER, quiz_json TEXT, created_at INTEGER)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, created_at INTEGER)''')
     conn.commit()
     conn.close()
 
@@ -71,9 +45,9 @@ init_db()
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz)")
-    correct_index: int = Field(description="To'g'ri javob indeksi (0 dan 3 gacha)")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
+    options: List[str] = Field(description="To'g'ri javob va 3 ta noto'g'ri variantdan iborat jami 4 ta variant ro'yxati")
+    correct_index: int = Field(description="To'g'ri javob joylashtirilgan indeks raqami")
+    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa qoida")
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
@@ -81,58 +55,17 @@ class QuizResponse(BaseModel):
 class ProgressUpdateRequest(BaseModel):
     quiz_id: str
     user_id: int
-    correct_count: int
-    percent: int
-
-class FlashcardCreateRequest(BaseModel):
-    user_id: int
-    front: str
-    back: str
 
 def add_user_to_db(user_id: int):
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language) VALUES (?, ?, 'uz')", (user_id, int(time.time())))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at) VALUES (?, ?)", (user_id, int(time.time())))
         conn.commit()
         conn.close()
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
-
-def get_users_count():
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT COUNT(*) FROM users")
-        count = cursor.fetchone()[0]
-        conn.close()
-        return count
-    except Exception as e:
-        logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
-        return 0
-
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    user_id = message.from_user.id
-    add_user_to_db(user_id)
-    
-    welcome_text = (
-        f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
-        "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz 3 xil tilda (UZ, RU, EN) ishlaydi, Ommaviy testlar va Flesh-kartochkalar to'liq ishga tushdi!\n\n"
-        "🚀 Marhamat, pastdagi tugmani bosib ilovani oching!"
-    )
-    
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn_start = telebot.types.KeyboardButton(text="/start")
-    
-    mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app")
-    btn_app = telebot.types.KeyboardButton(text="Ilovani ochish 🚀", web_app=telebot.types.WebAppInfo(url=mini_app_url))
-    
-    markup.row(btn_start, btn_app)
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 app = FastAPI()
 
@@ -148,18 +81,15 @@ app.add_middleware(
 def read_root(request: Request):
     response = templates.TemplateResponse("index.html", {"request": request})
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     return response
 
 @app.post("/api/create-quiz-web")
-async def create_quiz_web(
-    user_id: int = Form(...), 
-    text: Optional[str] = Form(None), 
-    file: Optional[UploadFile] = File(None),
-    quiz_title: Optional[str] = Form(None)
-):
+async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
     add_user_to_db(user_id)
     raw_text = ""
-    auto_title = "Matnli Test"
+    title = "Matnli Test"
     
     if file and file.filename and len(file.filename.strip()) > 0:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -171,27 +101,32 @@ async def create_quiz_web(
                     f.write(contents)
                 
                 if file.filename.endswith('.pdf'):
-                    reader = PdfReader(file_path)
-                    raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
-                    auto_title = file.filename.replace('.pdf', '')
+                    try:
+                        reader = PdfReader(file_path)
+                        raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
+                    except Exception as e:
+                        logging.error(f"PDF o'qishda xato: {e}")
+                    title = file.filename.replace('.pdf', '')
                 elif file.filename.endswith('.docx'):
-                    doc = docx.Document(file_path)
-                    raw_text = "\n".join([p.text for p in doc.paragraphs])
-                    auto_title = file.filename.replace('.docx', '')
+                    try:
+                        doc = docx.Document(file_path)
+                        raw_text = "\n".join([p.text for p in doc.paragraphs])
+                    except Exception as e:
+                        logging.error(f"DOCX o'qishda xato: {e}")
+                    title = file.filename.replace('.docx', '')
         except Exception as e:
-            logging.error(f"Fayl yuklashda xato: {e}")
+            logging.error(f"Faylni yuklashda umumiy xato: {e}")
             
     if not raw_text.strip() and text:
         raw_text = text
-        auto_text_clean = text.replace('\n', ' ').strip()
-        auto_title = auto_text_clean[:18] + "..." if len(auto_text_clean) > 18 else auto_text_clean
+        title = text[:15] + "..."
 
     if not raw_text.strip():
-        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
+        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi. Iltimos matn kiriting yoki fayl yuklang."}
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+        return {"status": "error", "message": "AI test generatsiya qila olmadi. Kalitlarni yoki matnni tekshiring."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -200,18 +135,16 @@ async def create_quiz_web(
             return {"status": "error", "message": "AI savollar ro'yxatini bo'sh qaytardi."}
             
         quiz_id = f"q_{int(time.time())}"
-        final_title = quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)", 
-                       (quiz_id, user_id, final_title[:30], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
+        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?)", (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time())))
         conn.commit()
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 **{final_title[:30]}** darsligi bo'yicha jami **{len(items)} ta** test savoli muvaffaqiyatli tayyorlandi!")
+            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
         except Exception as e: 
             logging.error(f"Telegram xabari yuborilmadi: {e}")
 
@@ -223,10 +156,11 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
     if not GOOGLE_API_KEYS: return None
 
-    system_instruction = """You are an advanced AI quiz generator. 
-CRITICAL RULES:
-1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
+    system_instruction = """Siz berilgan darslik matni asosida mukammal testlar yaratuvchi intellektual botsiz.
+Vazifangiz: Berilgan matndan kelib chiqib, QAT'IY RAVISHDA JAMI 50 TA UNIQUE (takrorlanmas) savol tuzing.
+Har bir savol uchun 1 ta to'g'ri va 3 ta noto'g'ri variant yarating.
+Har bir variant boshiga 'A) ', 'B) ', 'C) ', 'D) ' qo'shing.
+Explanation maydoniga javobning qisqa ilmiy isbotini yozing. Matn tili darslik bilan bir xil bo'lsin."""
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
@@ -242,118 +176,27 @@ CRITICAL RULES:
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=QuizResponse,
-                    temperature=0.2
+                    temperature=0.6
                 )
             )
             if response and response.text: return response.text
         except Exception as e:
-            logging.error(f"Gemini API xatosi: {e}")
+            logging.error(f"Gemini API xatosi (Key index {current_key_index}): {e}")
         current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
     return None
 
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
-    total_users = get_users_count()
-    
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    
-    # Shaxsiy testlar
-    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    personal_rows = cursor.fetchall()
-    
-    # Foydalanuvchi tanlagan tilini olish
-    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-    lang_row = cursor.fetchone()
-    user_lang = lang_row["language"] if lang_row else "uz"
-    
-    conn.close()
-    
-    quizzes = [{
-        "id": r["id"], 
-        "title": r["title"], 
-        "total": r["total"], 
-        "answered": r["answered"], 
-        "created_at": r["created_at"],
-        "last_score": r["last_score"],
-        "last_percent": r["last_percent"],
-        "is_public": r["is_public"]
-    } for r in personal_rows]
-    
-    return {"status": "ok", "quizzes": quizzes, "total_users": total_users, "user_lang": user_lang}
-
-# Ommaviy testlarni olish APIsi
-@app.get("/api/public-quizzes")
-def get_public_quizzes():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
+    cursor.execute("SELECT id, title, total, answered, created_at FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cursor.fetchall()
     conn.close()
-    
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "created_at": r["created_at"]} for r in rows]
+    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "answered": r["answered"], "created_at": r["created_at"]} for r in rows]
     return {"status": "ok", "quizzes": quizzes}
-
-# Testni ommaviy qilish yoki shaxsiyga qaytarish toggle APIsi
-@app.post("/api/toggle-public")
-def toggle_public(quiz_id: str, user_id: int, is_public: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?", (is_public, quiz_id, user_id))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-# Foydalanuvchi tilini o'zgartirish APIsi
-@app.post("/api/set-language")
-def set_language(user_id: int, lang: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-# --- FLASHCARDS APILARI ---
-@app.get("/api/flashcards")
-def get_flashcards(user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
-    return {"status": "ok", "cards": cards}
-
-@app.post("/api/create-flashcard")
-def create_flashcard(req: FlashcardCreateRequest):
-    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)", (card_id, req.user_id, req.front, req.back, int(time.time())))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-@app.delete("/api/delete-flashcard")
-def delete_flashcard(card_id: str, user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
 
 @app.get("/api/quiz-detail")
 def get_quiz_detail(quiz_id: str):
@@ -373,36 +216,22 @@ def update_progress(data: ProgressUpdateRequest):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET answered = total, last_score = ?, last_percent = ? WHERE id = ? AND user_id = ?", 
-                   (data.correct_count, data.percent, data.quiz_id, data.user_id))
+    cursor.execute("UPDATE quizzes SET answered = total WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
-@app.delete("/api/delete-quiz")
-def delete_quiz(quiz_id: str, user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "message": "Test o'chirildi."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Xatolik.")
-
-def start_bot_polling():
-    while True:
-        try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=10)
-        except Exception as e:
-            time.sleep(5)
-
-@app.on_event("startup")
-async def startup_event():
-    polling_thread = threading.Thread(target=start_bot_polling, daemon=True)
-    polling_thread.start()
+@app.get("/api/stats")
+def get_web_stats():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT COUNT(*) FROM users")
+    u_count = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM quizzes")
+    q_count = cursor.fetchone()
+    conn.close()
+    return {"status": "ok", "total_users": u_count[0] if u_count else 0, "total_quizzes": q_count[0] if q_count else 0}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
