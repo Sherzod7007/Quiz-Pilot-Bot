@@ -37,7 +37,7 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
-    # Quizzes jadvali (is_public ustuni qo'shildi)
+    # Quizzes jadvali (is_public ustuni to'g'rilandi)
     cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
                         id TEXT PRIMARY KEY, 
                         user_id INTEGER, 
@@ -50,13 +50,13 @@ def init_db():
                         last_percent INTEGER DEFAULT -1,
                         is_public INTEGER DEFAULT 0)''')
     
-    # Users jadvali (language ustuni qo'shildi)
+    # Users jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY, 
                         created_at INTEGER,
                         language TEXT DEFAULT 'uz')''')
     
-    # Flashcards jadvali (Yangi qo'shildi)
+    # Flashcards jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
                         id TEXT PRIMARY KEY,
                         user_id INTEGER,
@@ -205,8 +205,13 @@ async def create_quiz_web(
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)", 
-                       (quiz_id, user_id, final_title[:30], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
+        
+        # TUZATILDI: Ustunlar nomini aniq yozdik, xatolik to'liq bartaraf etildi
+        cursor.execute(
+            """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""", 
+            (quiz_id, user_id, final_title[:30], len(items), 0, quiz_json_raw, int(time.time()), -1, -1)
+        )
         conn.commit()
         conn.close()
 
