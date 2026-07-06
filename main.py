@@ -4,6 +4,7 @@ import json
 import os
 import time
 import sqlite3
+import threading
 from pypdf import PdfReader
 import docx
 import telebot
@@ -18,8 +19,10 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+# Loglarni sozlash
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Token va Kalitlarni yuklash
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
@@ -31,6 +34,7 @@ current_key_index = 0
 DOWNLOADS_DIR = 'downloads'
 DB_PATH = "/data/quiz_pilot.db" if os.path.exists("/data") else "quiz_pilot.db"
 
+# Ma'lumotlar bazasini tekshirish va yaratish
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
@@ -58,6 +62,7 @@ def init_db():
 
 init_db()
 
+# Pydantic Sxemalari
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz: A), B) qo'shmang)")
@@ -73,10 +78,6 @@ class ProgressUpdateRequest(BaseModel):
     correct_count: int
     percent: int
 
-class DeleteQuizRequest(BaseModel):
-    quiz_id: str
-    user_id: int
-
 def add_user_to_db(user_id: int):
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -88,6 +89,28 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
+# Telegram Bot Buyruqlarini Tinglash Qismi
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    user_id = message.from_user.id
+    add_user_to_db(user_id)
+    
+    welcome_text = (
+        f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
+        "⚡ **Yangi Yangilanish:**\n"
+        "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
+        "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!"
+    )
+    
+    # Mini App ochish tugmasini sozlash
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app") # O'zingizning Railway havolangiz
+    btn = telebot.types.KeyboardButton(text="Ilovani ochish 🚀", web_app=telebot.types.WebAppInfo(url=mini_app_url))
+    markup.add(btn)
+    
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+
+# FastAPI Ilovasi
 app = FastAPI()
 
 app.add_middleware(
@@ -107,15 +130,10 @@ def read_root(request: Request):
     return response
 
 @app.post("/api/create-quiz-web")
-async def create_quiz_web(
-    user_id: int = Form(...), 
-    text: Optional[str] = Form(None), 
-    custom_title: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None)
-):
+async def create_quiz_web(user_id: int = Form(...), text: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
     add_user_to_db(user_id)
     raw_text = ""
-    default_title = "Matnli Test"
+    title = "Matnli Test"
     
     if file and file.filename and len(file.filename.strip()) > 0:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -132,20 +150,20 @@ async def create_quiz_web(
                         raw_text = "".join([p.extract_text() + "\n" for p in reader.pages if p.extract_text()])
                     except Exception as e:
                         logging.error(f"PDF o'qishda xato: {e}")
-                    default_title = file.filename.replace('.pdf', '')
+                    title = file.filename.replace('.pdf', '')
                 elif file.filename.endswith('.docx'):
                     try:
                         doc = docx.Document(file_path)
                         raw_text = "\n".join([p.text for p in doc.paragraphs])
                     except Exception as e:
                         logging.error(f"DOCX o'qishda xato: {e}")
-                    default_title = file.filename.replace('.docx', '')
+                    title = file.filename.replace('.docx', '')
         except Exception as e:
             logging.error(f"Faylni yuklashda umumiy xato: {e}")
             
     if not raw_text.strip() and text:
         raw_text = text
-        default_title = text[:15] + "..."
+        title = text[:15] + "..."
 
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
@@ -162,19 +180,16 @@ async def create_quiz_web(
             
         quiz_id = f"q_{int(time.time())}"
         
-        # Agar foydalanuvchi o'z nomi kiritgan bo'lsa, o'shani tanlaydi
-        final_title = custom_title.strip() if custom_title and custom_title.strip() else default_title
-        
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("INSERT INTO quizzes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                       (quiz_id, user_id, final_title[:24], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
+                       (quiz_id, user_id, title[:22], len(items), 0, quiz_json_raw, int(time.time()), -1, -1))
         conn.commit()
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 '{final_title[:24]}' testi tayyorlandi! Jami: {len(items)} ta savol.")
+            bot.send_message(user_id, f"🎉 Ajoyib! Katta darsligingiz bo'yicha jami **{len(items)} ta** test savoli xatosiz tayyorlandi!")
         except Exception as e: 
             logging.error(f"Telegram xabari yuborilmadi: {e}")
 
@@ -261,15 +276,22 @@ def update_progress(data: ProgressUpdateRequest):
     conn.close()
     return {"status": "ok"}
 
-@app.post("/api/delete-quiz")
-def delete_quiz(data: DeleteQuizRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (data.quiz_id, data.user_id))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+# Bot uzluksiz tinglashini fonda bajaradigan funksiya
+def start_bot_polling():
+    logging.info("Telegram Bot parallel oqimda (Thread) tinglashni boshladi...")
+    while True:
+        try:
+            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        except Exception as e:
+            logging.error(f"Polling siklida uzilish bo'ldi, 5 soniyadan keyin qayta urinadi: {e}")
+            time.sleep(5)
+
+# FastAPI start-up hodisasi (Server yoqilganda botni ham fonda qo'shib ishga tushiradi)
+@app.on_event("startup")
+async def startup_event():
+    polling_thread = threading.Thread(target=start_bot_polling, daemon=True)
+    polling_thread.start()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
