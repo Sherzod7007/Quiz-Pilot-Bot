@@ -89,24 +89,46 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
+# Bazadagi jami foydalanuvchilar sonini hisoblash funksiyasi
+def get_users_count():
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("SELECT COUNT(*) FROM users")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
+    except Exception as e:
+        logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
+        return 0
+
 # Telegram Bot Buyruqlarini Tinglash Qismi
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     user_id = message.from_user.id
     add_user_to_db(user_id)
     
+    # Real vaqtdagi foydalanuvchilar sonini olish
+    total_users = get_users_count()
+    
     welcome_text = (
         f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
+        f"👥 **Bizning foydalanuvchilar:** {total_users} ta active user\n\n"
         "⚡ **Yangi Yangilanish:**\n"
         "🔥 Endi tizimimiz bitta darslikdan **50 tagacha mukammal va xatosiz test savollarini** qabul qila oladi va tayyorlaydi!\n\n"
         "🚀 Marhamat, pastdagi yonma-yon turgan tugmalardan foydalanib ilovani oching, darsligingizni yuklang va testlarni silliq ishlang!"
     )
     
-    # Mini App ochish tugmasini sozlash
+    # Tugmalarni sozlash
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app") # O'zingizning Railway havolangiz
-    btn = telebot.types.KeyboardButton(text="Ilovani ochish 🚀", web_app=telebot.types.WebAppInfo(url=mini_app_url))
-    markup.add(btn)
+    btn_start = telebot.types.KeyboardButton(text="/start")
+    
+    mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app")
+    btn_app = telebot.types.KeyboardButton(text="Ilovani ochish 🚀", web_app=telebot.types.WebAppInfo(url=mini_app_url))
+    
+    # Ikkala tugmani yonma-yon bitta qatorga joylashtirish
+    markup.row(btn_start, btn_app)
     
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -204,9 +226,7 @@ def generate_quiz_from_gemini(extracted_text):
     system_instruction = """You are an advanced AI quiz generator. 
 CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text. If the input text is in English, EVERYTHING must be in English. No Uzbek translations allowed for English text!
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions (e.g., 5, 10, or 15 questions), you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. Do NOT generate extra questions, do NOT inflate the count to 50 if the text only contains a few questions. Format ONLY what is given. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
-
-Task: Create a multiple-choice quiz based on the text. Each question must have exactly 4 choices (1 correct, 3 incorrect). Do NOT prefix options with letters like A), B), C), D) inside the JSON array. Write a brief explanation for the correct choice inside the explanation field."""
+2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions (e.g., 5, 10, or 15 questions), you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. Do NOT generate extra questions, do NOT inflate the count to 50 if the text only contains a few questions. Format ONLY what is given. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
 
     for _ in range(len(GOOGLE_API_KEYS)):
         api_key = GOOGLE_API_KEYS[current_key_index].strip()
