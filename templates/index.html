@@ -16,6 +16,7 @@
             --accent-red: #ff3b30;
             --border-color: #2c2c35;
             --accent-yellow: #f2c94c;
+            --premium-card: #1e1b2e;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -74,10 +75,33 @@
         /* Flesh kartochka interfeysi */
         .fc-display { font-size: 18px; font-weight: bold; padding: 25px; text-align: center; background: #24242b; border-radius: 12px; margin: 10px 0; border: 1px dashed var(--border-color); cursor: pointer; }
         
-        /* Premium dizayni */
-        .premium-box { background: linear-gradient(135deg, #2c1a4d 0%, #1a1a1e 100%); border-radius: 20px; padding: 25px; border: 1px solid #ffb800; text-align: center; margin-top: 15px; }
-        .premium-title { font-size: 22px; font-weight: bold; color: #ffb800; margin-bottom: 10px; }
-        .premium-feature { text-align: left; margin: 15px 0; font-size: 14px; color: #e0e0e0; line-height: 1.6; }
+        /* YANGI PREMIUM STYLES (RASMDAGIDEK) */
+        .p-screen-container { display: flex; flex-direction: column; gap: 12px; margin-top: 5px; }
+        .p-card { background: var(--premium-card); border-radius: 16px; padding: 18px; border: 1px solid #3c345c; position: relative; }
+        .p-card.status-box { border: 1px solid #b89433; background: #221c10; text-align: center; }
+        .p-card.info-box { text-align: center; border: 1px solid #38305c; background: #1a162b; }
+        .p-status-title { font-size: 18px; font-weight: 700; color: #ffca28; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .p-status-val { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 8px; text-transform: lowercase; }
+        .p-status-desc { font-size: 13px; color: #ccbba3; }
+        .p-info-title { font-size: 21px; font-weight: 800; color: #ffca28; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .p-info-desc { font-size: 13px; color: #b3a9cc; line-height: 1.4; padding: 0 10px; }
+        
+        .p-tariff-card { background: #1a162b; border: 1px solid #2e264f; border-radius: 16px; padding: 16px; display: flex; justify-content: space-between; align-items: center; position: relative; }
+        .p-tariff-card.popular::before { content: "OMMABOP"; position: absolute; top: -10px; right: 16px; background: #ffca28; color: #000; font-size: 9px; font-weight: 800; padding: 2px 8px; border-radius: 8px; }
+        .p-t-left { display: flex; flex-direction: column; gap: 4px; max-width: 65%; }
+        .p-t-title { font-size: 16px; font-weight: 700; color: #ffca28; display: flex; align-items: center; gap: 6px; }
+        .p-t-desc { font-size: 12px; color: #9a90b3; line-height: 1.3; }
+        .p-t-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+        .p-t-price { font-size: 16px; font-weight: 800; color: #fff; white-space: nowrap; }
+        .p-t-btn { background: #ffca28; color: #121214; border: none; padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: transform 0.1s; }
+        .p-t-btn:active { transform: scale(0.96); }
+        
+        /* Modal oyna / Karta nusxalash xabarnomasi */
+        .copy-toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: #34c759; color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: bold; z-index: 2000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .checkout-box { background: #251f3d; border: 1px dashed #ffca28; border-radius: 14px; padding: 12px; margin-top: 10px; text-align: center; display: none; animation: fadeIn 0.3s; }
+        .card-num-display { font-size: 18px; font-weight: 800; color: #fff; background: #131021; padding: 10px; border-radius: 8px; margin: 8px 0; border: 1px solid #3e3561; cursor: pointer; letter-spacing: 1px; }
+        .card-num-display:active { background: #1e1933; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -126,14 +150,69 @@
 
     <div id="premium-screen" class="screen">
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
-        <div class="premium-box">
-            <div class="premium-title">Quiz Pilot PRO 👑</div>
-            <div class="premium-feature">
-                • ✨ <span data-lang="p1">Cheksiz sun'iy intellekt orqali test yaratish</span><br>
-                • 📁 <span data-lang="p2">Katta hajmdagi PDF/Word fayllarni yuklash</span><br>
-                • 📊 <span data-lang="p3">To'liq statistika va ommaviy testlar lentasi</span>
+        <div class="p-screen-container">
+            
+            <div class="p-card status-box">
+                <div class="p-status-title">💎 Sizning Statusingiz</div>
+                <div class="p-status-val">undefined</div>
+                <div class="p-status-desc">30 kunlik bepul limitingiz: undefined / 3 ta</div>
             </div>
-            <button class="submit-btn" style="background: var(--accent-yellow); color:#121214; margin-top:15px;" onclick="alert('Tez kunda: Click / Payme integratsiyasi')" data-lang="btn_buy">Tez kunda faollashadi</button>
+
+            <div class="p-card info-box">
+                <div class="p-info-title">Quiz Pilot PRO 👑</div>
+                <div class="p-info-desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</div>
+                
+                <div id="checkout-panel" class="checkout-box">
+                    <div style="font-size: 13px; color: #ffca28; font-weight: bold;">Karta raqami (Nusxa olish uchun bosing):</div>
+                    <div class="card-num-display" onclick="copyCardNumber()">9860 0601 3135 0575</div>
+                    <div style="font-size: 12px; color: #b3a9cc;">Payme yoki Click orqali to'lov qilib, chekni botga tashlang!</div>
+                </div>
+            </div>
+
+            <div class="p-tariff-card">
+                <div class="p-t-left">
+                    <div class="p-t-title">⚡ Kunlik Cheksiz</div>
+                    <div class="p-t-desc">24 soat mutlaqo cheksiz test yaratish</div>
+                </div>
+                <div class="p-t-right">
+                    <div class="p-t-price">7 000 so'm</div>
+                    <button class="p-t-btn" onclick="showCheckout()">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="p-tariff-card popular">
+                <div class="p-t-left">
+                    <div class="p-t-title">📅 Haftalik Cheksiz</div>
+                    <div class="p-t-desc">7 kun davomida cheksiz foydalanish</div>
+                </div>
+                <div class="p-t-right">
+                    <div class="p-t-price">30 000 so'm</div>
+                    <button class="p-t-btn" onclick="showCheckout()">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="p-tariff-card">
+                <div class="p-t-left">
+                    <div class="p-t-title">🌙 Oylik Cheksiz</div>
+                    <div class="p-t-desc">30 kun davomida eng qulay cheksiz rejim</div>
+                </div>
+                <div class="p-t-right">
+                    <div class="p-t-price">6 000 so'm</div>
+                    <button class="p-t-btn" onclick="showCheckout()">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="p-tariff-card">
+                <div class="p-t-left">
+                    <div class="p-t-title">👨‍🏫 O'qituvchilar Uchun</div>
+                    <div class="p-t-desc">30 kunlik guruh rejimi (kengaytirilgan)</div>
+                </div>
+                <div class="p-t-right">
+                    <div class="p-t-price">90 000 so'm</div>
+                    <button class="p-t-btn" onclick="showCheckout()">Faollashtirish</button>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -155,6 +234,8 @@
         <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
         <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
     </div>
+
+    <div id="toast" class="copy-toast">📋 Karta raqami nusxalandi!</div>
 
     <script>
         const tg = window.Telegram.WebApp;
@@ -235,7 +316,6 @@
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
             });
             
-            // Sozlamalardagi tugmalarni faollashtirish
             document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
             const activeBtn = document.getElementById(`lang-${currentLang}`);
             if(activeBtn) activeBtn.classList.add('active');
@@ -284,6 +364,24 @@
             }
         }
 
+        // PREMIUM INTEGRATSIYA FUNKSIYALARI
+        function showCheckout() {
+            const panel = document.getElementById('checkout-panel');
+            panel.style.display = 'block';
+            panel.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function copyCardNumber() {
+            const cardNumber = "9860060131350575";
+            navigator.clipboard.writeText(cardNumber).then(() => {
+                const toast = document.getElementById('toast');
+                toast.style.display = 'block';
+                setTimeout(() => { toast.style.display = 'none'; }, 2000);
+            }).catch(err => {
+                alert("Nusxa olishda xatolik: " + err);
+            });
+        }
+
         async function startGeneration() {
             const textInput = document.getElementById('text-input').value.trim();
             const quizTitleInput = document.getElementById('quiz-title-input').value.trim();
@@ -326,7 +424,6 @@
             }
         }
 
-        // LOOD PERSONAL QUIZZES
         async function loadQuizzes() {
             try {
                 const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
@@ -378,7 +475,6 @@
             } catch (error) { console.error(error); }
         }
 
-        // LOAD PUBLIC QUIZZES LENTA
         async function loadPublicQuizzes() {
             const container = document.getElementById('lib-content-area');
             container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Loading...</div>`;
@@ -411,7 +507,6 @@
             } catch(e) { container.innerHTML = "Error."; }
         }
 
-        // TOGGLE PUBLIC SYSTEM
         async function togglePublic(quizId, newState) {
             try {
                 const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
@@ -429,7 +524,6 @@
             } catch (error) { alert("Error deleting."); }
         }
 
-        // --- FLASHCARDS LOGIC ---
         async function loadFlashcards() {
             const container = document.getElementById('lib-content-area');
             container.innerHTML = `
@@ -494,7 +588,6 @@
             } catch(e){}
         }
 
-        // --- GAME PLAY ENGINE ---
         async function playQuiz(quizId) {
             try {
                 const response = await fetch(BASE_URL + '/api/quiz-detail?quiz_id=' + quizId);
@@ -508,14 +601,10 @@
                     document.getElementById('game-screen').style.display = 'block';
                     showQuestion();
                 }
-            } catch (error) { alert("Load error."); }
+            } catch (e) { alert("Xatolik yuklashda."); }
         }
 
         function showQuestion() {
-            if (currentQuestionIdx >= currentQuizQuestions.length) {
-                finishQuiz();
-                return;
-            }
             isAnswered = false;
             const q = currentQuizQuestions[currentQuestionIdx];
             document.getElementById('game-progress').innerText = `Savol: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
@@ -524,68 +613,74 @@
             const container = document.getElementById('options-container');
             container.innerHTML = "";
             document.getElementById('explanation-container').style.display = 'none';
-            
-            const nextBtn = document.getElementById('next-question-btn');
-            nextBtn.style.display = 'none';
-            nextBtn.innerText = (currentQuestionIdx === currentQuizQuestions.length - 1) ? langPack[currentLang].btn_finish : langPack[currentLang].btn_next;
+            document.getElementById('next-question-btn').style.display = 'none';
 
-            const prefixes = ["A) ", "B) ", "C) ", "D) "];
             q.options.forEach((opt, idx) => {
                 const btn = document.createElement('button');
                 btn.className = 'opt-btn';
-                btn.innerText = opt.startsWith("A)") || opt.startsWith("B)") ? opt : (prefixes[idx] || "") + opt;
-                btn.onclick = () => selectOption(btn, idx, q.correct_index, q.explanation);
+                btn.innerText = opt;
+                btn.onclick = () => selectOption(idx, btn);
                 container.appendChild(btn);
             });
         }
 
-        function selectOption(btn, idx, correctIdx, explanation) {
+        function selectOption(selectedIdx, btnElement) {
             if (isAnswered) return;
             isAnswered = true;
+            const q = currentQuizQuestions[currentQuestionIdx];
             const container = document.getElementById('options-container');
-            const buttons = container.getElementsByClassName('opt-btn');
-            const expBox = document.getElementById('explanation-container');
+            const buttons = container.querySelectorAll('.opt-btn');
 
-            if (idx === correctIdx) {
-                btn.classList.add('correct');
+            if (selectedIdx === q.correct_index) {
+                btnElement.classList.add('correct');
                 correctAnswersCount++;
             } else {
-                btn.classList.add('wrong');
+                btnElement.classList.add('wrong');
+                buttons[q.correct_index].classList.add('correct');
                 wrongAnswersCount++;
-                if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
-                expBox.innerText = "💡 Izoh: " + (explanation || "Correct answer highlighted.");
+            }
+
+            if (q.explanation) {
+                const expBox = document.getElementById('explanation-container');
+                expBox.innerText = q.explanation;
                 expBox.style.display = 'block';
             }
-            document.getElementById('next-question-btn').style.display = 'block';
+
+            const nextBtn = document.getElementById('next-question-btn');
+            if (currentQuestionIdx < currentQuizQuestions.length - 1) {
+                nextBtn.innerText = langPack[currentLang].btn_next;
+            } else {
+                nextBtn.innerText = langPack[currentLang].btn_finish;
+            }
+            nextBtn.style.display = 'block';
         }
 
-        function nextQuestion() {
-            currentQuestionIdx++;
-            showQuestion();
-        }
-
-        async function finishQuiz() {
-            const total = currentQuizQuestions.length;
-            const scorePercent = Math.round((correctAnswersCount / total) * 100);
-            try {
-                await fetch(BASE_URL + '/api/update-progress', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
-                });
-            } catch (e) {}
-            alert(`🏁 Done!\n\n✅ Correct: ${correctAnswersCount}\n❌ Wrong: ${wrongAnswersCount}\n🎯 Score: ${scorePercent}%`);
-            closeGame();
+        async function nextQuestion() {
+            if (currentQuestionIdx < currentQuizQuestions.length - 1) {
+                currentQuestionIdx++;
+                showQuestion();
+            } else {
+                const percent = Math.round((correctAnswersCount / currentQuizQuestions.length) * 100);
+                try {
+                    await fetch(`${BASE_URL}/api/save-score`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_id: userId,
+                            quiz_id: currentQuizId,
+                            score: correctAnswersCount,
+                            percent: percent
+                        })
+                    });
+                } catch(e){}
+                closeGame();
+                loadQuizzes();
+            }
         }
 
         function closeGame() {
             document.getElementById('game-screen').style.display = 'none';
-            loadQuizzes();
         }
-
-        window.onload = function() {
-            loadQuizzes();
-        };
     </script>
 </body>
 </html>
