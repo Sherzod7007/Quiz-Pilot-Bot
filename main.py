@@ -32,7 +32,7 @@ current_key_index = 0
 DOWNLOADS_DIR = 'downloads'
 
 # LOYIHA ADMININING TELEGRAM ID RAQAMI (To'lov cheklari shu ID'ga forward qilinadi)
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "123456789")  # O'zingizning Telegram ID'ingizni kiriting
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "324575351")  # O'zingizning Telegram ID'ingizni kiriting
 
 # TUZATILDI: Eski volume muammosini chetlab o'tish uchun baza nomi quiz_pilot_v2.db ga o'zgartirildi
 DB_PATH = "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
