@@ -138,7 +138,7 @@ def send_welcome(message):
     welcome_text = (
         f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
         "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz 3 xil tilda (UZ, RU, EN) ishlaydi, Ommaviy testlar va Flesh-kartochkalar to'liq ishga tushdi!, Premium bo`limi ham ishlamoqda! O'zingizga qulay Limitni tanlab to'lov qiling va to'lov chekini ushbu Botga yuboring!\n\n"
+        "🔥 Endi tizimimiz 3 xil tilda (UZ, RU, EN) ishlaydi, Ommaviy testlar va Flesh-kartochkalar to'liq ishga tushdi!, Premium bolimi ham ishlamoqda! Ozingizga qulay Limitni tanlab tolov qiling va tolov chekini ushbu Botga yuboring!\n\n"
         "🚀 Marhamat, pastdagi tugmani bosib ilovani oching!"
     )
     
