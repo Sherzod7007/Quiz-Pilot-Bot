@@ -31,6 +31,9 @@ current_key_index = 0
 
 DOWNLOADS_DIR = 'downloads'
 
+# LOYIHA ADMININING TELEGRAM ID RAQAMI (To'lov cheklari shu ID'ga forward qilinadi)
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "123456789")  # O'zingizning Telegram ID'ingizni kiriting
+
 # TUZATILDI: Eski volume muammosini chetlab o'tish uchun baza nomi quiz_pilot_v2.db ga o'zgartirildi
 DB_PATH = "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 
@@ -52,11 +55,15 @@ def init_db():
                         last_percent INTEGER DEFAULT -1,
                         is_public INTEGER DEFAULT 0)''')
     
-    # Users jadvali
+    # Users jadvali (Premium, limit va davrlarni hisoblash ustunlari qo'shildi)
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY, 
                         created_at INTEGER,
-                        language TEXT DEFAULT 'uz')''')
+                        language TEXT DEFAULT 'uz',
+                        premium_status TEXT DEFAULT 'Free',
+                        premium_until INTEGER DEFAULT 0,
+                        free_quizzes_used INTEGER DEFAULT 0,
+                        limit_reset_at INTEGER DEFAULT 0)''')
     
     # Flashcards jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
@@ -93,10 +100,18 @@ class FlashcardCreateRequest(BaseModel):
 
 def add_user_to_db(user_id: int):
     try:
+        now = int(time.time())
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language) VALUES (?, ?, 'uz')", (user_id, int(time.time())))
+        
+        # Bepul foydalanuvchilar uchun 30 kunlik davr chegarasi (30 kun = 30 * 24 * 3600 soniya)
+        thirty_days_later = now + (30 * 24 * 3600)
+        
+        cursor.execute("""
+            INSERT OR IGNORE INTO users (user_id, created_at, language, premium_status, premium_until, free_quizzes_used, limit_reset_at) 
+            VALUES (?, ?, 'uz', 'Free', 0, 0, ?)
+        """, (user_id, now, thirty_days_later))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -136,6 +151,66 @@ def send_welcome(message):
     markup.row(btn_start, btn_app)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
+# --- SIZ SO'RAGAN TO'LOV CHEKLARINI TUTISH LOGIKASI ---
+@bot.message_handler(content_types=['photo'])
+def handle_receipt(message):
+    caption = message.caption.lower() if message.caption else ""
+    user_first = message.from_user.first_name
+    user_id = message.from_user.id
+    username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
+    
+    # Foydalanuvchiga javob qaytarish
+    bot.reply_to(
+        message, 
+        "🎉 **To'lov chekingiz qabul qilindi!**\nAdministrator tez orada chekni tekshiradi, to'lovingiz tasdiqlangach premium status faollashadi."
+    )
+    
+    # Loyiha adminiga (Sizga) foydalanuvchi ma'lumotlari bilan chekni yo'naltirish
+    try:
+        bot.forward_message(ADMIN_CHAT_ID, message.chat.id, message.message_id)
+        admin_info_text = (
+            f"🔔 **Yangi To'lov Cheki Keldi!**\n\n"
+            f"👤 Foydalanuvchi: {user_first}\n"
+            f"🆔 Telegram ID: `{user_id}`\n"
+            f"🌐 Username: {username}\n\n"
+            f"⚠️ Agar to'lov to'g'ri bo'lsa, status berish uchun botga quyidagi buyruqni yuboring:\n"
+            f"`/setpremium {user_id} 30`"
+        )
+        bot.send_message(ADMIN_CHAT_ID, admin_info_text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Adminga chek yuborishda xato: {e}")
+
+# --- ADMIN BUYRUG'I: Foydalanuvchiga premium status berish ---
+@bot.message_handler(commands=['setpremium'])
+def activate_premium_manual(message):
+    if str(message.from_user.id) != str(ADMIN_CHAT_ID):
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 3:
+            bot.reply_to(message, "Format: `/setpremium TELEGRAM_ID KUN` (Masalan: `/setpremium 123456 30`)")
+            return
+        
+        target_id = int(parts[1])
+        days = int(parts[2])
+        premium_duration = days * 24 * 3600
+        until_timestamp = int(time.time()) + premium_duration
+        
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("UPDATE users SET premium_status = 'PRO', premium_until = ? WHERE user_id = ?", (until_timestamp, target_id))
+        conn.commit()
+        conn.close()
+        
+        bot.reply_to(message, f"✅ ID: {target_id} bo'lgan foydalanuvchi {days} kunga PRO premium qilindi!")
+        try:
+            bot.send_message(target_id, f"👑 **To'lovingiz muvaffaqiyatli tasdiqlandi!** Akkauntingiz {days} kunga **Quiz Pilot PRO** tarifiga o'tkazildi. Cheksiz test yaratish imkoniyatidan foydalanishingiz mumkin!")
+        except Exception as e:
+            logging.error(f"Foydalanuvchini ogohlantirishda xato: {e}")
+    except Exception as e:
+        bot.reply_to(message, f"Xato yuz berdi: {e}")
+
 app = FastAPI()
 
 app.add_middleware(
@@ -160,6 +235,38 @@ async def create_quiz_web(
     quiz_title: Optional[str] = Form(None)
 ):
     add_user_to_db(user_id)
+    
+    # --- PREMIUM VA LIMITLAR TEKSHIRUVI ---
+    now = int(time.time())
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT premium_status, premium_until, free_quizzes_used, limit_reset_at FROM users WHERE user_id = ?", (user_id,))
+    u_row = cursor.fetchone()
+    
+    if u_row:
+        p_status = u_row["premium_status"]
+        p_until = u_row["premium_until"]
+        used_free = u_row["free_quizzes_used"]
+        reset_at = u_row["limit_reset_at"]
+        
+        # Agar Premium muddati tugab qolgan bo'lsa, statusni avtomatik ravishda Free holatiga qaytarish
+        if p_status != "Free" and now > p_until:
+            cursor.execute("UPDATE users SET premium_status = 'Free', premium_until = 0 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            p_status = "Free"
+            
+        # Agar foydalanuvchining 30 kunlik bepul muddat davri o'tib ketgan bo'lsa, limitni 0 ga qaytarish
+        if now > reset_at:
+            cursor.execute("UPDATE users SET free_quizzes_used = 0, limit_reset_at = ? WHERE user_id = ?", (now + (30 * 24 * 3600), user_id))
+            conn.commit()
+            used_free = 0
+            
+        # Agar foydalanuvchi oddiy planda darslik yaratayotgan bo'lsa va 3 tadan ko'p yuklagan bo'lsa, to'xtatish
+        if p_status == "Free" and used_free >= 3:
+            conn.close()
+            return {"status": "error", "message": "Sizning 30 kunlik bepul 3 ta test yaratish limitingiz tugadi. Iltimos, Premium sahifasiga o'tib faollashtiring!"}
+            
     raw_text = ""
     auto_title = "Matnli Test"
     
@@ -189,30 +296,34 @@ async def create_quiz_web(
         auto_title = auto_text_clean[:18] + "..." if len(auto_text_clean) > 18 else auto_text_clean
 
     if not raw_text.strip():
+        conn.close()
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
+        conn.close()
         return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
         items = quiz_data.get("quizzes", [])
         if not items:
+            conn.close()
             return {"status": "error", "message": "AI savollar ro'yxatini bo'sh qaytardi."}
             
         quiz_id = f"q_{int(time.time())}"
         final_title = quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
-        
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
         
         cursor.execute(
             """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""", 
             (quiz_id, user_id, final_title[:30], len(items), 0, quiz_json_raw, int(time.time()), -1, -1)
         )
+        
+        # Free foydalanuvchining sarflangan bepul limit darsligini 1 taga oshirish
+        if u_row and u_row["premium_status"] == "Free":
+            cursor.execute("UPDATE users SET free_quizzes_used = free_quizzes_used + 1 WHERE user_id = ?", (user_id,))
+            
         conn.commit()
         conn.close()
 
@@ -223,6 +334,7 @@ async def create_quiz_web(
 
         return {"status": "ok"}
     except Exception as e:
+        if conn: conn.close()
         return {"status": "error", "message": str(e)}
 
 def generate_quiz_from_gemini(extracted_text):
@@ -270,9 +382,18 @@ def get_user_quizzes(user_id: int):
     cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     personal_rows = cursor.fetchall()
     
-    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
+    # Premium ma'lumotlarini ham index.html uchun yuborish
+    cursor.execute("SELECT language, premium_status, free_quizzes_used FROM users WHERE user_id = ?", (user_id,))
     lang_row = cursor.fetchone()
-    user_lang = lang_row["language"] if lang_row else "uz"
+    
+    user_lang = "uz"
+    premium_status = "Free"
+    free_quizzes_used = 0
+    
+    if lang_row:
+        user_lang = lang_row["language"]
+        premium_status = lang_row["premium_status"]
+        free_quizzes_used = lang_row["free_quizzes_used"]
     
     conn.close()
     
@@ -287,7 +408,15 @@ def get_user_quizzes(user_id: int):
         "is_public": r["is_public"]
     } for r in personal_rows]
     
-    return {"status": "ok", "quizzes": quizzes, "total_users": total_users, "user_lang": user_lang}
+    # Kengaytirilgan ma'lumotlar uzatish: index.html yozuvlarini to'g'irlash uchun
+    return {
+        "status": "ok", 
+        "quizzes": quizzes, 
+        "total_users": total_users, 
+        "user_lang": user_lang,
+        "premium_status": premium_status,
+        "free_quizzes_used": free_quizzes_used
+    }
 
 @app.get("/api/public-quizzes")
 def get_public_quizzes():
