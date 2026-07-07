@@ -66,16 +66,13 @@
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
         
-        /* Sozlamalar dizayni */
         .settings-box { background: var(--card-bg); border-radius: 20px; padding: 20px; border: 1px solid var(--border-color); margin-top: 15px; }
         .lang-group { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
         .lang-btn { background: #24242b; border: 1px solid var(--border-color); color: #fff; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
         .lang-btn.active { border-color: var(--accent-blue); background: rgba(47, 128, 237, 0.1); color: var(--accent-blue); }
         
-        /* Flesh kartochka interfeysi */
-        .fc-display { font-size: 18px; font-weight: bold; padding: 25px; text-align: center; background: #24242b; border-radius: 12px; margin: 10px 0; border: 1px dashed var(--border-color); cursor: pointer; }
+        .fc-display { font-size: 18px; font-weight: bold; padding: 25px; text-align: center; background: #24242b; border-radius: 12px; margin: 10px 0; border: 1px dashed var(--border-color); cursor: pointer; width: 100%; box-sizing: border-box; }
         
-        /* YANGI PREMIUM STYLES */
         .p-screen-container { display: flex; flex-direction: column; gap: 12px; margin-top: 5px; }
         .p-card { background: var(--premium-card); border-radius: 16px; padding: 18px; border: 1px solid #3c345c; position: relative; }
         .p-card.status-box { border: 1px solid #b89433; background: #221c10; text-align: center; }
@@ -96,7 +93,6 @@
         .p-t-btn { background: #ffca28; color: #121214; border: none; padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: transform 0.1s; }
         .p-t-btn:active { transform: scale(0.96); }
         
-        /* Modal oyna / Karta nusxalash xabarnomasi */
         .copy-toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); background: #34c759; color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: bold; z-index: 2000; display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
         .checkout-box { background: #251f3d; border: 1px dashed #ffca28; border-radius: 14px; padding: 12px; margin-top: 10px; text-align: center; display: none; animation: fadeIn 0.3s; }
         .card-num-display { font-size: 18px; font-weight: 800; color: #fff; background: #131021; padding: 10px; border-radius: 8px; margin: 8px 0; border: 1px solid #3e3561; cursor: pointer; letter-spacing: 1px; }
@@ -165,7 +161,7 @@
                 <div id="checkout-panel" class="checkout-box">
                     <div style="font-size: 13px; color: #ffca28; font-weight: bold;">Karta raqami (Nusxa olish uchun bosing):</div>
                     <div class="card-num-display" onclick="copyCardNumber()">9860 0601 3135 0575</div>
-                    <div style="font-size: 12px; color: #b3a9cc;">Payme yoki Click orqali to'lov qilib, chekni botga tashlang!</div>
+                    <div style="font-size: 12px; color: #b3a9cc;">Payme yoki Click orqali to'lov qibly, chekni botga tashlang!</div>
                 </div>
             </div>
 
@@ -265,8 +261,7 @@
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", p1: "Cheksiz AI orqali test yaratish", p2: "Katta darsliklarni yuklash",
-                p3: "To'liq tahlillar va statistika", btn_buy: "Tez kunda integratsiya qilinadi", btn_exit: "✖ Chiqish",
+                select_lang: "Tizim tilini tanlang:", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?",
@@ -274,14 +269,13 @@
                 btn_add_card: "Yangi kartochka qo'shish"
             },
             ru: {
-                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
+                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премии",
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
                 placeholder_title: "Название теста (Например: Математика)...",
                 placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
-                select_lang: "Выберите язык системы:", p1: "Безлимитное создание тестов через ИИ", p2: "Загрузка больших учебников",
-                p3: "Полная аналитика и статистика", btn_buy: "Скоро будет интегрировано", btn_exit: "✖ Выход",
+                select_lang: "Выберите язык системы:", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", alert_del_quiz: "Вы хотите удалить этот тест?",
@@ -295,8 +289,7 @@
                 placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", p1: "Unlimited quiz generation via AI", p2: "Upload large textbooks",
-                p3: "Full analysis and global dashboard", btn_buy: "Coming soon", btn_exit: "✖ Exit",
+                select_lang: "Select system language:", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", alert_del_quiz: "Do you want to delete this quiz?",
@@ -338,7 +331,7 @@
             try {
                 await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
             } catch(e){}
-            if(currentTab === 'personal' || currentTab === 'public') switchLibTab(currentTab);
+            switchLibTab(currentTab);
         }
 
         function switchLibTab(tabName) {
@@ -388,7 +381,7 @@
             const loader = document.getElementById('loading-status');
 
             if (!textInput && fileInput.files.length === 0) {
-                alert("Please enter text or upload a file!");
+                alert("Iltimos matn kiriting yoki fayl tanlang!");
                 return;
             }
 
@@ -412,10 +405,10 @@
                     document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
                     switchScreen('library');
                 } else {
-                    alert("Error: " + (data.message || "Failed."));
+                    alert("Xatolik: " + (data.message || "Xato yuz berdi."));
                 }
             } catch (error) {
-                alert("System error.");
+                alert("Tizim xatoligi.");
             } finally {
                 genBtn.style.display = "block";
                 loader.style.display = "none";
@@ -428,19 +421,21 @@
                 const data = await response.json();
                 
                 if (data && data.total_users !== undefined) {
-                    document.getElementById('user-count-badge').innerText = `${data.total_users} active users`;
+                    document.getElementById('user-count-badge').innerText = `${data.total_users} faol foydalanuvchi`;
                 }
                 
-                // TUZATILDI: Backenddan kelayotgan real premium va limitlarni UI ga dinamik ulaymiz
-                if (data && data.premium_status) {
-                    document.getElementById('p-status-element').innerText = data.premium_status;
-                    document.getElementById('p-desc-element').innerText = `30 kunlik bepul limitingiz: ${data.free_quizzes_used} / 3 ta`;
+                if (data && data.premium_status !== undefined) {
+                    document.getElementById('p-status-element').innerText = data.premium_status || "Free";
+                    const used = data.free_quizzes_used !== undefined ? data.free_quizzes_used : 0;
+                    document.getElementById('p-desc-element').innerText = `30 kunlik bepul limitingiz: ${used} / 3 ta`;
                 }
 
                 if (data && data.user_lang) {
                     currentLang = data.user_lang;
                     applyLocalization();
                 }
+
+                if (currentTab !== 'personal') return;
 
                 const container = document.getElementById('lib-content-area');
                 container.innerHTML = `<div id="quiz-list"></div>`;
@@ -459,7 +454,7 @@
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
                                 <div class="action-group">
-                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})" title="Global Share">🌐</button>
+                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})">🌐</button>
                                     <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">🗑️</button>
                                     <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
                                 </div>
@@ -481,11 +476,13 @@
         }
 
         async function loadPublicQuizzes() {
+            if (currentTab !== 'public') return;
             const container = document.getElementById('lib-content-area');
-            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Loading...</div>`;
+            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Yuklanmoqda...</div>`;
             try {
                 const response = await fetch(`${BASE_URL}/api/public-quizzes`);
                 const data = await response.json();
+                if (currentTab !== 'public') return;
                 container.innerHTML = "";
                 
                 if(data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
@@ -496,7 +493,7 @@
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
                                 <div class="action-group">
-                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️ Play</button>
+                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
                                 </div>
                             </div>
                             <div class="card-footer">
@@ -509,29 +506,32 @@
                 } else {
                     container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_public}</div>`;
                 }
-            } catch(e) { container.innerHTML = "Error."; }
+            } catch(e) { container.innerHTML = "Xatolik."; }
         }
 
-        // TIKLANDI: Ommaviy bo'limga o'tkazish / qaytarish funksiyasi (FastAPI ulandi)
         async function togglePublic(quizId, newState) {
             try {
                 const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
                 const data = await response.json();
-                if(data.status === 'ok') loadQuizzes();
+                if(data && data.status === 'ok') {
+                    loadQuizzes();
+                }
             } catch(e){ console.error(e); }
         }
 
-        // TIKLANDI: Testni o'chirish funksiyasi (FastAPI ulandi)
         async function deleteQuiz(quizId) {
             if (!confirm(langPack[currentLang].alert_del_quiz)) return;
             try {
                 const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
                 const data = await response.json();
-                if (data && data.status === "ok") loadQuizzes();
-            } catch (error) { alert("Error deleting."); }
+                if (data && data.status === "ok") {
+                    loadQuizzes();
+                }
+            } catch (error) { alert("O'chirishda xatolik."); }
         }
 
         async function loadFlashcards() {
+            if (currentTab !== 'cards') return;
             const container = document.getElementById('lib-content-area');
             container.innerHTML = `
                 <div style="margin-bottom: 15px;">
@@ -545,14 +545,16 @@
             try {
                 const res = await fetch(`${BASE_URL}/api/flashcards?user_id=${userId}`);
                 const data = await res.json();
+                if (currentTab !== 'cards') return;
+                
                 if(data && data.cards && data.cards.length > 0) {
                     data.cards.forEach(c => {
                         const card = document.createElement('div');
                         card.className = 'flash-card';
                         card.innerHTML = `
-                            <div class="card-top">
-                                <div id="body-${c.id}" class="fc-display" onclick="flipCard('${c.id}', '${c.front}', '${c.back}')">${c.front}</div>
-                                <button class="btn-delete" onclick="deleteCard('${c.id}')">🗑️</button>
+                            <div class="card-top" style="align-items: center; width: 100%;">
+                                <div id="body-${c.id}" class="fc-display" onclick="flipCard('${c.id}', \`${c.front.replace(/'/g, "\\'")}\`, \`${c.back.replace(/'/g, "\\'")}\`)">${c.front}</div>
+                                <button class="btn-delete" style="margin-left: 10px;" onclick="deleteCard('${c.id}')">🗑️</button>
                             </div>
                         `;
                         listDiv.appendChild(card);
@@ -573,7 +575,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: userId, front: front, back: back })
                 });
-                if((await response.json()).status === 'ok') loadFlashcards();
+                const data = await response.json();
+                if(data && data.status === 'ok') loadFlashcards();
             } catch(e){}
         }
 
@@ -689,7 +692,8 @@
             document.getElementById('game-screen').style.display = 'none';
         }
 
-        applyLocalization();
+        // Ilk yuklanish
+        loadQuizzes();
     </script>
 </body>
 </html>
