@@ -75,13 +75,13 @@
         /* Flesh kartochka interfeysi */
         .fc-display { font-size: 18px; font-weight: bold; padding: 25px; text-align: center; background: #24242b; border-radius: 12px; margin: 10px 0; border: 1px dashed var(--border-color); cursor: pointer; }
         
-        /* YANGI PREMIUM STYLES (RASMDAGIDEK) */
+        /* YANGI PREMIUM STYLES */
         .p-screen-container { display: flex; flex-direction: column; gap: 12px; margin-top: 5px; }
         .p-card { background: var(--premium-card); border-radius: 16px; padding: 18px; border: 1px solid #3c345c; position: relative; }
         .p-card.status-box { border: 1px solid #b89433; background: #221c10; text-align: center; }
         .p-card.info-box { text-align: center; border: 1px solid #38305c; background: #1a162b; }
         .p-status-title { font-size: 18px; font-weight: 700; color: #ffca28; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .p-status-val { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 8px; text-transform: lowercase; }
+        .p-status-val { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
         .p-status-desc { font-size: 13px; color: #ccbba3; }
         .p-info-title { font-size: 21px; font-weight: 800; color: #ffca28; margin-bottom: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; }
         .p-info-desc { font-size: 13px; color: #b3a9cc; line-height: 1.4; padding: 0 10px; }
@@ -154,8 +154,8 @@
             
             <div class="p-card status-box">
                 <div class="p-status-title">💎 Sizning Statusingiz</div>
-                <div class="p-status-val">undefined</div>
-                <div class="p-status-desc">30 kunlik bepul limitingiz: undefined / 3 ta</div>
+                <div id="p-status-element" class="p-status-val">Free</div>
+                <div id="p-desc-element" class="p-status-desc">30 kunlik bepul limitingiz: 0 / 3 ta</div>
             </div>
 
             <div class="p-card info-box">
@@ -197,7 +197,7 @@
                     <div class="p-t-desc">30 kun davomida eng qulay cheksiz rejim</div>
                 </div>
                 <div class="p-t-right">
-                    <div class="p-t-price">6 000 so'm</div>
+                    <div class="p-t-price">60 000 so'm</div>
                     <button class="p-t-btn" onclick="showCheckout()">Faollashtirish</button>
                 </div>
             </div>
@@ -249,7 +249,7 @@
         }
 
         let currentLang = 'uz';
-        let currentTab = 'personal'; // personal, public, cards
+        let currentTab = 'personal'; 
         let currentQuizQuestions = [];
         let currentQuestionIdx = 0;
         let currentQuizId = "";
@@ -257,7 +257,6 @@
         let correctAnswersCount = 0;
         let wrongAnswersCount = 0;
 
-        // 3 TILLI LUG'AT
         const langPack = {
             uz: {
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
@@ -329,7 +328,7 @@
             document.getElementById(`nav-${screenName}`).classList.add('active');
             
             if(screenName === 'library') {
-                loadQuizzes();
+                switchLibTab(currentTab);
             }
         }
 
@@ -364,7 +363,6 @@
             }
         }
 
-        // PREMIUM INTEGRATSIYA FUNKSIYALARI
         function showCheckout() {
             const panel = document.getElementById('checkout-panel');
             panel.style.display = 'block';
@@ -432,6 +430,13 @@
                 if (data && data.total_users !== undefined) {
                     document.getElementById('user-count-badge').innerText = `${data.total_users} active users`;
                 }
+                
+                // TUZATILDI: Backenddan kelayotgan real premium va limitlarni UI ga dinamik ulaymiz
+                if (data && data.premium_status) {
+                    document.getElementById('p-status-element').innerText = data.premium_status;
+                    document.getElementById('p-desc-element').innerText = `30 kunlik bepul limitingiz: ${data.free_quizzes_used} / 3 ta`;
+                }
+
                 if (data && data.user_lang) {
                     currentLang = data.user_lang;
                     applyLocalization();
@@ -507,14 +512,16 @@
             } catch(e) { container.innerHTML = "Error."; }
         }
 
+        // TIKLANDI: Ommaviy bo'limga o'tkazish / qaytarish funksiyasi (FastAPI ulandi)
         async function togglePublic(quizId, newState) {
             try {
                 const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
                 const data = await response.json();
                 if(data.status === 'ok') loadQuizzes();
-            } catch(e){}
+            } catch(e){ console.error(e); }
         }
 
+        // TIKLANDI: Testni o'chirish funksiyasi (FastAPI ulandi)
         async function deleteQuiz(quizId) {
             if (!confirm(langPack[currentLang].alert_del_quiz)) return;
             try {
@@ -662,13 +669,13 @@
             } else {
                 const percent = Math.round((correctAnswersCount / currentQuizQuestions.length) * 100);
                 try {
-                    await fetch(`${BASE_URL}/api/save-score`, {
+                    await fetch(`${BASE_URL}/api/update-progress`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             user_id: userId,
                             quiz_id: currentQuizId,
-                            score: correctAnswersCount,
+                            correct_count: correctAnswersCount,
                             percent: percent
                         })
                     });
@@ -681,6 +688,8 @@
         function closeGame() {
             document.getElementById('game-screen').style.display = 'none';
         }
+
+        applyLocalization();
     </script>
 </body>
 </html>
