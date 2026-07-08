@@ -150,15 +150,14 @@
         </div>
     </div>
 
-    <!-- SKRINSHOTDAGI BILAN BIR XIL PREMIUM DIZAYN -->
     <div id="premium-screen" class="screen">
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
         <div class="premium-layout">
             
             <div class="p-status-box">
                 <h2>💎 Sizning Statusingiz</h2>
-                <p id="p-status-val">undefined</p>
-                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;">30 kunlik bepul limitingiz: <span id="p-limit-val">undefined</span> / 3 ta</p>
+                <p id="p-status-val">Normal user</p>
+                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;">30 kunlik bepul limitingiz: <span id="p-limit-val">0</span> / 3 ta</p>
             </div>
 
             <div class="p-pro-header">
@@ -206,14 +205,13 @@
                 </div>
                 <div class="tariff-action">
                     <span class="tariff-price">90 000 so'm</span>
-                    <button class="activate-btn" onclick="openPaymentModal('O'qituvchilar Uchun (30 kun)', '90 000 so\'m')">Faollashtirish</button>
+                    <button class="activate-btn" onclick="openPaymentModal('O\'qituvchilar Uchun (30 kun)', '90 000 so\'m')">Faollashtirish</button>
                 </div>
             </div>
 
         </div>
     </div>
 
-    <!-- AQLLI TO'LOV MODAL OYNASI -->
     <div id="payment-modal" class="modal-overlay">
         <div class="modal-box">
             <h4 id="m-tariff-title">Tarif</h4>
@@ -259,7 +257,7 @@
         }
 
         let currentLang = 'uz';
-        let currentTab = 'personal'; // personal, public, cards
+        let currentTab = 'personal'; 
         let currentQuizQuestions = [];
         let currentQuestionIdx = 0;
         let currentQuizId = "";
@@ -270,7 +268,6 @@
         let selectedTariffName = "";
         let selectedTariffPrice = "";
 
-        // 3 TILLI LUG'AT[cite: 1]
         const langPack = {
             uz: {
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
@@ -347,9 +344,17 @@
                 tariff_name: selectedTariffName,
                 tariff_price: selectedTariffPrice
             };
-            tg.sendData(JSON.stringify(paymentData));
+            
+            try {
+                tg.sendData(JSON.stringify(paymentData));
+            } catch (err) {
+                console.log("sendData error, attempting fallback...");
+            }
+            
             closePaymentModal();
-            tg.close();
+            setTimeout(() => {
+                tg.close();
+            }, 100);
         }
 
         function applyLocalization() {
@@ -387,8 +392,8 @@
                 const res = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}`);
                 const data = await res.json();
                 if(data && data.status === 'ok') {
-                    document.getElementById('p-status-val').innerText = data.user_status;
-                    document.getElementById('p-limit-val').innerText = data.free_used;
+                    document.getElementById('p-status-val').innerText = data.user_status || "Oddiy foydalanuvchi";
+                    document.getElementById('p-limit-val').innerText = data.free_used !== undefined ? data.free_used : "0";
                 }
             } catch(e){}
         }
