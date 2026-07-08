@@ -92,11 +92,6 @@
         .card-number-box:active { background: #231f33; }
         .card-hint { font-size: 11px; color: var(--text-hint); margin-top: 4px; display: block; }
         
-        /* Promokod bo'limi */
-        .promo-section { background: rgba(255,255,255,0.03); border: 1px dashed rgba(255, 184, 0, 0.3); padding: 15px; border-radius: 14px; margin-top: 20px; }
-        .promo-input { width: 70%; padding: 10px; background: #13111c; border: 1px solid var(--border-color); border-radius: 8px; color: #fff; text-align: center; font-size: 15px; font-weight: bold; text-transform: uppercase; outline: none; }
-        .promo-btn { width: 25%; padding: 10px; background: #ffb800; color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin-left: 5px; }
-
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
@@ -143,12 +138,14 @@
         </div>
     </div>
 
+    <!-- PREMIUM INTEGRATSIYALASHGAN EKRAN -->
     <div id="premium-screen" class="screen">
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
         <div class="premium-box">
             <div class="premium-title">Quiz Pilot PRO 👑</div>
-            <div id="status-premium-text" class="premium-subtitle" style="color: #ffb800; font-weight: bold;">Sizning holatingiz: Oddiy foydalanuvchi (Limit: 3 tadan 0 ta)</div>
+            <div class="premium-subtitle">O'zingizga mos tarif rejasini tanlang</div>
             
+            <!-- 1. Bepul tarif -->
             <div class="limit-card" onclick="selectTariff('30 kunda 3ta bepul', '0')">
                 <div class="limit-info">
                     <div class="limit-name">Bepul rejim</div>
@@ -157,6 +154,7 @@
                 <div class="limit-price free">Bepul</div>
             </div>
             
+            <!-- 2. 1 kunlik tarif -->
             <div class="limit-card" onclick="selectTariff('1 kunga 24 soat cheksiz', '7 000')">
                 <div class="limit-info">
                     <div class="limit-name">1 kunlik cheksiz</div>
@@ -165,6 +163,7 @@
                 <div class="limit-price">7 000 so'm</div>
             </div>
             
+            <!-- 3. 7 kunlik tarif -->
             <div class="limit-card" onclick="selectTariff('7 kunlik cheksiz', '30 000')">
                 <div class="limit-info">
                     <div class="limit-name">7 kunlik cheksiz</div>
@@ -173,6 +172,7 @@
                 <div class="limit-price">30 000 so'm</div>
             </div>
             
+            <!-- 4. 30 kunlik tarif -->
             <div class="limit-card" onclick="selectTariff('30 kunlik cheksiz', '60 000')">
                 <div class="limit-info">
                     <div class="limit-name">30 kunlik cheksiz</div>
@@ -180,22 +180,26 @@
                 </div>
                 <div class="limit-price">60 000 so'm</div>
             </div>
+            
+            <!-- 5. O'qituvchilar uchun tarif -->
+            <div class="limit-card" onclick="selectTariff('O\'qituvchilar uchun guruh rejimi', '90 000')">
+                <div class="limit-info">
+                    <div class="limit-name">O'qituvchilar rejimi 🧑‍🏫</div>
+                    <div class="limit-desc">30 kunlik kengaytirilgan guruh boshqaruvi</div>
+                </div>
+                <div class="limit-price">90 000 so'm</div>
+            </div>
 
+            <!-- Avtomatik nusxa oladigan To'lov bo'limi -->
             <div id="payment-panel" class="payment-modal">
                 <div style="font-weight: bold; font-size: 15px; color: #fff; margin-bottom: 5px;" id="selected-tariff-title">Tarif: -</div>
                 <div style="font-size: 13px; color: var(--text-hint); margin-bottom: 12px;">
-                    Payme yoki Click ilovasi orqali quyidagi plastik kartaga <span id="selected-tariff-price" style="color: #ffb800; font-weight: bold;">0</span> so'm to'lang va to'lov chekini tasdiqlash uchun menga yuboring. Admin sizga Promokod beradi.
+                    Payme yoki Click ilovasi orqali quyidagi plastik kartaga <span id="selected-tariff-price" style="color: #ffb800; font-weight: bold;">0</span> so'm to'lang va to'lov chekini tasdiqlash uchun menga yuboring.
                 </div>
                 <div class="card-number-box" onclick="copyCardNumber()">
                     💳 9860 0601 3135 0575
                     <span class="card-hint">Nusxalash uchun karta ustiga bosing</span>
                 </div>
-            </div>
-
-            <div class="promo-section">
-                <div style="font-size: 13px; color: #ffb800; font-weight: bold; margin-bottom: 8px;">🎫 Promokod kiritish (Admin yoki To'lov uchun)</div>
-                <input type="text" id="promo-code-input" class="promo-input" placeholder="KODNI YOZING...">
-                <button class="promo-btn" onclick="activatePromoCode()">OK</button>
             </div>
         </div>
     </div>
@@ -303,7 +307,6 @@
             document.getElementById('lang-uz').classList.toggle('active', currentLang === 'uz');
             document.getElementById('lang-ru').classList.toggle('active', currentLang === 'ru');
             document.getElementById('lang-en').classList.toggle('active', currentLang === 'en');
-            updateStatusText();
         }
 
         function switchScreen(screenId) {
@@ -312,7 +315,6 @@
             document.getElementById(`${screenId}-screen`).classList.add('active');
             document.getElementById(`nav-${screenId}`).classList.add('active');
             if (screenId === 'library') loadQuizzes();
-            if (screenId === 'premium') updateStatusText();
         }
 
         function switchLibTab(tab) {
@@ -499,51 +501,8 @@
             }
         }
 
-        // --- PROMOKOD VA PREMİUM STATUS LOGIKASI ---
-        function updateStatusText() {
-            const isPremium = localStorage.getItem(`quiz_pilot_premium_${userId}`) === 'true';
-            const limitKey = `quiz_pilot_limit_${userId}`;
-            let limitData = localStorage.getItem(limitKey);
-            let count = limitData ? JSON.parse(limitData).count : 0;
-            
-            const el = document.getElementById('status-premium-text');
-            if (el) {
-                if (isPremium) {
-                    el.innerText = "Sizning holatingiz: 👑 PREMIUM (Cheksiz Rejim Faol)";
-                    el.style.color = "#34c759";
-                } else {
-                    el.innerText = `Sizning holatingiz: Oddiy foydalanuvchi (Limit: 3 tadan ${count} ta ishlatildi)`;
-                    el.style.color = "#ffb800";
-                }
-            }
-        }
-
-        function activatePromoCode() {
-            const code = document.getElementById('promo-code-input').value.trim().toUpperCase();
-            if (!code) return;
-
-            // 👑 KODNI O'ZGARTIRMASDAN ADMIN VA TO'LOV KODLARI:
-            // O'zingiz yoki xohlagan odamingiz shu kodlardan birini kiritsa Premium faollashadi!
-            const VALID_CODES = ["ADMIN777", "CHEKSIZ", "PREM30DAY", "PILOTPRO"];
-
-            if (VALID_CODES.includes(code)) {
-                localStorage.setItem(`quiz_pilot_premium_${userId}`, 'true');
-                alert("👑 Tabriklaymiz! Premium status va cheksiz limit muvaffaqiyatli faollashtirildi!");
-                document.getElementById('promo-code-input').value = "";
-                updateStatusText();
-            } else {
-                alert("❌ Noto'g'ri yoki eskirgan promokod! Iltimos, adminga murojaat qiling.");
-            }
-        }
-
-        // --- LİMİTLARNİ JONLI TEKSHİRİSH MEXANIZMI ---
+        // --- LİMİTLARNİ TEKSHİRİSH VA HISOBGA OLISH MEXANIZMI ---
         function checkLimitAndIncrement() {
-            // Agar foydalanuvchida Premium faol bo'lsa, limitni umuman tekshirmaydi va o'tkazadi
-            const isPremium = localStorage.getItem(`quiz_pilot_premium_${userId}`) === 'true';
-            if (isPremium) {
-                return true; 
-            }
-
             const limitKey = `quiz_pilot_limit_${userId}`;
             let limitData = localStorage.getItem(limitKey);
             
@@ -551,7 +510,10 @@
             const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
             if (!limitData) {
-                limitData = { count: 0, resetTime: now + thirtyDaysMs };
+                limitData = {
+                    count: 0,
+                    resetTime: now + thirtyDaysMs
+                };
             } else {
                 limitData = JSON.parse(limitData);
             }
@@ -561,26 +523,27 @@
                 limitData.resetTime = now + thirtyDaysMs;
             }
 
+            // Blokka tushirish tekshiruvi (3 tadan oshsa bloklaydi)
             if (limitData.count >= 3) {
                 return false; 
             }
 
             limitData.count++;
             localStorage.setItem(limitKey, JSON.stringify(limitData));
-            updateStatusText();
             return true; 
         }
 
-        // --- TEST YARATISH LOGIKASI ---
+        // --- HAMMA FUNKSIYALARI SAQLANGAN TEST YARATISH LOGIKASI ---
         async function startGeneration() {
             const text = document.getElementById('text-input').value;
             const quizTitle = document.getElementById('quiz-title-input').value;
             
             if (!text.trim() && !selectedFile) return;
 
+            // 🚀 JONLI TEKSHIRUV:
             const hasLimit = checkLimitAndIncrement();
             if (!hasLimit) {
-                alert("🚫 Bepul limitingiz tugadi! Siz 30 kunda faqat 3ta bepul test yaratishingiz mumkin. Davom etish uchun Premium tariflaridan birini faollashtiring yoki Promokod kiriting.");
+                alert("🚫 Bepul limitingiz tugadi! Siz 30 kunda faqat 3ta bepul test yaratishingiz mumkin. Davom etish uchun Premium tariflaridan birini faollashtiring.");
                 switchScreen('premium'); 
                 return; 
             }
@@ -702,12 +665,20 @@
         async function finishQuiz() {
             const total = currentQuizQuestions.length;
             const pct = Math.round((correctAnswersCount / total) * 100);
+            
             alert(`🏁 Test yakunlandi!\n\nTo'g'ri javoblar: ${correctAnswersCount}/${total}\nNatija: ${pct}%`);
+            
             await fetch(`${BASE_URL}/api/update-progress`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: pct })
+                body: JSON.stringify({
+                    quiz_id: currentQuizId,
+                    user_id: userId,
+                    correct_count: correctAnswersCount,
+                    percent: pct
+                })
             });
+            
             closeGame();
             loadQuizzes();
         }
@@ -716,6 +687,7 @@
             document.getElementById('game-screen').style.display = "none";
         }
 
+        /* PREMIUM TARIF VA AVTOMATIK COPY FUNKSIYALARI */
         function selectTariff(tariffName, price) {
             if (price === "0") {
                 document.getElementById('payment-panel').classList.remove('active');
