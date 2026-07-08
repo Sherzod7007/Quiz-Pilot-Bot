@@ -122,6 +122,13 @@ class FlashcardCreateRequest(BaseModel):
     front: str
     back: str
 
+# To'lov WebApp'dan to'g'ridan-to'g'ri API orqali kelganda o'qib olish uchun model
+class PaymentIntentRequest(BaseModel):
+    action: str
+    user_id: int
+    tariff_name: str
+    tariff_price: str
+
 def add_user_to_db(user_id: int):
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -133,18 +140,43 @@ def add_user_to_db(user_id: int):
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
+# TUZATILDI: Active Users muammosi uchun unikal user_id'larni sanaydigan qilindi
 def get_users_count():
     try:
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT COUNT(*) FROM users")
+        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
         count = cursor.fetchone()[0]
         conn.close()
         return count
     except Exception as e:
         logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
         return 0
+
+# To'lov botga tushganda chek so'rash va admin panalga yuborish mantiqi (Buzilmagan, alohida funksiya qilib saqlandi)
+def trigger_payment_flow(user_id, tariff_name, tariff_price):
+    try:
+        tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
+        
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)", 
+                       (tx_id, user_id, tariff_name, tariff_price, int(time.time())))
+        conn.commit()
+        conn.close()
+        
+        prompt_msg = bot.send_message(
+            user_id,
+            f"🧾 Siz **{tariff_name}** ({tariff_price}) tarifini tanladingiz.\n\n"
+            f"Iltimos, plastik kartaga to'lov qilganingiz haqidagi **To'lov Chekini (Rasm/Skrinshot ko'rinishida)** shu yerga yuboring.\n"
+            f"Sizning buyurtma raqamingiz: `{tx_id}`",
+            parse_mode="Markdown"
+        )
+        bot.register_next_step_handler(prompt_msg, process_receipt, tx_id, tariff_name, tariff_price)
+    except Exception as e:
+        logging.error(f"To'lov jarayonini ishga tushirishda xato: {e}")
 
 # --- BOT INTERFEKSI VA WEBAPP MA'LUMOTLARINI ILIB OLISH ---
 @bot.message_handler(commands=['start'])
@@ -178,26 +210,7 @@ def handle_webapp_data(message):
             user_id = data.get("user_id")
             tariff_name = data.get("tariff_name", "Noma'lum Tarif")
             tariff_price = data.get("tariff_price", "0 UZS")
-            
-            # Unikal tranzaksiya ID yaratish
-            tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
-            
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL;")
-            cursor.execute("INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)", 
-                           (tx_id, user_id, tariff_name, tariff_price, int(time.time())))
-            conn.commit()
-            conn.close()
-            
-            prompt_msg = bot.send_message(
-                message.chat.id,
-                f"🧾 Siz **{tariff_name}** ({tariff_price}) tarifini tanladingiz.\n\n"
-                f"Iltimos, plastik kartaga to'lov qilganingiz haqidagi **To'lov Chekini (Rasm/Skrinshot ko'rinishida)** shu yerga yuboring.\n"
-                f"Sizning buyurtma raqamingiz: `{tx_id}`",
-                parse_mode="Markdown"
-            )
-            bot.register_next_step_handler(prompt_msg, process_receipt, tx_id, tariff_name, tariff_price)
+            trigger_payment_flow(user_id, tariff_name, tariff_price)
     except Exception as e:
         logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
@@ -214,7 +227,6 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
     file_id = message.photo[-1].file_id
     
     admin_markup = telebot.types.InlineKeyboardMarkup()
-    # Callback data uzunligi 64 belgidan oshib ketmasligi uchun qisqartirildi
     btn_approve = telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"p_app_{tx_id}_{user_id}")
     btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p_rej_{tx_id}_{user_id}")
     admin_markup.row(btn_approve, btn_reject)
@@ -240,7 +252,7 @@ def handle_admin_decision(call):
         return
         
     parts = call.data.split("_")
-    action = parts[1] # app yoki rej
+    action = parts[1] 
     tx_id = parts[2]
     user_id = int(parts[3])
     
@@ -260,9 +272,8 @@ def handle_admin_decision(call):
     
     if action == "app":
         current_time = int(time.time())
-        duration = 24 * 3600 # Standart holatda 1 kun (agar shartga tushmasa)
+        duration = 24 * 3600 
         
-        # Moslashuvchan qidiruv (Katta-kichik harf yoki ixtiyoriy matnda qidirish)
         t_name_lower = tariff_name.lower()
         if "kun" in t_name_lower or "24" in t_name_lower:
             duration = 24 * 3600
@@ -271,7 +282,7 @@ def handle_admin_decision(call):
         elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower:
             duration = 30 * 24 * 3600
         elif "umrbod" in t_name_lower or "unlimited" in t_name_lower:
-            duration = 365 * 10 * 24 * 3600 # 10 yil (Cheksizdek)
+            duration = 365 * 10 * 24 * 3600 
 
         premium_until_timestamp = current_time + duration
 
@@ -317,6 +328,15 @@ def read_root(request: Request):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
+# YANGI QO'SHILDI: WebApp'dan to'g'ridan-to'g'ri keladigan to'lov so'rovlarini ushlash uchun xavfsiz API endpoint
+@app.post("/api/payment-intent")
+def api_payment_intent(req: PaymentIntentRequest):
+    if req.action == "payment_intent":
+        # Bot orqali jarayonni fonda (async xavfsiz) boshlash
+        threading.Thread(target=trigger_payment_flow, args=(req.user_id, req.tariff_name, req.tariff_price), daemon=True).start()
+        return {"status": "ok", "message": "To'lov so'rovi qabul qilindi"}
+    raise HTTPException(status_code=400, detail="Noto'g'ri amal")
+
 @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -331,7 +351,6 @@ def get_premium_status(user_id: int):
         user_status = row["status"]
         premium_until = row["premium_until"]
         
-        # Vaqt tugagan bo'lsa statusni Oddiy foydalanuvchiga aylantirish
         if "PRO" in user_status and premium_until > 0 and int(time.time()) > premium_until:
             conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             cursor = conn.cursor()
@@ -358,7 +377,6 @@ async def create_quiz_web(
 ):
     add_user_to_db(user_id)
     
-    # Premium vaqtini tekshirish
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
