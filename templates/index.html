@@ -101,13 +101,12 @@
         .btn-send-receipt { background: var(--accent-blue); color: #fff; border: none; padding: 14px; border-radius: 12px; font-size: 14px; font-weight: bold; cursor: pointer; }
         .btn-close-modal { background: #24242b; color: var(--text-hint); border: none; padding: 12px; border-radius: 12px; font-size: 14px; cursor: pointer; }
 
-        /* Professional Global Custom System App Dialog UI */
         .app-dialog-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.75); z-index: 20000; display: none; align-items: center; justify-content: center; padding: 24px; animation: fadeIn 0.2s ease; }
         .app-dialog-box { background: #1e1e24; border-radius: 16px; border: 1px solid var(--border-color); width: 100%; max-width: 300px; padding: 20px; text-align: center; box-shadow: 0 12px 30px rgba(0,0,0,0.6); }
-        .app-dialog-icon { font-size: 34px; margin-bottom: 12px; display: block; }
+        .app-dialog-icon { font-size: 38px; margin-bottom: 12px; display: block; }
         .app-dialog-msg { font-size: 15px; color: #ffffff; line-height: 1.4; margin-bottom: 20px; font-weight: 500; }
         .app-dialog-footer { display: flex; gap: 10px; justify-content: center; }
-        .app-dialog-btn { flex: 1; padding: 11px; border-radius: 10px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .app-dialog-btn { flex: 1; padding: 12px; border-radius: 10px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
         .app-dialog-btn.primary { background: var(--accent-blue); color: #fff; }
         .app-dialog-btn.secondary { background: #2c2c35; color: var(--text-hint); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -219,7 +218,6 @@
         </div>
     </div>
 
-    <!-- Global Custom Modal System (Sleek UI inside the App) -->
     <div id="app-dialog" class="app-dialog-overlay">
         <div class="app-dialog-box">
             <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
@@ -306,7 +304,7 @@
                 btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!",
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
                 alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
-                confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
+                confirm_payment: "📑 Chek so'rovi yuborilsinmi? Tasdiqlaganingizdan so'ng, bot chatida chek rasmini (skrinshot) yuborishingiz mumkin bo'ladi.",
                 btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?"
             },
             ru: {
@@ -327,7 +325,7 @@
                 btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту!",
                 explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
                 alert_limit_over: "⚠️ Бесплатный лимит исчерпан! Пожалуйста, выберите тариф для продолжения.",
-                confirm_payment: "📑 Отправить запрос? Не забудьте вернуться в бот и отправить скриншот чека.",
+                confirm_payment: "📑 Отправить запрос? После подтверждения вы сможете отправить скриншот чека в чат бота.",
                 btn_ok: "ОК", btn_cancel: "Закрыть", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?"
             },
             en: {
@@ -348,12 +346,11 @@
                 btn_send_receipt: "Send Receipt 📑", btn_close: "Close", premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot!",
                 explanation_label: "💡 Explanation:", active_users_suffix: "active users",
                 alert_limit_over: "⚠️ Free limit expired! Please choose one of the plans to continue.",
-                confirm_payment: "📑 Send receipt intent? Don't forget to return to the bot and send a screenshot of the receipt.",
+                confirm_payment: "📑 Send receipt intent? After confirmation, you can send the receipt screenshot directly into the bot chat.",
                 btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?"
             }
         };
 
-        // In-App Custom Dialog Window (Professional UI)
         function showAppAlert(icon, text, callback = null) {
             document.getElementById('app-dialog-icon').innerText = icon;
             document.getElementById('app-dialog-msg').innerText = text;
@@ -421,19 +418,26 @@
             };
             
             showAppConfirm("📑", langPack[currentLang].confirm_payment, async () => {
-                // Avval backend bazasiga 100% yuborib olamiz (Jim bo'lib qolmasligi uchun)
+                closePaymentModal();
+                
+                // 1-Channel: AJAX request so'rovni to'g'ridan-to'g'ri backend API ga topshiradi
                 try {
                     await fetch(`${BASE_URL}/api/submit-intent`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(paymentData)
                     });
-                } catch(e) { console.log(e); }
+                } catch(e) { console.log("Fetch error:", e); }
                 
-                // Keyin Telegram bot chat interfeysiga ma'lumot uzatiladi va yopiladi
-                tg.sendData(JSON.stringify(paymentData));
-                closePaymentModal();
-                setTimeout(() => { tg.close(); }, 500);
+                // 2-Channel: inline orqali ochilgan bo'lsa bloklanishning oldini oluvchi yechim
+                try {
+                    tg.sendData(JSON.stringify(paymentData));
+                } catch(e) { console.log("tg.sendData restricted:", e); }
+                
+                // Bot chatini ochib berish va unga qaytish (Siz rasm/chek yuborishingiz uchun yo'l to'liq ochiladi)
+                setTimeout(() => {
+                    tg.close();
+                }, 100);
             });
         }
 
@@ -544,9 +548,9 @@
                         switchScreen('library');
                     });
                 } else {
-                    if (data.message && (data.message.includes("limit") || data.message.includes("Premium"))) {
+                    if (data.message && (data.message.includes("limit") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
                         showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => {
-                            switchScreen('premium');
+                            switchScreen('premium'); 
                         });
                     } else {
                         showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik yuz berdi."));
@@ -565,14 +569,12 @@
                 const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
                 const data = await response.json();
                 
-                // Dinamik va Mahalliylashtirilgan Active Users tizimi
-                let liveUsers = 14; 
-                if (data && data.total_users !== undefined && data.total_users !== 12) {
-                    liveUsers = data.total_users;
-                } else {
-                    liveUsers = 15 + Math.floor(Math.random() * 6); // 12 sonidan qutulish va jonli ko'rsatish
+                // Faol foydalanuvchilar soni xatoligi butunlay to'g'rilandi:
+                let liveUsers = 16; 
+                if (data && data.total_users !== undefined) {
+                    liveUsers = data.total_users; // Backenddan kelgan aniq qiymat
                 }
-                const suffix = langPack[currentLang].active_users_suffix || "active users";
+                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
                 document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
 
                 if (data && data.user_lang) {
@@ -597,7 +599,7 @@
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
                                 <div class="action-group">
-                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})" title="Global Share">🌐</button>
+                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})">🌐</button>
                                     <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">🗑️</button>
                                     <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
                                 </div>
@@ -830,7 +832,7 @@
         window.onload = function() {
             applyLocalization();
             loadQuizzes();
-            setInterval(loadQuizzes, 25000); // Faol foydalanuvchilarni real vaqtda yangilab turadi
+            setInterval(loadQuizzes, 20000); 
         };
     </script>
 </body>
