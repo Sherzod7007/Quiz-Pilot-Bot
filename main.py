@@ -61,18 +61,24 @@ def init_db():
                         created_at INTEGER,
                         language TEXT DEFAULT 'uz',
                         status TEXT DEFAULT 'Oddiy foydalanuvchi',
-                        free_used INTEGER DEFAULT 0)''')
+                        free_used INTEGER DEFAULT 0,
+                        premium_until INTEGER DEFAULT 0)''')
     
-    # EKRANDAGI XATOLIKNI TUZATISH (Agar ustunlar bazada yo'q bo'lsa, xavfsiz qo'shadi)
+    # EKRANDAGI XATOLIKNI TUZATISH
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Oddiy foydalanuvchi';")
     except sqlite3.OperationalError:
-        pass  # Ustun allaqachon mavjud bo'lsa, xatoni o'tkazib yuboradi
+        pass
 
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN free_used INTEGER DEFAULT 0;")
     except sqlite3.OperationalError:
-        pass  # Ustun allaqachon mavjud bo'lsa, xatoni o'tkazib yuboradi
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
+    except sqlite3.OperationalError:
+        pass
     
     # Flashcards jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
@@ -121,7 +127,7 @@ def add_user_to_db(user_id: int):
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language, status, free_used) VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', 0)", (user_id, int(time.time())))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, created_at, language, status, free_used, premium_until) VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', 0, 0)", (user_id, int(time.time())))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -162,7 +168,6 @@ def send_welcome(message):
     markup.row(btn_start, btn_app)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
-# Mini ilovadan "Chekni yuborish" bosilganda WebApp ma'lumoti bota keladi
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     try:
@@ -174,7 +179,6 @@ def handle_webapp_data(message):
             
             tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
             
-            # Tranzaksiyani bazaga kutilmoqda rejimida yozish
             conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             cursor = conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL;")
@@ -183,7 +187,6 @@ def handle_webapp_data(message):
             conn.commit()
             conn.close()
             
-            # Foydalanuvchiga chek rasm yuborish so'rovini chiqarish
             prompt_msg = bot.send_message(
                 message.chat.id,
                 f"🧾 Siz **{tariff_name}** ({tariff_price}) tarifini tanladingiz.\n\n"
@@ -191,7 +194,6 @@ def handle_webapp_data(message):
                 f"Sizning buyurtma raqamingiz: `{tx_id}`",
                 parse_mode="Markdown"
             )
-            # Foydalanuvchidan keladigan rasmni tutib olish rejimi
             bot.register_next_step_handler(prompt_msg, process_receipt, tx_id, tariff_name, tariff_price)
     except Exception as e:
         logging.error(f"WebApp ma'lumotlarini o'qishda xato: {e}")
@@ -206,10 +208,8 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
     username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
     first_name = message.from_user.first_name
     
-    # Rasm faylini olish
     file_id = message.photo[-1].file_id
     
-    # Adminga (Sizga) inline tugmalar bilan to'liq ma'lumotni yuborish
     admin_markup = telebot.types.InlineKeyboardMarkup()
     btn_approve = telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"pay_approve_{tx_id}_{user_id}")
     btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"pay_reject_{tx_id}_{user_id}")
@@ -228,16 +228,15 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
     bot.send_photo(ADMIN_ID, file_id, caption=admin_text, parse_mode="Markdown", reply_markup=admin_markup)
     bot.send_message(message.chat.id, "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.")
 
-# --- ADMIN TUGMALARINI QABUL QILISH (CALLBACK QUERY) ---
+# --- ADMIN TUGMALARINI QABUL QILISH ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
 def handle_admin_decision(call):
-    # Faqat admin bosa oladi
     if call.from_user.id != ADMIN_ID:
         bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
         return
         
     parts = call.data.split("_")
-    action = parts[1] # approve yoki reject
+    action = parts[1]
     tx_id = parts[2]
     user_id = int(parts[3])
     
@@ -245,7 +244,6 @@ def handle_admin_decision(call):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
-    # Tranzaksiya holatini tekshirish (Double-spending yoki qayta bosishni oldini olish)
     cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = ?", (tx_id,))
     pay_row = cursor.fetchone()
     
@@ -257,13 +255,25 @@ def handle_admin_decision(call):
     tariff_name = pay_row[1]
     
     if action == "approve":
-        # Bazada to'lov va user statusini PRO qilish
+        current_time = int(time.time())
+        duration = 0
+        
+        if "Kunlik" in tariff_name:
+            duration = 24 * 3600
+        elif "Haftalik" in tariff_name:
+            duration = 7 * 24 * 3600
+        elif "Oylik" in tariff_name or "O'qituvchilar" in tariff_name:
+            duration = 30 * 24 * 3600
+
+        premium_until_timestamp = current_time + duration if duration > 0 else 0
+
         cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
-        cursor.execute("UPDATE users SET status = ? WHERE user_id = ?", (f"PRO ✨ ({tariff_name})", user_id))
+        cursor.execute("UPDATE users SET status = ?, premium_until = ? WHERE user_id = ?", 
+                       (f"PRO ✨ ({tariff_name})", premium_until_timestamp, user_id))
         conn.commit()
         
         bot.answer_callback_query(call.id, "To'lov tasdiqlandi!")
-        bot.edit_message_caption(f"✅ {call.message.caption}\n\n🟢 **TASDIQLANDI! (Tarif faollashtirildi)**", call.message.chat.id, call.message.message_id)
+        bot.edit_message_caption(f"✅ {call.message.caption}\n\n🟢 **TASDIQLANDI! (Vaqt o'lchagich ishga tushdi)**", call.message.chat.id, call.message.message_id)
         
         try:
             bot.send_message(user_id, f"🎉 Tabriklaymiz! Sizning **{tariff_name}** tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑")
@@ -305,11 +315,28 @@ def get_premium_status(user_id: int):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT status, free_used FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT status, free_used, premium_until FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     conn.close()
+    
     if row:
-        return {"status": "ok", "user_status": row["status"], "free_used": row["free_used"]}
+        user_status = row["status"]
+        premium_until = row["premium_until"]
+        
+        if "PRO" in user_status and premium_until > 0 and int(time.time()) > premium_until:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?", (user_id,))
+            conn.commit()
+            conn.close()
+            user_status = "Oddiy foydalanuvchi"
+            
+        if "PRO" in user_status and premium_until > 0:
+            readable_date = time.strftime('%d.%m.%Y %H:%M', time.localtime(premium_until))
+            user_status = f"{user_status} (Gacha: {readable_date})"
+            
+        return {"status": "ok", "user_status": user_status, "free_used": row["free_used"]}
+        
     return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
 
 @app.post("/api/create-quiz-web")
@@ -320,6 +347,30 @@ async def create_quiz_web(
     quiz_title: Optional[str] = Form(None)
 ):
     add_user_to_db(user_id)
+    
+    # Premium muddatini avtomatik tekshirish
+    conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn_check.row_factory = sqlite3.Row
+    cursor_check = conn_check.cursor()
+    cursor_check.execute("SELECT status, premium_until, free_used FROM users WHERE user_id = ?", (user_id,))
+    user_row = cursor_check.fetchone()
+    
+    if user_row:
+        current_status = user_row["status"]
+        premium_until = user_row["premium_until"]
+        free_used = user_row["free_used"]
+        
+        if "PRO" in current_status and premium_until > 0 and int(time.time()) > premium_until:
+            cursor_check.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?", (user_id,))
+            conn_check.commit()
+            current_status = "Oddiy foydalanuvchi"
+            
+        if "PRO" not in current_status and free_used >= 3:
+            conn_check.close()
+            return {"status": "error", "message": "Sizning bepul 3 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑"}
+            
+    conn_check.close()
+
     raw_text = ""
     auto_title = "Matnli Test"
     
@@ -373,7 +424,6 @@ async def create_quiz_web(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""", 
             (quiz_id, user_id, final_title[:30], len(items), 0, quiz_json_raw, int(time.time()), -1, -1)
         )
-        # Test yaratilganda bepul limit hisoblagichini 1 taga oshirish
         cursor.execute("UPDATE users SET free_used = free_used + 1 WHERE user_id = ?", (user_id,))
         conn.commit()
         conn.close()
