@@ -42,7 +42,7 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
-    # Quizzes jadvali[cite: 2]
+    # Quizzes jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
                         id TEXT PRIMARY KEY, 
                         user_id INTEGER, 
@@ -55,7 +55,7 @@ def init_db():
                         last_percent INTEGER DEFAULT -1,
                         is_public INTEGER DEFAULT 0)''')
     
-    # Users jadvali (Premium va Limitlar ustunlari qo'shildi)[cite: 2]
+    # Users jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                         user_id INTEGER PRIMARY KEY, 
                         created_at INTEGER,
@@ -63,7 +63,18 @@ def init_db():
                         status TEXT DEFAULT 'Oddiy foydalanuvchi',
                         free_used INTEGER DEFAULT 0)''')
     
-    # Flashcards jadvali[cite: 2]
+    # EKRANDAGI XATOLIKNI TUZATISH (Agar ustunlar bazada yo'q bo'lsa, xavfsiz qo'shadi)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Oddiy foydalanuvchi';")
+    except sqlite3.OperationalError:
+        pass  # Ustun allaqachon mavjud bo'lsa, xatoni o'tkazib yuboradi
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN free_used INTEGER DEFAULT 0;")
+    except sqlite3.OperationalError:
+        pass  # Ustun allaqachon mavjud bo'lsa, xatoni o'tkazib yuboradi
+    
+    # Flashcards jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
                         id TEXT PRIMARY KEY,
                         user_id INTEGER,
@@ -71,7 +82,7 @@ def init_db():
                         back TEXT,
                         created_at INTEGER)''')
                         
-    # To'lovlar va Tranzaksiyalar jadvali (High-load holatlar uchun)
+    # To'lovlar va Tranzaksiyalar jadvali
     cursor.execute('''CREATE TABLE IF NOT EXISTS payments (
                         tx_id TEXT PRIMARY KEY,
                         user_id INTEGER,
