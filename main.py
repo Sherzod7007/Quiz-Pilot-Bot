@@ -122,16 +122,16 @@ def send_welcome(message):
     
     welcome_text = (
         f"👋 Salom, {message.from_user.first_name}! **Quiz Pilot Super Mini App** tizimiga xush kelibsiz.\n\n"
-        "⚡ **Yangi Yangilanish:**\n"
-        "🔥 Endi tizimimiz 3 xil tilda (UZ, RU, EN) ishlaydi, Ommaviy testlar va Flesh-kartochkalar to'liq ishga tushdi! Premium bolimiga otib ozingizga mos Limitga tolov qiling va tolov chekini ushbu Botga yuboring\n\n"
-        "🚀 Marhamat, pastdagi tugmani bosib ilovani oching!"
+        "📢 **Yangi Yangilanish:**\n"
+        "🚀 Endi tizimimiz 3 xil tilda (UZ, RU, EN) ishlaydi, Ommaviy testlar va Flesh-kartochkalar to'liq ishga tushdi!\n\n"
+        "👇 Marhamat, pastdagi tugmani bosib ilovani oching!"
     )
     
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
     
     mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app")
-    btn_app = telebot.types.KeyboardButton(text="Ilovani ochish 🚀", web_app=telebot.types.WebAppInfo(url=mini_app_url))
+    btn_app = telebot.types.KeyboardButton(text="Ilovani ochish 📱", web_app=telebot.types.WebAppInfo(url=mini_app_url))
     
     markup.row(btn_start, btn_app)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
@@ -217,7 +217,7 @@ async def create_quiz_web(
         conn.close()
 
         try: 
-            bot.send_message(user_id, f"🎉 **{final_title[:30]}** darsligi bo'yicha jami **{len(items)} ta** test savoli muvaffaqiyatli tayyorlandi!")
+            bot.send_message(user_id, f"📝 **{final_title[:30]}** darsligi bo'yicha jami **{len(items)} ta** test savoli muvaffaqiyatli tayyorlandi!")
         except Exception as e: 
             logging.error(f"Telegram xabari yuborilmadi: {e}")
 
@@ -227,9 +227,10 @@ async def create_quiz_web(
 
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
-    if not GOOGLE_API_KEYS: return None
-
-    system_instruction = """You are an advanced AI quiz generator. 
+    if not GOOGLE_API_KEYS:
+        return None
+        
+    system_instruction = """You are an advanced AI quiz generator.
 CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
 2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
@@ -251,36 +252,35 @@ CRITICAL RULES:
                     temperature=0.2
                 )
             )
-            if response and response.text: return response.text
+            if response and response.text:
+                return response.text
         except Exception as e:
             logging.error(f"Gemini API xatosi: {e}")
-        current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
+            
     return None
 
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
     total_users = get_users_count()
-    
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    
     cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     personal_rows = cursor.fetchall()
     
     cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
     lang_row = cursor.fetchone()
     user_lang = lang_row["language"] if lang_row else "uz"
-    
     conn.close()
     
     quizzes = [{
-        "id": r["id"], 
-        "title": r["title"], 
-        "total": r["total"], 
-        "answered": r["answered"], 
+        "id": r["id"],
+        "title": r["title"],
+        "total": r["total"],
+        "answered": r["answered"],
         "created_at": r["created_at"],
         "last_score": r["last_score"],
         "last_percent": r["last_percent"],
@@ -295,29 +295,68 @@ def get_public_quizzes():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
-    rows = cursor.fetchall()
+    cursor.execute("SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
+    public_rows = cursor.fetchall()
     conn.close()
     
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "created_at": r["created_at"]} for r in rows]
+    quizzes = [{
+        "id": r["id"],
+        "title": r["title"],
+        "total": r["total"],
+        "answered": r["answered"],
+        "created_at": r["created_at"],
+        "last_score": r["last_score"],
+        "last_percent": r["last_percent"],
+        "is_public": r["is_public"]
+    } for r in public_rows]
     return {"status": "ok", "quizzes": quizzes}
 
 @app.post("/api/toggle-public")
-def toggle_public(quiz_id: str, user_id: int, is_public: int):
+def toggle_public(quiz_id: str, user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?", (is_public, quiz_id, user_id))
+    cursor.execute("SELECT is_public FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+    new_state = 1 if row[0] == 0 else 0
+    cursor.execute("UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?", (new_state, quiz_id, user_id))
     conn.commit()
     conn.close()
-    return {"status": "ok"}
+    return {"status": "ok", "is_public": new_state}
 
-@app.post("/api/set-language")
-def set_language(user_id: int, lang: str):
+@app.get("/api/quiz-details")
+def get_quiz_details(quiz_id: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT quiz_json, title FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+    return {"status": "ok", "title": row[1], "quiz_json": row[0]}
+
+@app.post("/api/change-language")
+def change_user_lang(user_id: int, lang: str):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.post("/api/create-flashcard")
+def create_flashcard(data: FlashcardCreateRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    fc_id = f"fc_{int(time.time())}_{data.user_id}"
+    cursor.execute("INSERT INTO flashcards (id, user_id, front, back, created_at) VALUES (?, ?, ?, ?, ?)",
+                   (fc_id, data.user_id, data.front, data.back, int(time.time())))
     conn.commit()
     conn.close()
     return {"status": "ok"}
@@ -334,17 +373,6 @@ def get_flashcards(user_id: int):
     cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
     return {"status": "ok", "cards": cards}
 
-@app.post("/api/create-flashcard")
-def create_flashcard(req: FlashcardCreateRequest):
-    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)", (card_id, req.user_id, req.front, req.back, int(time.time())))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
 @app.delete("/api/delete-flashcard")
 def delete_flashcard(card_id: str, user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -354,19 +382,6 @@ def delete_flashcard(card_id: str, user_id: int):
     conn.commit()
     conn.close()
     return {"status": "ok"}
-
-@app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-    raise HTTPException(status_code=404, detail="Test topilmadi")
 
 @app.post("/api/update-progress")
 def update_progress(data: ProgressUpdateRequest):
@@ -397,13 +412,9 @@ def start_bot_polling():
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception as e:
+            logging.error(f"Bot polling xatosi, qayta urunish: {e}")
             time.sleep(5)
 
-@app.on_event("startup")
-async def startup_event():
-    polling_thread = threading.Thread(target=start_bot_polling, daemon=True)
-    polling_thread.start()
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    threading.Thread(target=start_bot_polling, daemon=True).start()
+    uvicorn.run("mail:app", host="0.0.0.0", port=8000, reload=False)
