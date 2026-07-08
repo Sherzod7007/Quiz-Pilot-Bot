@@ -463,8 +463,8 @@
         }
 
         async function addFlashcard() {
-            const front = document.getElementById('fc-front').value.strip ? document.getElementById('fc-front').value.strip() : document.getElementById('fc-front').value.trim();
-            const back = document.getElementById('fc-back').value.strip ? document.getElementById('fc-back').value.strip() : document.getElementById('fc-back').value.trim();
+            const front = document.getElementById('fc-front').value.trim();
+            const back = document.getElementById('fc-back').value.trim();
             if(!front || !back) return;
             
             await fetch(`${BASE_URL}/api/create-flashcard`, {
@@ -501,11 +501,52 @@
             }
         }
 
+        // --- LİMİTLARNİ TEKSHİRİSH VA HISOBGA OLISH MEXANIZMI ---
+        function checkLimitAndIncrement() {
+            const limitKey = `quiz_pilot_limit_${userId}`;
+            let limitData = localStorage.getItem(limitKey);
+            
+            const now = Date.now();
+            const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+            if (!limitData) {
+                limitData = {
+                    count: 0,
+                    resetTime: now + thirtyDaysMs
+                };
+            } else {
+                limitData = JSON.parse(limitData);
+            }
+
+            if (now > limitData.resetTime) {
+                limitData.count = 0;
+                limitData.resetTime = now + thirtyDaysMs;
+            }
+
+            // Blokka tushirish tekshiruvi (3 tadan oshsa bloklaydi)
+            if (limitData.count >= 3) {
+                return false; 
+            }
+
+            limitData.count++;
+            localStorage.setItem(limitKey, JSON.stringify(limitData));
+            return true; 
+        }
+
+        // --- HAMMA FUNKSIYALARI SAQLANGAN TEST YARATISH LOGIKASI ---
         async function startGeneration() {
             const text = document.getElementById('text-input').value;
             const quizTitle = document.getElementById('quiz-title-input').value;
             
             if (!text.trim() && !selectedFile) return;
+
+            // 🚀 JONLI TEKSHIRUV:
+            const hasLimit = checkLimitAndIncrement();
+            if (!hasLimit) {
+                alert("🚫 Bepul limitingiz tugadi! Siz 30 kunda faqat 3ta bepul test yaratishingiz mumkin. Davom etish uchun Premium tariflaridan birini faollashtiring.");
+                switchScreen('premium'); 
+                return; 
+            }
 
             document.getElementById('generate-btn').style.display = "none";
             document.getElementById('loading-status').style.display = "block";
@@ -667,7 +708,6 @@
             });
         }
 
-        // Boshlang'ich yuklash
         loadQuizzes();
     </script>
 </body>
