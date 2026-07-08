@@ -64,7 +64,7 @@ def init_db():
                         free_used INTEGER DEFAULT 0,
                         premium_until INTEGER DEFAULT 0)''')
     
-    # EKRANDAGI XATOLIKNI TUZATISH
+    # Bazani tekshirish va ustunlar yo'q bo'lsa qo'shish
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Oddiy foydalanuvchi';")
     except sqlite3.OperationalError:
@@ -105,7 +105,7 @@ init_db()
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
     options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz)")
-    correct_index: int = Field(description="To'g'ri javob indeksi (0 dan 3 gacha)")
+    correct_index: int = Field(description="To'g'ri javob indeks (0 dan 3 gacha)")
     explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
 
 class QuizResponse(BaseModel):
@@ -171,12 +171,15 @@ def send_welcome(message):
 @bot.message_handler(content_types=['web_app_data'])
 def handle_webapp_data(message):
     try:
+        logging.info(f"WebApp dan kelgan xom ma'lumot: {message.web_app_data.data}")
         data = json.loads(message.web_app_data.data)
+        
         if data.get("action") == "payment_intent":
             user_id = data.get("user_id")
-            tariff_name = data.get("tariff_name")
-            tariff_price = data.get("tariff_price")
+            tariff_name = data.get("tariff_name", "Noma'lum Tarif")
+            tariff_price = data.get("tariff_price", "0 UZS")
             
+            # Unikal tranzaksiya ID yaratish
             tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
             
             conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -196,7 +199,7 @@ def handle_webapp_data(message):
             )
             bot.register_next_step_handler(prompt_msg, process_receipt, tx_id, tariff_name, tariff_price)
     except Exception as e:
-        logging.error(f"WebApp ma'lumotlarini o'qishda xato: {e}")
+        logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
 def process_receipt(message, tx_id, tariff_name, tariff_price):
     if not message.photo:
@@ -211,8 +214,9 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
     file_id = message.photo[-1].file_id
     
     admin_markup = telebot.types.InlineKeyboardMarkup()
-    btn_approve = telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"pay_approve_{tx_id}_{user_id}")
-    btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"pay_reject_{tx_id}_{user_id}")
+    # Callback data uzunligi 64 belgidan oshib ketmasligi uchun qisqartirildi
+    btn_approve = telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"p_app_{tx_id}_{user_id}")
+    btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p_rej_{tx_id}_{user_id}")
     admin_markup.row(btn_approve, btn_reject)
     
     admin_text = (
@@ -229,14 +233,14 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
     bot.send_message(message.chat.id, "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.")
 
 # --- ADMIN TUGMALARINI QABUL QILISH ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("pay_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
 def handle_admin_decision(call):
     if call.from_user.id != ADMIN_ID:
         bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
         return
         
     parts = call.data.split("_")
-    action = parts[1]
+    action = parts[1] # app yoki rej
     tx_id = parts[2]
     user_id = int(parts[3])
     
@@ -254,18 +258,22 @@ def handle_admin_decision(call):
         
     tariff_name = pay_row[1]
     
-    if action == "approve":
+    if action == "app":
         current_time = int(time.time())
-        duration = 0
+        duration = 24 * 3600 # Standart holatda 1 kun (agar shartga tushmasa)
         
-        if "Kunlik" in tariff_name:
+        # Moslashuvchan qidiruv (Katta-kichik harf yoki ixtiyoriy matnda qidirish)
+        t_name_lower = tariff_name.lower()
+        if "kun" in t_name_lower or "24" in t_name_lower:
             duration = 24 * 3600
-        elif "Haftalik" in tariff_name:
+        elif "hafta" in t_name_lower or "7" in t_name_lower:
             duration = 7 * 24 * 3600
-        elif "Oylik" in tariff_name or "O'qituvchilar" in tariff_name:
+        elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower:
             duration = 30 * 24 * 3600
+        elif "umrbod" in t_name_lower or "unlimited" in t_name_lower:
+            duration = 365 * 10 * 24 * 3600 # 10 yil (Cheksizdek)
 
-        premium_until_timestamp = current_time + duration if duration > 0 else 0
+        premium_until_timestamp = current_time + duration
 
         cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
         cursor.execute("UPDATE users SET status = ?, premium_until = ? WHERE user_id = ?", 
@@ -279,7 +287,7 @@ def handle_admin_decision(call):
             bot.send_message(user_id, f"🎉 Tabriklaymiz! Sizning **{tariff_name}** tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑")
         except Exception: pass
         
-    elif action == "reject":
+    elif action == "rej":
         cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = ?", (tx_id,))
         conn.commit()
         
@@ -323,6 +331,7 @@ def get_premium_status(user_id: int):
         user_status = row["status"]
         premium_until = row["premium_until"]
         
+        # Vaqt tugagan bo'lsa statusni Oddiy foydalanuvchiga aylantirish
         if "PRO" in user_status and premium_until > 0 and int(time.time()) > premium_until:
             conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             cursor = conn.cursor()
@@ -330,6 +339,7 @@ def get_premium_status(user_id: int):
             conn.commit()
             conn.close()
             user_status = "Oddiy foydalanuvchi"
+            premium_until = 0
             
         if "PRO" in user_status and premium_until > 0:
             readable_date = time.strftime('%d.%m.%Y %H:%M', time.localtime(premium_until))
@@ -348,7 +358,7 @@ async def create_quiz_web(
 ):
     add_user_to_db(user_id)
     
-    # Premium muddatini avtomatik tekshirish
+    # Premium vaqtini tekshirish
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
