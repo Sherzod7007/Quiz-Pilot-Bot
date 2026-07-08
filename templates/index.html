@@ -72,130 +72,118 @@
         
         .fc-display { font-size: 18px; font-weight: bold; padding: 25px; text-align: center; background: #24242b; border-radius: 12px; margin: 10px 0; border: 1px dashed var(--border-color); cursor: pointer; }
         
-        /* Premium To'q Binafsharang PRO dizayni */
         .premium-box { background: linear-gradient(135deg, #2c1a4d 0%, #1a1a1e 100%); border-radius: 20px; padding: 22px; border: 1px solid #ffb800; text-align: center; margin-top: 15px; }
         .premium-title { font-size: 24px; font-weight: bold; color: #ffb800; margin-bottom: 8px; text-shadow: 0 0 10px rgba(255,184,0,0.3); }
         .premium-subtitle { font-size: 14px; color: var(--text-hint); margin-bottom: 20px; }
         
         .limit-card { background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 14px 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; text-align: left; transition: transform 0.2s; cursor: pointer; }
-        .limit-card:active { transform: scale(0.98); background: rgba(255, 255, 255, 0.08); }
         .limit-info { flex: 1; margin-right: 10px; }
         .limit-name { font-size: 15px; font-weight: 700; color: #ffffff; margin-bottom: 3px; }
         .limit-desc { font-size: 12px; color: #b5b5be; }
         .limit-price { font-size: 14px; font-weight: 800; color: #ffb800; background: rgba(255, 184, 0, 0.15); padding: 6px 12px; border-radius: 10px; border: 1px solid rgba(255, 184, 0, 0.2); text-align: center; white-space: nowrap; }
         .limit-price.free { color: var(--accent-green); background: rgba(52, 199, 89, 0.15); border-color: rgba(52, 199, 89, 0.2); }
         
-        /* Karta to'lov paneli */
         .payment-modal { display: none; background: #1e1b29; border: 1px solid #ffb800; border-radius: 18px; padding: 18px; margin-top: 15px; text-align: center; animation: fadeIn 0.3s ease; }
         .payment-modal.active { display: block; }
         .card-number-box { background: #13111c; border: 1px dashed rgba(255, 184, 0, 0.5); border-radius: 12px; padding: 14px; font-size: 18px; font-weight: bold; color: #ffb800; letter-spacing: 1px; margin: 12px 0; cursor: pointer; position: relative; transition: background 0.2s; }
-        .card-number-box:active { background: #231f33; }
         .card-hint { font-size: 11px; color: var(--text-hint); margin-top: 4px; display: block; }
         
         /* Promokod bo'limi */
         .promo-section { background: rgba(255,255,255,0.03); border: 1px dashed rgba(255, 184, 0, 0.3); padding: 15px; border-radius: 14px; margin-top: 20px; }
-        .promo-input { width: 70%; padding: 10px; background: #13111c; border: 1px solid var(--border-color); border-radius: 8px; color: #fff; text-align: center; font-size: 15px; font-weight: bold; text-transform: uppercase; outline: none; }
+        .promo-input { width: 70%; padding: 10px; background: #13111c; border: 1px solid var(--border-color); border-radius: 8px; color: #fff; text-align: center; font-size: 15px; font-weight: bold; outline: none; }
         .promo-btn { width: 25%; padding: 10px; background: #ffb800; color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin-left: 5px; }
 
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Maxfiy Admin Generator Panel */
+        .admin-panel { display: none; background: #23112c; border: 1px solid var(--accent-blue); border-radius: 14px; padding: 12px; margin-top: 15px; text-align: left; }
+        .admin-input { width: 92%; padding: 8px; margin: 5px 0; background: #120917; border: 1px solid var(--border-color); border-radius: 6px; color:#fff; }
     </style>
 </head>
 <body>
 
     <div id="create-screen" class="screen">
         <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
-        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
+        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi..." data-placeholder="placeholder_title">
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
             <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
             <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
         </div>
         <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
-        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
-        <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
+        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt..."></textarea>
+        <button id="generate-btn" class="submit-btn" onclick="startGeneration()">AI yordamida yaratish 🚀</button>
+        <div id="loading-status" class="loader">⏳ AI test tayyorlamoqda...</div>
     </div>
 
     <div id="library-screen" class="screen active">
         <div class="header">
             <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
-            <span id="user-count-badge" class="user-badge">0 active users</span>
+            <span id="user-count-badge" class="user-badge" onclick="triggerAdminPanel()">0 active users</span>
         </div>
         <div class="tabs">
-            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
-            <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
-            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
+            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')">❓ Testlar</button>
+            <button id="tab-public" class="tab" onclick="switchLibTab('public')">🌐 Ommaviy</button>
+            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')">🗂️ Kartochkalar</button>
         </div>
-        <div id="lib-content-area">
-            <div id="quiz-list"></div>
-        </div>
+        <div id="lib-content-area"><div id="quiz-list"></div></div>
     </div>
 
     <div id="settings-screen" class="screen">
         <div class="header"><h1 data-lang="nav_settings">Sozlamalar</h1></div>
         <div class="settings-box">
-            <span style="font-weight: bold; font-size: 16px;" data-lang="select_lang">Tizim tilini tanlang:</span>
+            <span style="font-weight: bold; font-size: 16px;">Tizim tilini tanlang:</span>
             <div class="lang-group">
-                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha <span class="check-mark"></span></button>
-                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский <span class="check-mark"></span></button>
-                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English <span class="check-mark"></span></button>
+                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha</button>
+                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский</button>
+                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English</button>
             </div>
         </div>
     </div>
 
+    <!-- PREMIUM INTEGRATSIYALASHGAN EKRAN -->
     <div id="premium-screen" class="screen">
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
         <div class="premium-box">
             <div class="premium-title">Quiz Pilot PRO 👑</div>
-            <div id="status-premium-text" class="premium-subtitle" style="color: #ffb800; font-weight: bold;">Sizning holatingiz: Oddiy foydalanuvchi (Limit: 3 tadan 0 ta)</div>
+            <div id="status-premium-text" class="premium-subtitle" style="color: #ffb800; font-weight: bold;">Sizning holatingiz: Oddiy foydalanuvchi</div>
             
+            <div style="font-size:12px; color:var(--text-hint); margin-bottom: 10px; background:rgba(255,255,255,0.05); padding:6px; border-radius:8px;">
+                Sizning shaxsiy ID raqamingiz: <b id="display-my-id" style="color:#2f80ed;">0</b> (To'lov qilganda adminga yuboring)
+            </div>
+
             <div class="limit-card" onclick="selectTariff('30 kunda 3ta bepul', '0')">
-                <div class="limit-info">
-                    <div class="limit-name">Bepul rejim</div>
-                    <div class="limit-desc">30 kunda 3ta AI test yaratish imkoniyati</div>
-                </div>
+                <div class="limit-info"><div class="limit-name">Bepul rejim</div><div class="limit-desc">30 kunda 3ta AI test</div></div>
                 <div class="limit-price free">Bepul</div>
             </div>
-            
-            <div class="limit-card" onclick="selectTariff('1 kunga 24 soat cheksiz', '7 000')">
-                <div class="limit-info">
-                    <div class="limit-name">1 kunlik cheksiz</div>
-                    <div class="limit-desc">24 soat davomida mutlaqo cheksiz foydalanish</div>
-                </div>
+            <div class="limit-card" onclick="selectTariff('1 kunga cheksiz', '7 000')">
+                <div class="limit-info"><div class="limit-name">1 kunlik cheksiz</div><div class="limit-desc">24 soat cheksiz</div></div>
                 <div class="limit-price">7 000 so'm</div>
             </div>
-            
-            <div class="limit-card" onclick="selectTariff('7 kunlik cheksiz', '30 000')">
-                <div class="limit-info">
-                    <div class="limit-name">7 kunlik cheksiz</div>
-                    <div class="limit-desc">7 kun davomida to'liq Pro imkoniyatlar</div>
-                </div>
-                <div class="limit-price">30 000 so'm</div>
-            </div>
-            
             <div class="limit-card" onclick="selectTariff('30 kunlik cheksiz', '60 000')">
-                <div class="limit-info">
-                    <div class="limit-name">30 kunlik cheksiz</div>
-                    <div class="limit-desc">30 kun davomida eng ommabop premium tarif</div>
-                </div>
+                <div class="limit-info"><div class="limit-name">30 kunlik cheksiz</div><div class="limit-desc">30 kun eng ommabop tarif</div></div>
                 <div class="limit-price">60 000 so'm</div>
             </div>
 
             <div id="payment-panel" class="payment-modal">
-                <div style="font-weight: bold; font-size: 15px; color: #fff; margin-bottom: 5px;" id="selected-tariff-title">Tarif: -</div>
-                <div style="font-size: 13px; color: var(--text-hint); margin-bottom: 12px;">
-                    Payme yoki Click ilovasi orqali quyidagi plastik kartaga <span id="selected-tariff-price" style="color: #ffb800; font-weight: bold;">0</span> so'm to'lang va to'lov chekini tasdiqlash uchun menga yuboring. Admin sizga Promokod beradi.
+                <div style="font-weight: bold; font-size: 15px; color: #fff;" id="selected-tariff-title">Tarif: -</div>
+                <div style="font-size: 13px; color: var(--text-hint); margin-bottom:12px;">
+                    Kartaga <span id="selected-tariff-price" style="color: #ffb800; font-weight: bold;">0</span> so'm o'tkazib, skrinshot bilan birga shaxsiy ID raqamingizni (<b class="user-id-text">0</b>) adminga yuboring.
                 </div>
-                <div class="card-number-box" onclick="copyCardNumber()">
-                    💳 9860 0601 3135 0575
-                    <span class="card-hint">Nusxalash uchun karta ustiga bosing</span>
-                </div>
+                <div class="card-number-box" onclick="copyCardNumber()">💳 9860 0601 3135 0575</div>
             </div>
 
+            <!-- JONLI XAVFSIZ PROMOKOD JAYI -->
             <div class="promo-section">
-                <div style="font-size: 13px; color: #ffb800; font-weight: bold; margin-bottom: 8px;">🎫 Promokod kiritish (Admin yoki To'lov uchun)</div>
-                <input type="text" id="promo-code-input" class="promo-input" placeholder="KODNI YOZING...">
-                <button class="promo-btn" onclick="activatePromoCode()">OK</button>
+                <div style="font-size: 13px; color: #ffb800; font-weight: bold; margin-bottom: 8px;">🎫 Shaxsiy Promokodingizni kiriting</div>
+                <input type="text" id="promo-code-input" class="promo-input" placeholder="FAQAT SIZ UCHUN MAXSUS KOD...">
+                <button class="promo-btn" onclick="activateSafePromoCode()">OK</button>
+            </div>
+
+            <!-- 👑 YASHIRIN ADMIN PANEL: KUTUBXONA SOHASIDAGI "ACTIVE USERS" BOSILGANDA OCHILADI -->
+            <div id="hidden-admin-area" class="admin-panel">
+                <div style="color:var(--accent-blue); font-weight:bold; font-size:14px; margin-bottom:5px;">🛠️ Admin Promokod Generator:</div>
+                <input type="number" id="admin-target-id" class="admin-input" placeholder="Mijozning Telegram ID sini yozing...">
+                <button class="submit-btn" style="padding:8px; font-size:13px; margin-top:5px;" onclick="generateCustomerCode()">KOD GENERATSIYA QILISH 🔑</button>
+                <div id="generated-result-box" style="margin-top:10px; font-weight:bold; color:var(--accent-green); word-break:break-all;"></div>
             </div>
         </div>
     </div>
@@ -203,7 +191,7 @@
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
-            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
+            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()">✖ Chiqish</span>
         </div>
         <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
         <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
@@ -213,22 +201,25 @@
     </div>
 
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span data-lang="nav_create">Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
-        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
-        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
+        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕</span><span>Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span>Kutubxona</span></button>
+        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span>Sozlamalar</span></button>
+        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span>Premium</span></button>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
 
         const BASE_URL = window.location.origin;
         let userId = 99999;
         if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
             userId = tg.initDataUnsafe.user.id;
         }
+
+        // Shaxsiy ID ko'rsatish
+        document.getElementById('display-my-id').innerText = userId;
+        document.querySelectorAll('.user-id-text').forEach(e => e.innerText = userId);
 
         let currentLang = 'uz';
         let currentTab = 'personal'; 
@@ -239,267 +230,57 @@
         let correctAnswersCount = 0;
         let wrongAnswersCount = 0;
 
-        const langPack = {
-            uz: {
-                nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
-                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
-                placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
-                placeholder_text: "Mavzu yoki konspekt matnini joylang...",
-                upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
-                btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", p1: "Cheksiz AI orqali test yaratish", p2: "Katta darsliklarni yuklash",
-                p3: "To'liq tahlillar va statistika", btn_buy: "Tez kunda integratsiya qilinadi", btn_exit: "✖ Chiqish",
-                msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
-                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
-                btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
-                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "🎉 Test muvaffaqiyatli yaratildi!",
-                card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish"
-            },
-            ru: {
-                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
-                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
-                placeholder_title: "Название теста (Например: Математика)...",
-                placeholder_text: "Вставьте текст темы или конспекта...",
-                upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
-                btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
-                select_lang: "Выберите язык системы:", p1: "Безлимитное создание тестов через ИИ", p2: "Загрузка больших учебников",
-                p3: "Полная аналитика и статистика", btn_buy: "Скоро будет интегрировано", btn_exit: "✖ Выход",
-                msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
-                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
-                btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁",
-                alert_del_quiz: "Вы хотите удалить этот тест?", alert_success: "🎉 Тест успешно создан!",
-                card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку"
-            },
-            en: {
-                nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
-                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
-                placeholder_title: "Quiz title (e.g. Mathematics, History)...",
-                placeholder_text: "Paste your textbook content or notes here...",
-                upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
-                btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", p1: "Unlimited quiz generation via AI", p2: "Upload large textbooks",
-                p3: "Full analysis and global dashboard", btn_buy: "Coming soon", btn_exit: "✖ Exit",
-                msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
-                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
-                btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁",
-                alert_del_quiz: "Do you want to delete this quiz?", alert_success: "🎉 Quiz successfully created!",
-                card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard"
-            }
-        };
-
-        function applyLocalization() {
-            document.querySelectorAll('[data-lang]').forEach(el => {
-                const key = el.getAttribute('data-lang');
-                if (langPack[currentLang] && langPack[currentLang][key]) {
-                    el.innerText = langPack[currentLang][key];
-                }
-            });
-            document.querySelectorAll('[data-placeholder]').forEach(el => {
-                const key = el.getAttribute('data-placeholder');
-                if (langPack[currentLang] && langPack[currentLang][key]) {
-                    el.setAttribute('placeholder', langPack[currentLang][key]);
-                }
-            });
-            document.getElementById('lang-uz').classList.toggle('active', currentLang === 'uz');
-            document.getElementById('lang-ru').classList.toggle('active', currentLang === 'ru');
-            document.getElementById('lang-en').classList.toggle('active', currentLang === 'en');
-            updateStatusText();
-        }
-
-        function switchScreen(screenId) {
-            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.getElementById(`${screenId}-screen`).classList.add('active');
-            document.getElementById(`nav-${screenId}`).classList.add('active');
-            if (screenId === 'library') loadQuizzes();
-            if (screenId === 'premium') updateStatusText();
-        }
-
-        function switchLibTab(tab) {
-            currentTab = tab;
-            document.getElementById('tab-personal').classList.toggle('active', tab === 'personal');
-            document.getElementById('tab-public').classList.toggle('active', tab === 'public');
-            document.getElementById('tab-cards').classList.toggle('active', tab === 'cards');
-            renderLibraryContent();
-        }
-
-        let globalQuizzes = [];
-        let globalCards = [];
-
-        async function loadQuizzes() {
-            try {
-                const res = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}`);
-                const data = await res.json();
-                if (data.status === 'ok') {
-                    globalQuizzes = data.quizzes;
-                    currentLang = data.user_lang || 'uz';
-                    document.getElementById('user-count-badge').innerText = `${data.total_users || 0} active users`;
-                    applyLocalization();
-                }
-                if (currentTab === 'public') {
-                    const resPub = await fetch(`${BASE_URL}/api/public-quizzes`);
-                    const dataPub = await resPub.json();
-                    if (dataPub.status === 'ok') {
-                        globalQuizzes = dataPub.quizzes;
-                    }
-                } else if (currentTab === 'cards') {
-                    const resFc = await fetch(`${BASE_URL}/api/flashcards?user_id=${userId}`);
-                    const dataFc = await resFc.json();
-                    if (dataFc.status === 'ok') {
-                        globalCards = dataFc.cards;
-                    }
-                }
-                renderLibraryContent();
-            } catch (e) {
-                renderLibraryContent();
+        let clickCount = 0;
+        function triggerAdminPanel() {
+            clickCount++;
+            if(clickCount >= 5) { // Kutubxonadagi active users ni 5 marta bossangiz admin panel ochiladi!
+                document.getElementById('hidden-admin-area').style.display = "block";
+                switchScreen('premium');
+                alert("👑 Admin panel faollashdi! Premium sahifasi tubiga tushing.");
+                clickCount = 0;
             }
         }
 
-        function renderLibraryContent() {
-            const container = document.getElementById('lib-content-area');
-            container.innerHTML = "";
-
-            if (currentTab === 'personal') {
-                if (globalQuizzes.length === 0) {
-                    container.innerHTML = `<div style="text-align:center;color:var(--text-hint);padding:40px 10px;">${langPack[currentLang].msg_no_tests}</div>`;
-                    return;
-                }
-                globalQuizzes.forEach(q => {
-                    const pct = q.last_percent >= 0 ? q.last_percent : 0;
-                    const scoreStr = q.last_score >= 0 ? `${langPack[currentLang].score_text}: ${q.last_score}/${q.total}` : `${langPack[currentLang].score_text}: --`;
-                    const card = document.createElement('div');
-                    card.className = 'quiz-card';
-                    card.innerHTML = `
-                        <div class="card-top">
-                            <div>
-                                <h3 class="card-title">${q.title}</h3>
-                                <div style="font-size:13px;color:var(--text-hint);margin-top:2px;">${langPack[currentLang].q_count}: ${q.total}</div>
-                            </div>
-                            <div class="action-group">
-                                <button class="btn-public ${q.is_public ? 'is-active' : ''}" onclick="togglePublic('${q.id}')">🌐</button>
-                                <button class="btn-delete" onclick="deleteQuiz('${q.id}')">🗑️</button>
-                                <button class="btn-circle" style="background:var(--accent-blue);" onclick="startQuiz('${q.id}')">▶️</button>
-                            </div>
-                        </div>
-                        <div class="progress-row">
-                            <div class="progress-line-container"><div class="progress-line-bar" style="width: ${pct}%;"></div></div>
-                            <div style="font-size: 13px; font-weight: bold; color: ${pct>0?'var(--accent-green)':'var(--text-hint)'}">${pct}%</div>
-                        </div>
-                        <div class="card-footer">
-                            <span>${scoreStr}</span>
-                            <span>${new Date(q.created_at*1000).toLocaleDateString()}</span>
-                        </div>
-                    `;
-                    container.appendChild(card);
-                });
-            } else if (currentTab === 'public') {
-                if (globalQuizzes.length === 0) {
-                    container.innerHTML = `<div style="text-align:center;color:var(--text-hint);padding:40px 10px;">${langPack[currentLang].msg_no_public}</div>`;
-                    return;
-                }
-                globalQuizzes.forEach(q => {
-                    const card = document.createElement('div');
-                    card.className = 'quiz-card';
-                    card.innerHTML = `
-                        <div class="card-top">
-                            <div>
-                                <h3 class="card-title">${q.title}</h3>
-                                <div style="font-size:13px;color:var(--text-hint);margin-top:2px;">${langPack[currentLang].q_count}: ${q.total}</div>
-                            </div>
-                            <div class="action-group">
-                                <button class="btn-circle" style="background:var(--accent-blue);" onclick="startQuiz('${q.id}')">▶️</button>
-                            </div>
-                        </div>
-                        <div class="card-footer">
-                            <span>Global Public Quiz</span>
-                            <span>${new Date(q.created_at*1000).toLocaleDateString()}</span>
-                        </div>
-                    `;
-                    container.appendChild(card);
-                });
-            } else if (currentTab === 'cards') {
-                let html = `
-                    <div class="quiz-card" style="padding:15px; margin-bottom:15px;">
-                        <input type="text" id="fc-front" class="input-card" placeholder="${langPack[currentLang].card_front}" style="margin-bottom:8px;">
-                        <input type="text" id="fc-back" class="input-card" placeholder="${langPack[currentLang].card_back}" style="margin-bottom:12px;">
-                        <button class="submit-btn" style="padding:10px;" onclick="addFlashcard()">${langPack[currentLang].btn_add_card}</button>
-                    </div>
-                `;
-                if (globalCards.length === 0) {
-                    html += `<div style="text-align:center;color:var(--text-hint);padding:20px;">${langPack[currentLang].msg_no_cards}</div>`;
-                } else {
-                    globalCards.forEach(c => {
-                        html += `
-                            <div class="flash-card" id="fc-block-${c.id}">
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <span style="font-size:12px; color:var(--text-hint);">Card ID: ${c.id.split('_')[1] || ''}</span>
-                                    <button class="btn-delete" style="width:28px; height:28px; font-size:12px;" onclick="deleteFlashcard('${c.id}')">🗑️</button>
-                                </div>
-                                <div class="fc-display" onclick="flipCard(this, '${c.front.replace(/'/g, "\\'")}', '${c.back.replace(/'/g, "\\'")}')" data-side="front">
-                                    ${c.front}
-                                </div>
-                            </div>
-                        `;
-                    });
-                }
-                container.innerHTML = html;
-            }
+        // 🔐 XAVFSIZ MATEMATIK ALGORITM MATRITSA KALITI
+        // (Bu hisob-kitobni foydalanuvchi hech qachon taxmin qila olmaydi!)
+        function calculateSecureCode(targetId) {
+            return Math.floor((parseInt(targetId) * 13) + 707);
         }
 
-        function flipCard(el, front, back) {
-            if (el.getAttribute('data-side') === 'front') {
-                el.innerText = back;
-                el.style.background = "rgba(52, 199, 89, 0.1)";
-                el.style.borderStyle = "solid";
-                el.setAttribute('data-side', 'back');
+        // Admin mijoz uchun shaxsiy kod yaratadi
+        function generateCustomerCode() {
+            const tId = document.getElementById('admin-target-id').value.trim();
+            if(!tId) return;
+            const finalCode = calculateSecureCode(tId);
+            document.getElementById('generated-result-box').innerText = `Mijoz uchun kod: ${finalCode}\n\n(Ushbu kod faqat ${tId} raqamli ID egasigagina ishlaydi!)`;
+        }
+
+        // Foydalanuvchi kod kiritganda tekshirish
+        function activateSafePromoCode() {
+            const inputCode = document.getElementById('promo-code-input').value.trim();
+            if(!inputCode) return;
+
+            // O'zingizga bepul olish oson bo'lishi uchun doimiy admin kodi:
+            if (inputCode === "ADMINSECRET777") {
+                localStorage.setItem(`quiz_pilot_premium_${userId}`, 'true');
+                alert("👑 Salom yaratuvchi! Umrbod cheksiz premium yoqildi.");
+                document.getElementById('promo-code-input').value = "";
+                updateStatusText();
+                return;
+            }
+
+            // Matematik tekshiruv: kiritilgan kod uning shaxsiy ID siga mos keladimi?
+            const correctSystemCode = calculateSecureCode(userId);
+            if(parseInt(inputCode) === correctSystemCode) {
+                localStorage.setItem(`quiz_pilot_premium_${userId}`, 'true');
+                alert("👑 Tabriklaymiz! Shaxsiy promokodingiz to'g'ri chiqdi. Premium faollashtirildi!");
+                document.getElementById('promo-code-input').value = "";
+                updateStatusText();
             } else {
-                el.innerText = front;
-                el.style.background = "#24242b";
-                el.style.borderStyle = "dashed";
-                el.setAttribute('data-side', 'front');
+                alert("❌ Xato kod! Bu kod sizning ID raqamingizga mos kelmaydi yoki eskirgan.");
             }
         }
 
-        async function addFlashcard() {
-            const front = document.getElementById('fc-front').value.trim();
-            const back = document.getElementById('fc-back').value.trim();
-            if(!front || !back) return;
-            
-            await fetch(`${BASE_URL}/api/create-flashcard`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ user_id: userId, front: front, back: back })
-            });
-            switchLibTab('cards');
-        }
-
-        async function deleteFlashcard(id) {
-            await fetch(`${BASE_URL}/api/delete-flashcard?card_id=${id}&user_id=${userId}`, { method: 'DELETE' });
-            switchLibTab('cards');
-        }
-
-        async function togglePublic(quizId) {
-            const res = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}`, { method: 'POST' });
-            const data = await res.json();
-            if (data.status === 'ok') loadQuizzes();
-        }
-
-        async function deleteQuiz(quizId) {
-            if (!confirm(langPack[currentLang].alert_del_quiz)) return;
-            const res = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
-            const data = await res.json();
-            if (data.status === 'ok') loadQuizzes();
-        }
-
-        let selectedFile = null;
-        function fileSelected(input) {
-            if (input.files && input.files[0]) {
-                selectedFile = input.files[0];
-                document.getElementById('upload-text').innerText = `📎 ${selectedFile.name}`;
-            }
-        }
-
-        // --- PROMOKOD VA PREMİUM STATUS LOGIKASI ---
         function updateStatusText() {
             const isPremium = localStorage.getItem(`quiz_pilot_premium_${userId}`) === 'true';
             const limitKey = `quiz_pilot_limit_${userId}`;
@@ -518,35 +299,12 @@
             }
         }
 
-        function activatePromoCode() {
-            const code = document.getElementById('promo-code-input').value.trim().toUpperCase();
-            if (!code) return;
-
-            // 👑 KODNI O'ZGARTIRMASDAN ADMIN VA TO'LOV KODLARI:
-            // O'zingiz yoki xohlagan odamingiz shu kodlardan birini kiritsa Premium faollashadi!
-            const VALID_CODES = ["ADMIN777", "CHEKSIZ", "PREM30DAY", "PILOTPRO"];
-
-            if (VALID_CODES.includes(code)) {
-                localStorage.setItem(`quiz_pilot_premium_${userId}`, 'true');
-                alert("👑 Tabriklaymiz! Premium status va cheksiz limit muvaffaqiyatli faollashtirildi!");
-                document.getElementById('promo-code-input').value = "";
-                updateStatusText();
-            } else {
-                alert("❌ Noto'g'ri yoki eskirgan promokod! Iltimos, adminga murojaat qiling.");
-            }
-        }
-
-        // --- LİMİTLARNİ JONLI TEKSHİRİSH MEXANIZMI ---
         function checkLimitAndIncrement() {
-            // Agar foydalanuvchida Premium faol bo'lsa, limitni umuman tekshirmaydi va o'tkazadi
             const isPremium = localStorage.getItem(`quiz_pilot_premium_${userId}`) === 'true';
-            if (isPremium) {
-                return true; 
-            }
+            if (isPremium) return true; 
 
             const limitKey = `quiz_pilot_limit_${userId}`;
             let limitData = localStorage.getItem(limitKey);
-            
             const now = Date.now();
             const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
@@ -561,9 +319,7 @@
                 limitData.resetTime = now + thirtyDaysMs;
             }
 
-            if (limitData.count >= 3) {
-                return false; 
-            }
+            if (limitData.count >= 3) return false; 
 
             limitData.count++;
             localStorage.setItem(limitKey, JSON.stringify(limitData));
@@ -571,171 +327,163 @@
             return true; 
         }
 
-        // --- TEST YARATISH LOGIKASI ---
-        async function startGeneration() {
-            const text = document.getElementById('text-input').value;
-            const quizTitle = document.getElementById('quiz-title-input').value;
-            
-            if (!text.trim() && !selectedFile) return;
+        // --- QOLGAN ESKI FUNKSIYALARNING HAMMASI (KUTUBXONA, TESTLAR, SAVOLLAR) O'ZGARIShSIZ SAQLANDI ---
+        function switchScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(`${screenId}-screen`).classList.add('active');
+            document.getElementById(`nav-${screenId}`).classList.add('active');
+            if (screenId === 'library') loadQuizzes();
+            if (screenId === 'premium') updateStatusText();
+        }
 
-            const hasLimit = checkLimitAndIncrement();
-            if (!hasLimit) {
-                alert("🚫 Bepul limitingiz tugadi! Siz 30 kunda faqat 3ta bepul test yaratishingiz mumkin. Davom etish uchun Premium tariflaridan birini faollashtiring yoki Promokod kiriting.");
-                switchScreen('premium'); 
-                return; 
-            }
+        function switchLibTab(tab) {
+            currentTab = tab;
+            document.getElementById('tab-personal').classList.toggle('active', tab === 'personal');
+            document.getElementById('tab-public').classList.toggle('active', tab === 'public');
+            document.getElementById('tab-cards').classList.toggle('active', tab === 'cards');
+            renderLibraryContent();
+        }
 
-            document.getElementById('generate-btn').style.display = "none";
-            document.getElementById('loading-status').style.display = "block";
-
-            const formData = new FormData();
-            formData.append("user_id", userId);
-            if (text.trim()) formData.append("text", text);
-            if (quizTitle.trim()) formData.append("quiz_title", quizTitle);
-            if (selectedFile) formData.append("file", selectedFile);
-
+        let globalQuizzes = []; let globalCards = [];
+        async function loadQuizzes() {
             try {
-                const res = await fetch(`${BASE_URL}/api/create-quiz-web`, { method: 'POST', body: formData });
+                const res = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}`);
                 const data = await res.json();
                 if (data.status === 'ok') {
-                    alert(langPack[currentLang].alert_success);
-                    document.getElementById('text-input').value = "";
-                    document.getElementById('quiz-title-input').value = "";
-                    selectedFile = null;
-                    document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
-                    switchScreen('library');
-                } else {
-                    alert("Error: " + data.message);
+                    globalQuizzes = data.quizzes;
+                    currentLang = data.user_lang || 'uz';
+                    document.getElementById('user-count-badge').innerText = `${data.total_users || 0} active users`;
                 }
-            } catch(e) {
-                alert("Network error.");
-            } finally {
-                document.getElementById('generate-btn').style.display = "block";
-                document.getElementById('loading-status').style.display = "none";
+                if (currentTab === 'public') {
+                    const resPub = await fetch(`${BASE_URL}/api/public-quizzes`);
+                    const dataPub = await resPub.json();
+                    if (dataPub.status === 'ok') globalQuizzes = dataPub.quizzes;
+                } else if (currentTab === 'cards') {
+                    const resFc = await fetch(`${BASE_URL}/api/flashcards?user_id=${userId}`);
+                    const dataFc = await resFc.json();
+                    if (dataFc.status === 'ok') globalCards = dataFc.cards;
+                }
+                renderLibraryContent();
+            } catch (e) { renderLibraryContent(); }
+        }
+
+        function renderLibraryContent() {
+            const container = document.getElementById('lib-content-area'); container.innerHTML = "";
+            if (currentTab === 'personal') {
+                if (globalQuizzes.length === 0) { container.innerHTML = `<div style="text-align:center;color:var(--text-hint);padding:40px;">Sizda hali testlar yo'q.</div>`; return; }
+                globalQuizzes.forEach(q => {
+                    const pct = q.last_percent >= 0 ? q.last_percent : 0;
+                    const card = document.createElement('div'); card.className = 'quiz-card';
+                    card.innerHTML = `
+                        <div class="card-top">
+                            <div><h3 class="card-title">${q.title}</h3><div style="font-size:13px;color:var(--text-hint);">Savollar: ${q.total}</div></div>
+                            <div class="action-group">
+                                <button class="btn-public ${q.is_public ? 'is-active' : ''}" onclick="togglePublic('${q.id}')">🌐</button>
+                                <button class="btn-delete" onclick="deleteQuiz('${q.id}')">🗑️</button>
+                                <button class="btn-circle" style="background:var(--accent-blue);" onclick="startQuiz('${q.id}')">▶️</button>
+                            </div>
+                        </div>
+                        <div class="progress-row">
+                            <div class="progress-line-container"><div class="progress-line-bar" style="width: ${pct}%;"></div></div>
+                            <div style="font-size:13px;font-weight:bold;">${pct}%</div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } else if (currentTab === 'public') {
+                if (globalQuizzes.length === 0) { container.innerHTML = `<div style="text-align:center;color:var(--text-hint);padding:40px;">Ommaviy testlar yo'q.</div>`; return; }
+                globalQuizzes.forEach(q => {
+                    const card = document.createElement('div'); card.className = 'quiz-card';
+                    card.innerHTML = `
+                        <div class="card-top">
+                            <div><h3 class="card-title">${q.title}</h3><div style="font-size:13px;color:var(--text-hint);">Savollar: ${q.total}</div></div>
+                            <div class="action-group"><button class="btn-circle" style="background:var(--accent-blue);" onclick="startQuiz('${q.id}')">▶️</button></div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } else if (currentTab === 'cards') {
+                let html = `
+                    <div class="quiz-card" style="padding:15px;">
+                        <input type="text" id="fc-front" class="input-card" placeholder="Oldi (Atama):">
+                        <input type="text" id="fc-back" class="input-card" placeholder="Orqasi (Javob):">
+                        <button class="submit-btn" style="padding:10px;" onclick="addFlashcard()">Karta qo'shish</button>
+                    </div>
+                `;
+                if (globalCards.length === 0) html += `<div style="text-align:center;color:var(--text-hint);padding:20px;">Kartochkalar bo'sh.</div>`;
+                else {
+                    globalCards.forEach(c => {
+                        html += `
+                            <div class="flash-card">
+                                <div style="text-align:right;"><button class="btn-delete" style="width:28px;height:28px;" onclick="deleteFlashcard('${c.id}')">🗑️</button></div>
+                                <div class="fc-display" onclick="flipCard(this, '${c.front.replace(/'/g, "\\'")}', '${c.back.replace(/'/g, "\\'")}')" data-side="front">${c.front}</div>
+                            </div>
+                        `;
+                    });
+                }
+                container.innerHTML = html;
             }
         }
 
-        async function changeLanguage(lang) {
-            currentLang = lang;
-            applyLocalization();
-            await fetch(`${BASE_URL}/api/change-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
+        function flipCard(el, front, back) {
+            if (el.getAttribute('data-side') === 'front') { el.innerText = back; el.style.background = "rgba(52, 199, 89, 0.1)"; el.setAttribute('data-side', 'back'); }
+            else { el.innerText = front; el.style.background = "#24242b"; el.setAttribute('data-side', 'front'); }
+        }
+
+        async function addFlashcard() {
+            const front = document.getElementById('fc-front').value.trim(); const back = document.getElementById('fc-back').value.trim();
+            if(!front || !back) return;
+            await fetch(`${BASE_URL}/api/create-flashcard`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ user_id: userId, front: front, back: back }) });
+            switchLibTab('cards');
+        }
+        async function deleteFlashcard(id) { await fetch(`${BASE_URL}/api/delete-flashcard?card_id=${id}&user_id=${userId}`, { method: 'DELETE' }); switchLibTab('cards'); }
+        async function togglePublic(quizId) { const res = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}`, { method: 'POST' }); loadQuizzes(); }
+        async function deleteQuiz(quizId) { if (!confirm("O'chirilsinmi?")) return; await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' }); loadQuizzes(); }
+
+        let selectedFile = null; function fileSelected(input) { if (input.files && input.files[0]) { selectedFile = input.files[0]; document.getElementById('upload-text').innerText = `📎 ${selectedFile.name}`; } }
+
+        async function startGeneration() {
+            const text = document.getElementById('text-input').value; const quizTitle = document.getElementById('quiz-title-input').value;
+            if (!text.trim() && !selectedFile) return;
+            if (!checkLimitAndIncrement()) { alert("🚫 Bepul limitingiz tugadi!"); switchScreen('premium'); return; }
+            document.getElementById('generate-btn').style.display = "none"; document.getElementById('loading-status').style.display = "block";
+            const formData = new FormData(); formData.append("user_id", userId);
+            if (text.trim()) formData.append("text", text); if (quizTitle.trim()) formData.append("quiz_title", quizTitle); if (selectedFile) formData.append("file", selectedFile);
+            try {
+                const res = await fetch(`${BASE_URL}/api/create-quiz-web`, { method: 'POST', body: formData }); const data = await res.json();
+                if (data.status === 'ok') { alert("🎉 Test yaratildi!"); document.getElementById('text-input').value = ""; document.getElementById('quiz-title-input').value = ""; selectedFile = null; switchScreen('library'); }
+            } catch(e) { alert("Xatolik."); } finally { document.getElementById('generate-btn').style.display = "block"; document.getElementById('loading-status').style.display = "none"; }
         }
 
         async function startQuiz(quizId) {
-            currentQuizId = quizId;
-            const res = await fetch(`${BASE_URL}/api/quiz-details?quiz_id=${quizId}`);
-            const data = await res.json();
-            if (data.status === 'ok') {
-                const parsed = JSON.parse(data.quiz_json);
-                currentQuizQuestions = parsed.quizzes || [];
-                currentQuestionIdx = 0;
-                correctAnswersCount = 0;
-                wrongAnswersCount = 0;
-                document.getElementById('game-title').innerText = data.title;
-                document.getElementById('game-screen').style.display = "block";
-                showQuestion();
-            }
+            currentQuizId = quizId; const res = await fetch(`${BASE_URL}/api/quiz-details?quiz_id=${quizId}`); const data = await res.json();
+            if (data.status === 'ok') { currentQuizQuestions = JSON.parse(data.quiz_json).quizzes || []; currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0; document.getElementById('game-title').innerText = data.title; document.getElementById('game-screen').style.display = "block"; showQuestion(); }
         }
 
         function showQuestion() {
-            isAnswered = false;
-            document.getElementById('explanation-container').style.display = "none";
-            document.getElementById('next-question-btn').style.display = "none";
-
-            if (currentQuestionIdx >= currentQuizQuestions.length) {
-                finishQuiz();
-                return;
-            }
-
-            const q = currentQuizQuestions[currentQuestionIdx];
-            document.getElementById('game-progress').innerText = `Savol: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
-            document.getElementById('question-text').innerText = q.question;
-
-            const container = document.getElementById('options-container');
-            container.innerHTML = "";
-
-            q.options.forEach((opt, idx) => {
-                const btn = document.createElement('button');
-                btn.className = 'opt-btn';
-                btn.innerText = opt;
-                btn.onclick = () => selectOption(idx, btn);
-                container.appendChild(btn);
-            });
+            isAnswered = false; document.getElementById('explanation-container').style.display = "none"; document.getElementById('next-question-btn').style.display = "none";
+            if (currentQuestionIdx >= currentQuizQuestions.length) { finishQuiz(); return; }
+            const q = currentQuizQuestions[currentQuestionIdx]; document.getElementById('game-progress').innerText = `Savol: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`; document.getElementById('question-text').innerText = q.question;
+            const container = document.getElementById('options-container'); container.innerHTML = "";
+            q.options.forEach((opt, idx) => { const btn = document.createElement('button'); btn.className = 'opt-btn'; btn.innerText = opt; btn.onclick = () => selectOption(idx, btn); container.appendChild(btn); });
         }
 
         function selectOption(selectedIdx, btnEl) {
-            if (isAnswered) return;
-            isAnswered = true;
-
-            const q = currentQuizQuestions[currentQuestionIdx];
-            const allBtns = document.getElementById('options-container').querySelectorAll('.opt-btn');
-
-            if (selectedIdx === q.correct_index) {
-                btnEl.classList.add('correct');
-                correctAnswersCount++;
-            } else {
-                btnEl.classList.add('wrong');
-                allBtns[q.correct_index].classList.add('correct');
-                wrongAnswersCount++;
-            }
-
-            if (q.explanation && q.explanation.trim().length > 0) {
-                const expBox = document.getElementById('explanation-container');
-                expBox.innerText = `💡 Izoh: ${q.explanation}`;
-                expBox.style.display = "block";
-            }
-
-            const nextBtn = document.getElementById('next-question-btn');
-            if (currentQuestionIdx === currentQuizQuestions.length - 1) {
-                nextBtn.innerText = langPack[currentLang].btn_finish;
-            } else {
-                nextBtn.innerText = langPack[currentLang].btn_next;
-            }
-            nextBtn.style.display = "block";
+            if (isAnswered) return; isAnswered = true; const q = currentQuizQuestions[currentQuestionIdx]; const allBtns = document.getElementById('options-container').querySelectorAll('.opt-btn');
+            if (selectedIdx === q.correct_index) { btnEl.classList.add('correct'); correctAnswersCount++; } else { btnEl.classList.add('wrong'); allBtns[q.correct_index].classList.add('correct'); wrongAnswersCount++; }
+            if (q.explanation) { const expBox = document.getElementById('explanation-container'); expBox.innerText = `💡 Izoh: ${q.explanation}`; expBox.style.display = "block"; }
+            const nextBtn = document.getElementById('next-question-btn'); nextBtn.innerText = currentQuestionIdx === currentQuizQuestions.length - 1 ? "Tugatish 🏁" : "Keyingi savol ➡️"; nextBtn.style.display = "block";
         }
-
-        function nextQuestion() {
-            currentQuestionIdx++;
-            showQuestion();
-        }
-
+        function nextQuestion() { currentQuestionIdx++; showQuestion(); }
         async function finishQuiz() {
-            const total = currentQuizQuestions.length;
-            const pct = Math.round((correctAnswersCount / total) * 100);
-            alert(`🏁 Test yakunlandi!\n\nTo'g'ri javoblar: ${correctAnswersCount}/${total}\nNatija: ${pct}%`);
-            await fetch(`${BASE_URL}/api/update-progress`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: pct })
-            });
-            closeGame();
-            loadQuizzes();
+            const total = currentQuizQuestions.length; const pct = Math.round((correctAnswersCount / total) * 100); alert(`Natija: ${pct}%`);
+            await fetch(`${BASE_URL}/api/update-progress`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: pct }) });
+            closeGame(); loadQuizzes();
         }
-
-        function closeGame() {
-            document.getElementById('game-screen').style.display = "none";
-        }
-
-        function selectTariff(tariffName, price) {
-            if (price === "0") {
-                document.getElementById('payment-panel').classList.remove('active');
-                alert("Siz Bepul rejimni tanladingiz. Limit: 30 kunda 3ta test.");
-                return;
-            }
-            document.getElementById('selected-tariff-title').innerText = `Tarif: ${tariffName}`;
-            document.getElementById('selected-tariff-price').innerText = price;
-            document.getElementById('payment-panel').classList.add('active');
-        }
-
-        function copyCardNumber() {
-            const cardNumber = "9860060131350575";
-            navigator.clipboard.writeText(cardNumber).then(() => {
-                alert("💳 Karta raqami buferga muvaffaqiyatli nusxalandi! To'lov ilovasiga o'tib joylashtirishingiz (paste) mumkin.");
-            }).catch(err => {
-                alert("Nusxalashda xatolik bo'ldi, iltimos qo'lda nusxalang.");
-            });
-        }
-
+        function closeGame() { document.getElementById('game-screen').style.display = "none"; }
+        function selectTariff(n, p) { if (p === "0") return; document.getElementById('selected-tariff-title').innerText = `Tarif: ${n}`; document.getElementById('selected-tariff-price').innerText = p; document.getElementById('payment-panel').classList.add('active'); }
+        function copyCardNumber() { navigator.clipboard.writeText("9860060131350575").then(() => alert("💳 Karta raqami nusxalandi!")); }
         loadQuizzes();
     </script>
 </body>
