@@ -26,8 +26,9 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
 
-# SIZNING TELEGRAM ID RAQAMINGIZ (To'lov so'rovlari shu IDga boradi)
-ADMIN_ID = 123456789  # <--- O'zingizning Telegram IDingizni yozing
+# Railway Variables'dan ADMIN_ID ni xavfsiz o'qib olish
+raw_admin_id = os.getenv("ADMIN_ID")
+ADMIN_ID = int(raw_admin_id.strip()) if raw_admin_id else None
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
