@@ -61,7 +61,6 @@
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-item.active { color: var(--accent-blue); }
-        .nav-item.active#nav-create .nav-icon { color: var(--accent-yellow) !important; }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: var(--accent-blue); font-weight: bold; }
         
@@ -80,7 +79,7 @@
         .p-pro-header h3 { font-size: 20px; color: #ffffff; margin: 0 0 8px 0; font-weight: 700; }
         .p-pro-header p { font-size: 13px; color: var(--text-hint); margin: 0; line-height: 1.4; }
         .tariff-card { background: #1c1936; border-radius: 16px; padding: 18px; border: 1px solid #2c2c35; display: flex; justify-content: space-between; align-items: center; position: relative; }
-        .tariff-card.popular::before { content: "OMMABOP"; position: absolute; top: -10px; right: 20px; background: #f2c94c; color: #121214; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        .tariff-card.popular::before { content: "⭐"; position: absolute; top: -10px; right: 20px; background: #f2c94c; color: #121214; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
         .tariff-info { display: flex; flex-direction: column; gap: 4px; max-width: 65%; }
         .tariff-title { font-size: 16px; font-weight: bold; color: #ffffff; display: flex; align-items: center; gap: 6px; }
         .tariff-desc { font-size: 12px; color: var(--text-hint); line-height: 1.3; }
@@ -138,10 +137,7 @@
             <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
             <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
         </div>
-        
-        <div id="lib-content-area">
-            <div id="quiz-list"></div>
-        </div>
+        <div id="lib-content-area"><div id="quiz-list"></div></div>
     </div>
 
     <div id="settings-screen" class="screen">
@@ -149,9 +145,9 @@
         <div class="settings-box">
             <span style="font-weight: bold; font-size: 16px;" data-lang="select_lang">Tizim tilini tanlang:</span>
             <div class="lang-group">
-                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha <span class="check-mark"></span></button>
-                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский <span class="check-mark"></span></button>
-                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English <span class="check-mark"></span></button>
+                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha</button>
+                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский</button>
+                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English</button>
             </div>
         </div>
     </div>
@@ -159,7 +155,6 @@
     <div id="premium-screen" class="screen">
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
         <div class="premium-layout">
-            
             <div class="p-status-box">
                 <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
                 <p id="p-status-val">Normal user</p>
@@ -167,63 +162,52 @@
             </div>
 
             <div class="p-pro-header">
-                <h3>Quiz Pilot PRO 👑</h3>
+                <h3 data-lang="premium_pro_title">Quiz Pilot PRO 👑</h3>
                 <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
             </div>
 
-            <div class="tariff-card">
+            <div class="tariff-card" id="card-daily">
                 <div class="tariff-info">
                     <span class="tariff-title">⚡ Kunlik Cheksiz</span>
                     <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
                 </div>
                 <div class="tariff-action">
                     <span class="tariff-price">7 000 so'm</span>
-                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('Kunlik Cheksiz (24 soat)', '7 000 so\'m')">Faollashtirish</button>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('daily')">Faollashtirish</button>
                 </div>
             </div>
 
-            <div class="tariff-card popular">
+            <div class="tariff-card popular" id="card-weekly">
                 <div class="tariff-info">
                     <span class="tariff-title">📅 Haftalik Cheksiz</span>
                     <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
                 </div>
                 <div class="tariff-action">
                     <span class="tariff-price">30 000 so'm</span>
-                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('Haftalik Cheksiz (7 kun)', '30 000 so\'m')">Faollashtirish</button>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('weekly')">Faollashtirish</button>
                 </div>
             </div>
 
-            <div class="tariff-card">
+            <div class="tariff-card" id="card-monthly">
                 <div class="tariff-info">
                     <span class="tariff-title">🌙 Oylik Cheksiz</span>
                     <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
                 </div>
                 <div class="tariff-action">
                     <span class="tariff-price">60 000 so'm</span>
-                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('Oylik Cheksiz (30 kun)', '60 000 so\'m')">Faollashtirish</button>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('monthly')">Faollashtirish</button>
                 </div>
             </div>
 
-            <div class="tariff-card">
+            <div class="tariff-card" id="card-teachers">
                 <div class="tariff-info">
                     <span class="tariff-title">🧑‍🏫 O'qituvchilar Uchun</span>
                     <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
                 </div>
                 <div class="tariff-action">
                     <span class="tariff-price">90 000 so'm</span>
-                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('O\'qituvchilar Uchun (30 kun)', '90 000 so\'m')">Faollashtirish</button>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
                 </div>
-            </div>
-
-        </div>
-    </div>
-
-    <div id="app-dialog" class="app-dialog-overlay">
-        <div class="app-dialog-box">
-            <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
-            <div id="app-dialog-msg" class="app-dialog-msg">Xabar matni...</div>
-            <div class="app-dialog-footer" id="app-dialog-footer">
-                <button class="app-dialog-btn primary" id="app-dialog-ok-btn">OK</button>
             </div>
         </div>
     </div>
@@ -238,6 +222,16 @@
             <div class="modal-buttons">
                 <button class="btn-send-receipt" onclick="submitPaymentIntent()" data-lang="btn_send_receipt">Chekni yuborish 📑</button>
                 <button class="btn-close-modal" onclick="closePaymentModal()" data-lang="btn_close">Yopish</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-dialog" class="app-dialog-overlay">
+        <div class="app-dialog-box">
+            <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
+            <div id="app-dialog-msg" class="app-dialog-msg">Xabar...</div>
+            <div class="app-dialog-footer" id="app-dialog-footer">
+                <button class="app-dialog-btn primary" id="app-dialog-ok-btn">OK</button>
             </div>
         </div>
     </div>
@@ -280,9 +274,7 @@
         let isAnswered = false;
         let correctAnswersCount = 0;
         let wrongAnswersCount = 0;
-        
-        let selectedTariffName = "";
-        let selectedTariffPrice = "";
+        let selectedTariffKey = "";
 
         const langPack = {
             uz: {
@@ -301,16 +293,22 @@
                 premium_status_title: "💎 Sizning Statusingiz", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
                 modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
                 copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
-                btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!",
+                btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!",
+                tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
+                tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
+                tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
                 alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
-                confirm_payment: "📑 Chek so'rovi yuborilsinmi? Tasdiqlaganingizdan so'ng, bot chatida chek rasmini (skrinshot) yuborishingiz mumkin bo'ladi.",
+                confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
                 btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?"
             },
             ru: {
                 nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
-                placeholder_title: "Название теста (Например: Математика)...", placeholder_text: "Вставьте текст темы или конспекта...",
+                placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
                 select_lang: "Выберите язык системы:", btn_exit: "✖ Выход",
@@ -322,16 +320,22 @@
                 premium_status_title: "💎 Ваш Статус", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
                 modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
                 copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
-                btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту!",
+                btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту!",
+                tariff_daily_title: "⚡ Суточный Безлимит", tariff_daily_desc: "24 часа абсолютно безлимитного создания тестов",
+                tariff_weekly_title: "📅 Недельный Безлимит", tariff_weekly_desc: "7 дней безлимитного использования системы",
+                tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
+                tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "30 дней группового режима (расширенный)",
                 explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
                 alert_limit_over: "⚠️ Бесплатный лимит исчерпан! Пожалуйста, выберите тариф для продолжения.",
-                confirm_payment: "📑 Отправить запрос? После подтверждения вы сможете отправить скриншот чека в чат бота.",
-                btn_ok: "ОК", btn_cancel: "Закрыть", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?"
+                confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?"
             },
             en: {
                 nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
                 tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
-                placeholder_title: "Quiz title (e.g. Mathematics)...", placeholder_text: "Paste your textbook content or notes here...",
+                placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
                 select_lang: "Select system language:", btn_exit: "✖ Exit",
@@ -343,12 +347,25 @@
                 premium_status_title: "💎 Your Status", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
                 modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
                 copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
-                btn_send_receipt: "Send Receipt 📑", btn_close: "Close", premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot!",
+                btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot!",
+                tariff_daily_title: "⚡ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
+                tariff_weekly_title: "📅 Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
+                tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
+                tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
                 explanation_label: "💡 Explanation:", active_users_suffix: "active users",
                 alert_limit_over: "⚠️ Free limit expired! Please choose one of the plans to continue.",
-                confirm_payment: "📑 Send receipt intent? After confirmation, you can send the receipt screenshot directly into the bot chat.",
+                confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
                 btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?"
             }
+        };
+
+        const tariffDetails = {
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "7 000 so'm" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "30 000 so'm" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "60 000 so'm" },
+            teachers: { uz: "O'qituvchilar Uchun", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "90 000 so'm" }
         };
 
         function showAppAlert(icon, text, callback = null) {
@@ -356,17 +373,14 @@
             document.getElementById('app-dialog-msg').innerText = text;
             const footer = document.getElementById('app-dialog-footer');
             footer.innerHTML = `<button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>`;
-            
-            const overlay = document.getElementById('app-dialog');
-            overlay.style.display = 'flex';
-            
+            document.getElementById('app-dialog').style.display = 'flex';
             document.getElementById('app-dialog-ok-btn').onclick = function() {
-                overlay.style.display = 'none';
+                document.getElementById('app-dialog').style.display = 'none';
                 if(callback) callback();
             };
         }
 
-        function showAppConfirm(icon, text, onConfirm, onCancel = null) {
+        function showAppConfirm(icon, text, onConfirm) {
             document.getElementById('app-dialog-icon').innerText = icon;
             document.getElementById('app-dialog-msg').innerText = text;
             const footer = document.getElementById('app-dialog-footer');
@@ -374,73 +388,69 @@
                 <button class="app-dialog-btn secondary" id="app-dialog-cancel-btn">${langPack[currentLang].btn_cancel || 'Yopish'}</button>
                 <button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>
             `;
-            
-            const overlay = document.getElementById('app-dialog');
-            overlay.style.display = 'flex';
-            
+            document.getElementById('app-dialog').style.display = 'flex';
             document.getElementById('app-dialog-ok-btn').onclick = function() {
-                overlay.style.display = 'none';
+                document.getElementById('app-dialog').style.display = 'none';
                 onConfirm();
             };
             document.getElementById('app-dialog-cancel-btn').onclick = function() {
-                overlay.style.display = 'none';
-                if(onCancel) onCancel();
+                document.getElementById('app-dialog').style.display = 'none';
             };
         }
 
-        function openPaymentModal(name, price) {
-            selectedTariffName = name;
-            selectedTariffPrice = price;
-            document.getElementById('m-tariff-title').innerText = name;
-            document.getElementById('m-tariff-price').innerText = price;
+        function openPaymentModal(key) {
+            selectedTariffKey = key;
+            const tariff = tariffDetails[key];
+            document.getElementById('m-tariff-title').innerText = tariff[currentLang] || tariff['uz'];
+            document.getElementById('m-tariff-price').innerText = tariff.price;
             document.getElementById('payment-modal').style.display = 'flex';
         }
 
         function closePaymentModal() {
             document.getElementById('payment-modal').style.display = 'none';
-            document.getElementById('toast-notif').style.display = 'none';
         }
 
         function copyCardNumber() {
             navigator.clipboard.writeText("9860060131350575").then(() => {
                 const toast = document.getElementById('toast-notif');
                 toast.style.display = 'inline-block';
-                setTimeout(() => { toast.style.display = 'none'; }, 2500);
+                setTimeout(() => { toast.style.display = 'none'; }, 2000);
             });
         }
 
+        // FIXED: Dual-kanal orqali xabar yuborish (2-MUAMMO TO'LIQ YECHIMI)
         function submitPaymentIntent() {
+            const tariff = tariffDetails[selectedTariffKey];
             const paymentData = {
                 action: "payment_intent",
                 user_id: userId,
-                tariff_name: selectedTariffName,
-                tariff_price: selectedTariffPrice
+                tariff_name: tariff['uz'], 
+                tariff_price: tariff.price
             };
             
-            showAppConfirm("📑", langPack[currentLang].confirm_payment, async () => {
+            showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
                 closePaymentModal();
                 
-                // 1-Channel: AJAX request so'rovni to'g'ridan-to'g'ri backend API ga topshiradi
+                // 1-Kanal: To'g'ridan-to'g'ri FastAPI Endpointiga yuborish (Xavfsiz va tezkor)
                 try {
-                    await fetch(`${BASE_URL}/api/submit-intent`, {
+                    await fetch(`${BASE_URL}/api/payment-intent`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(paymentData)
                     });
-                } catch(e) { console.log("Fetch error:", e); }
+                } catch(e) { console.log("API Fetch xatosi:", e); }
                 
-                // 2-Channel: inline orqali ochilgan bo'lsa bloklanishning oldini oluvchi yechim
+                // 2-Kanal: Agar WebApp klaviatura orqali ochilgan bo'lsa chatga ham tashlaydi
                 try {
                     tg.sendData(JSON.stringify(paymentData));
-                } catch(e) { console.log("tg.sendData restricted:", e); }
+                } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
                 
-                // Bot chatini ochib berish va unga qaytish (Siz rasm/chek yuborishingiz uchun yo'l to'liq ochiladi)
-                setTimeout(() => {
-                    tg.close();
-                }, 100);
+                // Bot chatiga qaytarish
+                setTimeout(() => { tg.close(); }, 200);
             });
         }
 
+        // FIXED: Premium bo'limining barcha tariflari tillarga qarab to'liq tarjima qilinadigan bo'ldi (3-MUAMMO YECHIMI)
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.getAttribute('data-lang');
@@ -451,6 +461,28 @@
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
             });
             
+            // Premium Premium Dynamic Card Translation
+            const dailyCard = document.getElementById('card-daily');
+            if(dailyCard) {
+                dailyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_daily_title;
+                dailyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_daily_desc;
+            }
+            const weeklyCard = document.getElementById('card-weekly');
+            if(weeklyCard) {
+                weeklyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_weekly_title;
+                weeklyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_weekly_desc;
+            }
+            const monthlyCard = document.getElementById('card-monthly');
+            if(monthlyCard) {
+                monthlyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_monthly_title;
+                monthlyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_monthly_desc;
+            }
+            const teachersCard = document.getElementById('card-teachers');
+            if(teachersCard) {
+                teachersCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_teacher_title;
+                teachersCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_teacher_desc;
+            }
+
             document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
             const activeBtn = document.getElementById(`lang-${currentLang}`);
             if(activeBtn) activeBtn.classList.add('active');
@@ -459,18 +491,11 @@
         function switchScreen(screenName) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
-            
             document.getElementById(`${screenName}-screen`).classList.add('active');
             document.getElementById(`nav-${screenName}`).classList.add('active');
-            
             applyLocalization();
-
-            if(screenName === 'library') {
-                loadQuizzes();
-            }
-            if(screenName === 'premium') {
-                loadPremiumStatus();
-            }
+            if(screenName === 'library') loadQuizzes();
+            if(screenName === 'premium') loadPremiumStatus();
         }
 
         async function loadPremiumStatus() {
@@ -496,7 +521,6 @@
         function switchLibTab(tabName) {
             currentTab = tabName;
             document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
-            
             if(tabName === 'personal') {
                 document.getElementById('tab-personal').classList.add('active');
                 loadQuizzes();
@@ -549,16 +573,13 @@
                     });
                 } else {
                     if (data.message && (data.message.includes("limit") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
-                        showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => {
-                            switchScreen('premium'); 
-                        });
+                        showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
                     } else {
-                        showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik yuz berdi."));
+                        showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik"));
                     }
                 }
-            } catch (error) {
-                showAppAlert("❌", langPack[currentLang].alert_system_err);
-            } finally {
+            } catch (error) { showAppAlert("❌", langPack[currentLang].alert_system_err); }
+            finally {
                 genBtn.style.display = "block";
                 loader.style.display = "none";
             }
@@ -569,11 +590,8 @@
                 const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
                 const data = await response.json();
                 
-                // Faol foydalanuvchilar soni xatoligi butunlay to'g'rilandi:
                 let liveUsers = 16; 
-                if (data && data.total_users !== undefined) {
-                    liveUsers = data.total_users; // Backenddan kelgan aniq qiymat
-                }
+                if (data && data.total_users !== undefined) liveUsers = data.total_users;
                 const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
                 document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
 
@@ -605,9 +623,7 @@
                                 </div>
                             </div>
                             <div class="progress-row">
-                                <div class="progress-line-container">
-                                    <div class="progress-line-bar" style="width: ${displayPercent}%;"></div>
-                                </div>
+                                <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
                                 <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
                             </div>
                             <div class="card-footer"><span>${scoreText}</span><span>ID: ${quiz.id.replace('q_', '')}</span></div>
@@ -627,7 +643,6 @@
                 const response = await fetch(`${BASE_URL}/api/public-quizzes?_t=${Date.now()}`);
                 const data = await response.json();
                 container.innerHTML = "";
-                
                 if(data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
                         const card = document.createElement('div');
@@ -635,14 +650,9 @@
                         card.innerHTML = `
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
-                                <div class="action-group">
-                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️ Play</button>
-                                </div>
+                                <div class="action-group"><button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️ Play</button></div>
                             </div>
-                            <div class="card-footer">
-                                <span>${langPack[currentLang].q_count}: ${quiz.total}</span>
-                                <span>🌍 Global</span>
-                            </div>
+                            <div class="card-footer"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>🌍 Global</span></div>
                         `;
                         container.appendChild(card);
                     });
@@ -655,8 +665,7 @@
         async function togglePublic(quizId, newState) {
             try {
                 const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
-                const data = await response.json();
-                if(data.status === 'ok') loadQuizzes();
+                if((await response.json()).status === 'ok') loadQuizzes();
             } catch(e){}
         }
 
@@ -664,8 +673,7 @@
             showAppConfirm("🗑️", langPack[currentLang].alert_del_quiz, async () => {
                 try {
                     const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
-                    const data = await response.json();
-                    if (data && data.status === "ok") loadQuizzes();
+                    if ((await response.json()).status === "ok") loadQuizzes();
                 } catch (error) { console.log(error); }
             });
         }
@@ -719,11 +727,9 @@
         function flipCard(id, front, back) {
             const el = document.getElementById(`body-${id}`);
             if(el.innerText === front) {
-                el.innerText = back;
-                el.style.color = 'var(--accent-yellow)';
+                el.innerText = back; el.style.color = 'var(--accent-yellow)';
             } else {
-                el.innerText = front;
-                el.style.color = '#fff';
+                el.innerText = front; el.style.color = '#fff';
             }
         }
 
@@ -743,23 +749,19 @@
                 if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
                     currentQuizId = quizId;
                     currentQuizQuestions = data.quiz_json.quizzes;
-                    currentQuestionIdx = 0;
-                    correctAnswersCount = 0;
-                    wrongAnswersCount = 0;
+                    currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
                     document.getElementById('game-screen').style.display = 'block';
                     showQuestion();
                 }
-            } catch (error) { showAppAlert("❌", "Yuklashda xatolik yuz berdi."); }
+            } catch (error) { showAppAlert("❌", "Yuklashda xatolik."); }
         }
 
         function showQuestion() {
             if (currentQuestionIdx >= currentQuizQuestions.length) {
-                finishQuiz();
-                return;
+                finishQuiz(); return;
             }
             isAnswered = false;
             const q = currentQuizQuestions[currentQuestionIdx];
-            
             document.getElementById('game-progress').innerText = `Question: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
             document.getElementById('question-text').innerText = q.question;
             
@@ -790,13 +792,10 @@
             const expBox = document.getElementById('explanation-container');
 
             if (idx === correctIdx) {
-                btn.classList.add('correct');
-                correctAnswersCount++;
+                btn.classList.add('correct'); correctAnswersCount++;
             } else {
-                btn.classList.add('wrong');
-                wrongAnswersCount++;
+                btn.classList.add('wrong'); wrongAnswersCount++;
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
-                
                 const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
                 expBox.innerText = `${expLabel} ` + (explanation || "...");
                 expBox.style.display = 'block';
@@ -805,8 +804,7 @@
         }
 
         function nextQuestion() {
-            currentQuestionIdx++;
-            showQuestion();
+            currentQuestionIdx++; showQuestion();
         }
 
         async function finishQuiz() {
@@ -819,9 +817,7 @@
                     body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
                 });
             } catch (e) {}
-            showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => {
-                closeGame();
-            });
+            showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
         }
 
         function closeGame() {
