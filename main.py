@@ -345,6 +345,7 @@ def api_payment_intent(req: PaymentIntentRequest):
     raise HTTPException(status_code=400, detail="Noto'g'ri amal")
 
 @app.get("/api/premium-status")
+def @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -365,11 +366,16 @@ def get_premium_status(user_id: int):
             conn.close()
             user_status = "Oddiy foydalanuvchi"
             premium_until = 0
+            
         if "PRO" in user_status and premium_until > 0:
-            readable_date = time.strftime('%d.%m.%Y %H:%M', time.localtime(premium_until))
+            # O'zbekiston vaqti UTC+5 bo'lgani uchun 5 soat (5 * 3600 = 18000 sek) qo'shamiz
+            uzb_time = time.gmtime(premium_until + 18000)
+            readable_date = time.strftime('%d.%m.%Y %H:%M', uzb_time)
             user_status = f"{user_status} (Gacha: {readable_date})"
+            
         return {"status": "ok", "user_status": user_status, "free_used": row["free_used"]}
     return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
+
 
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
