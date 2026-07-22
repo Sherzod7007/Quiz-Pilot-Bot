@@ -262,14 +262,29 @@ def handle_admin_decision(call):
     
     if action == "app":
         current_time = int(time.time())
+        
+        # Foydalanuvchining bazadagi joriy status va premium vaqtini olamiz
+        cursor.execute("SELECT premium_until FROM users WHERE user_id = ?", (user_id,))
+        u_row = cursor.fetchone()
+        user_current_until = u_row[0] if u_row and u_row[0] else 0
+        
+        # Agar hozirgi premium muddati tugamagan bo'lsa, yangi vaqtni uning ustiga qo'shamiz
+        base_time = user_current_until if user_current_until > current_time else current_time
+        
         duration = 24 * 3600 
         t_name_lower = tariff_name.lower()
-        if "kun" in t_name_lower or "24" in t_name_lower: duration = 24 * 3600
-        elif "hafta" in t_name_lower or "7" in t_name_lower: duration = 7 * 24 * 3600
-        elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower: duration = 30 * 24 * 3600
-        elif "umrbod" in t_name_lower or "unlimited" in t_name_lower: duration = 365 * 10 * 24 * 3600 
+        
+        # ANIQ TEKSHIRUV TARTIBI (7 kun va 30 kun nomida "kun" so'zi bo'lsa ham adashmasligi uchun)
+        if "umrbod" in t_name_lower or "unlimited" in t_name_lower:
+            duration = 365 * 10 * 24 * 3600 
+        elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower:
+            duration = 30 * 24 * 3600
+        elif "hafta" in t_name_lower or "7" in t_name_lower:
+            duration = 7 * 24 * 3600
+        elif "kun" in t_name_lower or "24" in t_name_lower:
+            duration = 24 * 3600
 
-        premium_until_timestamp = current_time + duration
+        premium_until_timestamp = base_time + duration
         cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
         cursor.execute("UPDATE users SET status = ?, premium_until = ? WHERE user_id = ?", 
                        (f"PRO ✨ ({tariff_name})", premium_until_timestamp, user_id))
