@@ -27,7 +27,11 @@ bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
 
 raw_admin_id = os.getenv("ADMIN_ID")
-ADMIN_ID = int(raw_admin_id.strip()) if raw_admin_id else None
+try:
+    ADMIN_ID = int(raw_admin_id.strip()) if raw_admin_id else None
+except Exception as e:
+    logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
+    ADMIN_ID = None
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
@@ -63,7 +67,6 @@ def init_db():
                         free_used INTEGER DEFAULT 0,
                         premium_until INTEGER DEFAULT 0)''')
     
-    # BAZANI TEKSHIRISH VA USTUNLARNI PRAGMA ORQALI MAJBURIY TEKSHIRIB QO'SHISH (1-MUAMMO YECHIMI)
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
     
@@ -233,12 +236,18 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
         f"Chek to'g'riligini tekshiring va pastdagi tugmalardan birini bosing."
     )
     
-    bot.send_photo(ADMIN_ID, file_id, caption=admin_text, parse_mode="Markdown", reply_markup=admin_markup)
-    bot.send_message(message.chat.id, "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.")
+    target_admin = ADMIN_ID if ADMIN_ID else user_id # ADMIN_ID bo'lmasa foydalanuvchining o'ziga yuboradi
+
+    try:
+        bot.send_photo(target_admin, file_id, caption=admin_text, parse_mode="Markdown", reply_markup=admin_markup)
+        bot.send_message(message.chat.id, "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.")
+    except Exception as e:
+        logging.error(f"Admin g'a rasm yuborishda xatolik yuz berdi: {e}")
+        bot.send_message(message.chat.id, "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
 def handle_admin_decision(call):
-    if call.from_user.id != ADMIN_ID:
+    if ADMIN_ID and call.from_user.id != ADMIN_ID:
         bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
         return
         
@@ -263,18 +272,15 @@ def handle_admin_decision(call):
     if action == "app":
         current_time = int(time.time())
         
-        # Foydalanuvchining bazadagi joriy status va premium vaqtini olamiz
         cursor.execute("SELECT premium_until FROM users WHERE user_id = ?", (user_id,))
         u_row = cursor.fetchone()
         user_current_until = u_row[0] if u_row and u_row[0] else 0
         
-        # Agar hozirgi premium muddati tugamagan bo'lsa, yangi vaqtni uning ustiga qo'shamiz
         base_time = user_current_until if user_current_until > current_time else current_time
         
         duration = 24 * 3600 
         t_name_lower = tariff_name.lower()
         
-        # ANIQ TEKSHIRUV TARTIBI (7 kun va 30 kun nomida "kun" so'zi bo'lsa ham adashmasligi uchun)
         if "umrbod" in t_name_lower or "unlimited" in t_name_lower:
             duration = 365 * 10 * 24 * 3600 
         elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower:
@@ -291,17 +297,27 @@ def handle_admin_decision(call):
         conn.commit()
         
         bot.answer_callback_query(call.id, "To'lov tasdiqlandi!")
-        bot.edit_message_caption(f"✅ {call.message.caption}\n\n🟢 **TASDIQLANDI!**", call.message.chat.id, call.message.message_id)
-        try: bot.send_message(user_id, f"🎉 Tabriklaymiz! Sizning **{tariff_name}** tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑")
-        except Exception: pass
+        try:
+            bot.edit_message_caption(f"✅ {call.message.caption}\n\n🟢 **TASDIQLANDI!**", call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        try: 
+            bot.send_message(user_id, f"🎉 Tabriklaymiz! Sizning **{tariff_name}** tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑")
+        except Exception: 
+            pass
         
     elif action == "rej":
         cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = ?", (tx_id,))
         conn.commit()
         bot.answer_callback_query(call.id, "To'lov rad etildi.")
-        bot.edit_message_caption(f"❌ {call.message.caption}\n\n🔴 **RAD ETILDI!**", call.message.chat.id, call.message.message_id)
-        try: bot.send_message(user_id, "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.")
-        except Exception: pass
+        try:
+            bot.edit_message_caption(f"❌ {call.message.caption}\n\n🔴 **RAD ETILDI!**", call.message.chat.id, call.message.message_id)
+        except Exception:
+            pass
+        try: 
+            bot.send_message(user_id, "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.")
+        except Exception: 
+            pass
     conn.close()
 
 # --- FASTAPI ENDPOINTS ---
@@ -321,7 +337,6 @@ def read_root(request: Request):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# FIXED: Frontenddagi Fetch URL va Model nomi /api/payment-intent bilan to'liq moslashtirildi (2-MUAMMO YECHIMI)
 @app.post("/api/payment-intent")
 def api_payment_intent(req: PaymentIntentRequest):
     if req.action == "payment_intent":
