@@ -1,4 +1,3 @@
-
 -- coding: utf-8 --
 import docx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
