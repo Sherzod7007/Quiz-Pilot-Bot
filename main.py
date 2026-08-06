@@ -483,31 +483,44 @@ def get_premium_status(user_id: int):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "SELECT status, free_used, premium_until FROM users WHERE user_id = ?",
+        "SELECT status, free_used, premium_until, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     row = cursor.fetchone()
-    conn.close()
 
     if row:
         user_status = row["status"]
         premium_until = row["premium_until"]
+        free_used = row["free_used"]
+        created_at = row["created_at"] or int(time.time())
+        current_now = int(time.time())
+
+        # 30 kunda bepul limitni 0 ga reset qilish (har oyda 2 ta bepul beriladi)
+        thirty_days_sec = 30 * 24 * 3600
+        if current_now - created_at >= thirty_days_sec and free_used > 0:
+            cursor.execute(
+                "UPDATE users SET free_used = 0, created_at = ? WHERE user_id = ?",
+                (current_now, user_id),
+            )
+            conn.commit()
+            free_used = 0
+
         if (
             "PRO" in user_status
             and premium_until > 0
-            and int(time.time()) > premium_until
+            and current_now > premium_until
         ):
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            cursor = conn.cursor()
             cursor.execute(
                 "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0"
                 " WHERE user_id = ?",
                 (user_id,),
             )
             conn.commit()
-            conn.close()
             user_status = "Oddiy foydalanuvchi"
             premium_until = 0
+            
+        conn.close()
+
         if "PRO" in user_status and premium_until > 0:
             readable_date = time.strftime(
                 "%d.%m.%Y %H:%M", time.localtime(premium_until)
@@ -516,8 +529,10 @@ def get_premium_status(user_id: int):
         return {
             "status": "ok",
             "user_status": user_status,
-            "free_used": row["free_used"],
+            "free_used": free_used,
         }
+    
+    conn.close()
     return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
 
 
@@ -533,7 +548,7 @@ async def create_quiz_web(
     conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
     cursor_check.execute(
-        "SELECT status, premium_until, free_used FROM users WHERE user_id = ?",
+        "SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     user_row = cursor_check.fetchone()
@@ -542,10 +557,23 @@ async def create_quiz_web(
         current_status = user_row["status"]
         premium_until = user_row["premium_until"]
         free_used = user_row["free_used"]
+        created_at = user_row["created_at"] or int(time.time())
+        current_now = int(time.time())
+
+        # 30 kunda bepul limitni 0 ga reset qilish
+        thirty_days_sec = 30 * 24 * 3600
+        if current_now - created_at >= thirty_days_sec and free_used > 0:
+            cursor_check.execute(
+                "UPDATE users SET free_used = 0, created_at = ? WHERE user_id = ?",
+                (current_now, user_id),
+            )
+            conn_check.commit()
+            free_used = 0
+
         if (
             "PRO" in current_status
             and premium_until > 0
-            and int(time.time()) > premium_until
+            and current_now > premium_until
         ):
             cursor_check.execute(
                 "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0"
@@ -554,12 +582,14 @@ async def create_quiz_web(
             )
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
-        if "PRO" not in current_status and free_used >= 3:
+
+        # Bepul limit 2 taga o'zgartirildi:
+        if "PRO" not in current_status and free_used >= 2:
             conn_check.close()
             return {
                 "status": "error",
                 "message": (
-                    "Sizning bepul 3 ta test yaratish limitingiz tugadi. Iltimos,"
+                    "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos,"
                     " Premium tarifga o'ting! 👑"
                 ),
             }
