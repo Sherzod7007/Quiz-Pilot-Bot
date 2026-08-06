@@ -305,7 +305,9 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
       f"Chek to'g'riligini tekshiring va pastdagi tugmalardan birini bosing."
   )
 
-  target_admin = ADMIN_ID if ADMIN_ID else user_id
+  target_admin = (
+      ADMIN_ID if ADMIN_ID else user_id
+  )  # ADMIN_ID bo'lmasa foydalanuvchining o'ziga yuboradi
 
   try:
     bot.send_photo(
@@ -671,10 +673,12 @@ CRITICAL RULES:
 
   total_keys = len(GOOGLE_API_KEYS)
 
+  # Asinxron so'rovlarda ko'p tarmoqli poyga holatini oldini olish uchun lock ishlatamiz
   with key_lock:
     start_index = current_key_index
     current_key_index = (current_key_index + 1) % total_keys
 
+  # Barcha mavjud kalitlar bo'ylab navbatma-navbat aylanamiz
   for i in range(total_keys):
     key_idx = (start_index + i) % total_keys
     api_key = GOOGLE_API_KEYS[key_idx].strip()
@@ -685,7 +689,7 @@ CRITICAL RULES:
     try:
       client = genai.Client(api_key=api_key)
       response = client.models.generate_content(
-          model="gemini-3.6-flash",
+          model="gemini-1.5-flash",
           contents=extracted_text[:80000],
           config=genai_types.GenerateContentConfig(
               system_instruction=system_instruction,
