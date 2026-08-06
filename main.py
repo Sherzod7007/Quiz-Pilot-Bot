@@ -689,7 +689,7 @@ CRITICAL RULES:
     try:
       client = genai.Client(api_key=api_key)
       response = client.models.generate_content(
-          model="gemini-1.5-flash",
+          model="gemini-3.5-flash-lite",
           contents=extracted_text[:80000],
           config=genai_types.GenerateContentConfig(
               system_instruction=system_instruction,
