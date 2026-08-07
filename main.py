@@ -1,14 +1,4 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime, timedelta, timezone
-import json
-import logging
-import os
-import sqlite3
-import threading
-import time
-from typing import List, Optional
-import uuid
-
 import docx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,10 +6,18 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
+import json
+import logging
+import os
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+import sqlite3
 import telebot
+import threading
+import time
+from typing import List, Optional
 import uvicorn
+import uuid
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -49,15 +47,7 @@ DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
 
-
-def format_uzb_time(timestamp: int) -> str:
-    """Timestamp ni O'zbekiston vaqti (UTC+5) bo'yicha DD.MM.YYYY HH:MM formatiga o'tkazadi"""
-    uzb_tz = timezone(timedelta(hours=5))
-    dt = datetime.fromtimestamp(timestamp, tz=uzb_tz)
-    return dt.strftime("%d.%m.%Y %H:%M")
-
-
-# --- MULTI-LANGUAGE DICTIONARY ---
+# --- MULTILINGUAL (3 TILDAGI BILDIRISHNOMALAR) ---
 MESSAGES = {
     "uz": {
         "welcome": (
@@ -66,77 +56,64 @@ MESSAGES = {
             "Premium rejalarni faollashtirib, cheksiz testlar yarating!\n\n"
             "👇 Marhamat, pastdagi tugmani bosib ilovani oching!"
         ),
-        "btn_app": "Ilovani ochish 📱",
+        "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
             "🧾 Siz {tariff_name} ({tariff_price}) tarifini tanladingiz.\n\n"
             "Iltimos, plastik kartaga to'lov qilganingiz haqidagi To'lov Chekini "
             "(Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\n"
             "Sizning buyurtma raqamingiz: {tx_id}"
         ),
-        "receipt_err": "❌ Iltimos, faqat rasm (skrinshot) ko'rinishidagi to'lov chekini yuboring. Qaytadan urinib ko'ring:",
-        "receipt_sent": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
-        "receipt_admin_err": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
-        "limit_exceeded": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
-        "read_error": "Matn yoki darslikni o'qib bo'lmadi.",
-        "ai_error": "AI test generatsiya qila olmadi.",
-        "ai_empty": "AI savollar ro'yxatini bo'sh qaytardi.",
+        "photo_only_error": "❌ Iltimos, faqat rasm (skrinshot) ko'rinishidagi to'lov chekini yuboring. Qaytadan urinib ko'ring:",
+        "receipt_received": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
+        "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
+        "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
+        "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
+        "quiz_limit_reached": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
-        "pay_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
-        "pay_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
-        "default_title": "Matnli Test",
     },
     "ru": {
         "welcome": (
             "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
             "🚀 Новое обновление:\n🔒 Запущена наша умная система оплаты. "
-            "Активируйте Премиум и создавайте неограниченное количество тестов!\n\n"
+            "Активируйте Premium тарифы и создавайте неограниченное количество тестов!\n\n"
             "👇 Нажмите кнопку ниже, чтобы открыть приложение!"
         ),
-        "btn_app": "Открыть приложение 📱",
+        "open_app": "Открыть приложение 📱",
         "payment_prompt": (
             "🧾 Вы выбрали тариф {tariff_name} ({tariff_price}).\n\n"
-            "Пожалуйста, отправьте сюда чек об оплате (в виде фото/скриншота).\n"
+            "Пожалуйста, отправьте чек об оплате (в виде фото/скриншота) сюда.\n"
             "Ваш номер заказа: {tx_id}"
         ),
-        "receipt_err": "❌ Пожалуйста, отправьте чек об оплате только в виде фото (скриншота). Попробуйте еще раз:",
-        "receipt_sent": "✅ Спасибо! Ваш чек отправлен администратору. Он будет проверен в ближайшее время.",
-        "receipt_admin_err": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Проверяется через админ-панель.",
-        "limit_exceeded": "Ваш бесплатный лимит на создание 2 тестов в течение 30 дней исчерпан. Пожалуйста, перейдите на Премиум! 👑",
-        "read_error": "Не удалось прочитать текст или учебник.",
-        "ai_error": "ИИ не удалось сгенерировать тест.",
-        "ai_empty": "ИИ вернул пустой список вопросов.",
-        "quiz_ready": "📝 По учебнику {title} успешно подготовлено {count} тестовых вопросов!",
-        "pay_approved": "🎉 Поздравляем! Ваш платеж за тариф {tariff_name} подтвержден. В приложении активирован статус PRO! 👑",
-        "pay_rejected": "❌ Ваш чек об оплате не принят или отклонен. Если вы считаете, что это ошибка, обратитесь к администратору.",
-        "default_title": "Текстовый тест",
+        "photo_only_error": "❌ Пожалуйста, отправьте чек об оплате только в виде изображения (скриншота). Попробуйте еще раз:",
+        "receipt_received": "✅ Спасибо! Ваш чек отправлен администратору. В ближайшее время он будет проверен, и ваш тариф активируется.",
+        "receipt_error": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Он будет проверен через админ-панель.",
+        "payment_approved": "🎉 Поздравляем! Ваш платеж по тарифу {tariff_name} подтвержден. В приложении активирован PRO статус! 👑",
+        "payment_rejected": "❌ Ваш чек об оплате был отклонен. Если вы считаете, что произошла ошибка, свяжитесь с администратором.",
+        "quiz_limit_reached": "Ваш лимит на создание 2 бесплатных тестов в течение 30 дней исчерпан. Пожалуйста, перейдите на Premium тариф! 👑",
+        "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
     "en": {
         "welcome": (
             "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
             "🚀 New Update:\n🔒 Our smart payment system is now live. "
-            "Activate Premium plans and create unlimited quizzes!\n\n"
+            "Activate Premium plans to generate unlimited quizzes!\n\n"
             "👇 Tap the button below to open the app!"
         ),
-        "btn_app": "Open App 📱",
+        "open_app": "Open App 📱",
         "payment_prompt": (
-            "🧾 You selected {tariff_name} ({tariff_price}).\n\n"
-            "Please send your payment receipt (as a photo/screenshot) here.\n"
-            "Your order ID: {tx_id}"
+            "🧾 You have selected the {tariff_name} ({tariff_price}) plan.\n\n"
+            "Please send your payment receipt (as a Photo/Screenshot) here.\n"
+            "Your Order ID is: {tx_id}"
         ),
-        "receipt_err": "❌ Please send the payment receipt as a photo or screenshot only. Try again:",
-        "receipt_sent": "✅ Thank you! Your payment receipt has been sent to the admin for verification.",
-        "receipt_admin_err": "⚠️ Receipt received, but there was an issue notifying the admin. It will be checked manually.",
-        "limit_exceeded": "Your free limit of 2 tests per 30 days has expired. Please upgrade to Premium! 👑",
-        "read_error": "Could not read the provided text or document.",
-        "ai_error": "AI failed to generate the quiz.",
-        "ai_empty": "AI returned an empty list of questions.",
-        "quiz_ready": "📝 A total of {count} quiz questions for {title} have been created successfully!",
-        "pay_approved": "🎉 Congratulations! Your payment for {tariff_name} has been approved. PRO status is now active! 👑",
-        "pay_rejected": "❌ Your payment receipt was rejected. If you think this is a mistake, please contact the administrator.",
-        "default_title": "Text Quiz",
-    },
+        "photo_only_error": "❌ Please send the payment receipt only as an image (screenshot). Please try again:",
+        "receipt_received": "✅ Thank you! Your payment receipt has been sent to the administrator. It will be verified shortly, and your plan will be activated.",
+        "receipt_error": "⚠️ Your receipt was received, but there was an issue notifying the admin. It will be reviewed via the admin panel.",
+        "payment_approved": "🎉 Congratulations! Your payment for the {tariff_name} plan has been confirmed. PRO status is now active! 👑",
+        "payment_rejected": "❌ Your payment receipt was rejected. If you believe this is an error, please contact support.",
+        "quiz_limit_reached": "You have reached your free limit of 2 quizzes within 30 days. Please upgrade to a Premium plan! 👑",
+        "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
+    }
 }
-
 
 def get_user_lang(user_id: int) -> str:
     try:
@@ -148,7 +125,7 @@ def get_user_lang(user_id: int) -> str:
         if row and row[0] in MESSAGES:
             return row[0]
     except Exception as e:
-        logging.error(f"Foydalanuvchi tilini olishda xato: {e}")
+        logging.error(f"Foydalanuvchi tilini olishda xatolik: {e}")
     return "uz"
 
 
@@ -293,10 +270,11 @@ def trigger_payment_flow(user_id, tariff_name, tariff_price):
         conn.commit()
         conn.close()
 
-        # Foydalanuvchi tilini bazadan olamiz va shu tilda xabar yuboramiz
         user_lang = get_user_lang(user_id)
         msg_text = MESSAGES[user_lang]["payment_prompt"].format(
-            tariff_name=tariff_name, tariff_price=tariff_price, tx_id=tx_id
+            tariff_name=tariff_name,
+            tariff_price=tariff_price,
+            tx_id=tx_id
         )
 
         prompt_msg = bot.send_message(user_id, msg_text, parse_mode="Markdown")
@@ -313,26 +291,18 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(
-        name=message.from_user.first_name
-    )
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
 
     mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app")
     btn_app = telebot.types.KeyboardButton(
-        text=MESSAGES[user_lang]["btn_app"],
-        web_app=telebot.types.WebAppInfo(url=mini_app_url),
+        text=MESSAGES[user_lang]["open_app"], web_app=telebot.types.WebAppInfo(url=mini_app_url)
     )
 
     markup.row(btn_start, btn_app)
-    bot.send_message(
-        message.chat.id,
-        welcome_text,
-        parse_mode="Markdown",
-        reply_markup=markup,
-    )
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 
 @bot.message_handler(content_types=["web_app_data"])
@@ -356,7 +326,8 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
 
     if not message.photo:
         err_msg = bot.send_message(
-            message.chat.id, MESSAGES[user_lang]["receipt_err"]
+            message.chat.id,
+            MESSAGES[user_lang]["photo_only_error"]
         )
         bot.register_next_step_handler(
             err_msg, process_receipt, tx_id, tariff_name, tariff_price
@@ -376,6 +347,7 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
         f"💰 YANGI TO'LOV SO'ROVI!\n\n"
         f"👤 Foydalanuvchi: {first_name} ({username})\n"
         f"🆔 Telegram ID: {user_id}\n"
+        f"🌐 Til kodi: {user_lang.upper()}\n"
         f"📦 Tanlangan Tarif: {tariff_name}\n"
         f"💵 To'lov Summasi: {tariff_price}\n"
         f"🧩 Tranzaksiya ID: {tx_id}\n\n"
@@ -392,10 +364,10 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
             parse_mode="Markdown",
             reply_markup=admin_markup,
         )
-        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_sent"])
+        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_received"])
     except Exception as e:
         logging.error(f"Admin ga rasm yuborishda xatolik yuz berdi: {e}")
-        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_admin_err"])
+        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_error"])
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
@@ -408,6 +380,7 @@ def handle_admin_decision(call):
     action = parts[1]
     tx_id = parts[2]
     user_id = int(parts[3])
+    user_lang = get_user_lang(user_id)
 
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
@@ -421,17 +394,14 @@ def handle_admin_decision(call):
         return
 
     tariff_name = pay_row[1]
-    user_lang = get_user_lang(user_id)
 
     if action == "app":
         current_time = int(time.time())
-
         cursor.execute("SELECT premium_until FROM users WHERE user_id = ?", (user_id,))
         u_row = cursor.fetchone()
         user_current_until = u_row[0] if u_row and u_row[0] else 0
 
         base_time = user_current_until if user_current_until > current_time else current_time
-
         duration = 24 * 3600
         t_name_lower = tariff_name.lower()
 
@@ -462,11 +432,8 @@ def handle_admin_decision(call):
         except Exception:
             pass
         try:
-            # Foydalanuvchiga uning tilida tasdiq xabarini yuboramiz
-            bot.send_message(
-                user_id,
-                MESSAGES[user_lang]["pay_approved"].format(tariff_name=tariff_name),
-            )
+            succ_msg = MESSAGES[user_lang]["payment_approved"].format(tariff_name=tariff_name)
+            bot.send_message(user_id, succ_msg)
         except Exception:
             pass
 
@@ -483,8 +450,8 @@ def handle_admin_decision(call):
         except Exception:
             pass
         try:
-            # Foydalanuvchiga uning tilida rad etilganligi haqidagi xabarni yuboramiz
-            bot.send_message(user_id, MESSAGES[user_lang]["pay_rejected"])
+            rej_msg = MESSAGES[user_lang]["payment_rejected"]
+            bot.send_message(user_id, rej_msg)
         except Exception:
             pass
 
@@ -553,7 +520,11 @@ def get_premium_status(user_id: int):
             conn.commit()
             free_used = 0
 
-        if "PRO" in user_status and premium_until > 0 and current_now > premium_until:
+        if (
+            "PRO" in user_status
+            and premium_until > 0
+            and current_now > premium_until
+        ):
             cursor.execute(
                 "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
                 (user_id,),
@@ -561,18 +532,20 @@ def get_premium_status(user_id: int):
             conn.commit()
             user_status = "Oddiy foydalanuvchi"
             premium_until = 0
-
+            
         conn.close()
 
         if "PRO" in user_status and premium_until > 0:
-            readable_date = format_uzb_time(premium_until)
+            readable_date = time.strftime(
+                "%d.%m.%Y %H:%M", time.localtime(premium_until)
+            )
             user_status = f"{user_status} (Gacha: {readable_date})"
         return {
             "status": "ok",
             "user_status": user_status,
             "free_used": free_used,
         }
-
+    
     conn.close()
     return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
 
@@ -612,7 +585,11 @@ async def create_quiz_web(
             conn_check.commit()
             free_used = 0
 
-        if "PRO" in current_status and premium_until > 0 and current_now > premium_until:
+        if (
+            "PRO" in current_status
+            and premium_until > 0
+            and current_now > premium_until
+        ):
             cursor_check.execute(
                 "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
                 (user_id,),
@@ -624,12 +601,12 @@ async def create_quiz_web(
             conn_check.close()
             return {
                 "status": "error",
-                "message": MESSAGES[user_lang]["limit_exceeded"],
+                "message": MESSAGES[user_lang]["quiz_limit_reached"],
             }
     conn_check.close()
 
     raw_text = ""
-    auto_title = MESSAGES[user_lang]["default_title"]
+    auto_title = "Matnli Test"
 
     if file and file.filename and len(file.filename.strip()) > 0:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -641,11 +618,9 @@ async def create_quiz_web(
                     f.write(contents)
                 if file.filename.endswith(".pdf"):
                     reader = PdfReader(file_path)
-                    raw_text = "".join([
-                        p.extract_text() + "\n"
-                        for p in reader.pages
-                        if p.extract_text()
-                    ])
+                    raw_text = "".join(
+                        [p.extract_text() + "\n" for p in reader.pages if p.extract_text()]
+                    )
                     auto_title = file.filename.replace(".pdf", "")
                 elif file.filename.endswith(".docx"):
                     doc = docx.Document(file_path)
@@ -664,11 +639,11 @@ async def create_quiz_web(
         )
 
     if not raw_text.strip():
-        return {"status": "error", "message": MESSAGES[user_lang]["read_error"]}
+        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": MESSAGES[user_lang]["ai_error"]}
+        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -676,14 +651,12 @@ async def create_quiz_web(
         if not items:
             return {
                 "status": "error",
-                "message": MESSAGES[user_lang]["ai_empty"],
+                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
             }
 
         quiz_id = f"q_{int(time.time())}"
         final_title = (
-            quiz_title.strip()
-            if (quiz_title and quiz_title.strip())
-            else auto_title
+            quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         )
 
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -712,12 +685,11 @@ async def create_quiz_web(
         conn.close()
 
         try:
-            bot.send_message(
-                user_id,
-                MESSAGES[user_lang]["quiz_ready"].format(
-                    title=final_title[:30], count=len(items)
-                ),
+            q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
+                title=final_title[:30],
+                count=len(items)
             )
+            bot.send_message(user_id, q_ready_msg)
         except Exception as e:
             logging.error(f"Telegram xabari yuborilmadi: {e}")
         return {"status": "ok"}
@@ -765,20 +737,17 @@ CRITICAL RULES:
 
             if response and response.text:
                 logging.info(
-                    "Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi:"
-                    f" [{key_idx}]"
+                    f"Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi: [{key_idx}]"
                 )
                 return response.text
 
         except Exception as e:
             logging.warning(
-                f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. Xatolik:"
-                f" {e}. Keyingi kalitga o'tilmoqda..."
+                f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. Xatolik: {e}."
+                " Keyingi kalitga o'tilmoqda..."
             )
 
-    logging.error(
-        "Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi."
-    )
+    logging.error("Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi.")
     return None
 
 
@@ -791,7 +760,8 @@ def get_user_quizzes(user_id: int):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "SELECT id, title, total, answered, created_at, last_score, last_percent, is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC",
+        "SELECT id, title, total, answered, created_at, last_score, last_percent,"
+        " is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC",
         (user_id,),
     )
     personal_rows = cursor.fetchall()
@@ -825,7 +795,8 @@ def get_public_quizzes():
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50"
+        "SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1"
+        " ORDER BY created_at DESC LIMIT 50"
     )
     rows = cursor.fetchall()
     conn.close()
@@ -872,15 +843,102 @@ def get_flashcards(user_id: int):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "SELECT id, front, back, created_at FROM flashcards WHERE user_id = ? ORDER BY created_at DESC",
+        "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY"
+        " created_at DESC",
         (user_id,),
     )
     rows = cursor.fetchall()
     conn.close()
-    cards = [{
-        "id": r["id"],
-        "front": r["front"],
-        "back": r["back"],
-        "created_at": r["created_at"],
-    } for r in rows]
-    return {"status": "ok", "flashcards": cards}
+    cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
+    return {"status": "ok", "cards": cards}
+
+
+@app.post("/api/create-flashcard")
+def create_flashcard(req: FlashcardCreateRequest):
+    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
+        (card_id, req.user_id, req.front, req.back, int(time.time())),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.delete("/api/delete-flashcard")
+def delete_flashcard(card_id: str, user_id: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.get("/api/quiz-detail")
+def get_quiz_detail(quiz_id: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+    raise HTTPException(status_code=404, detail="Test topilmadi")
+
+
+@app.post("/api/update-progress")
+def update_progress(data: ProgressUpdateRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
+        " WHERE id = ? AND user_id = ?",
+        (data.correct_count, data.percent, data.quiz_id, data.user_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.delete("/api/delete-quiz")
+def delete_quiz(quiz_id: str, user_id: int):
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute(
+            "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Test o'chirildi."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Xatolik.")
+
+
+def start_bot_polling():
+    while True:
+        try:
+            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        except Exception:
+            time.sleep(5)
+
+
+@app.on_event("startup")
+async def startup_event():
+    threading.Thread(target=start_bot_polling, daemon=True).start()
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
