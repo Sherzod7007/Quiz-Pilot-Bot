@@ -45,7 +45,7 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
 
-# Quizzes jadvali
+Quizzes jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
 id TEXT PRIMARY KEY,
 user_id INTEGER,
@@ -58,7 +58,7 @@ last_score INTEGER DEFAULT -1,
 last_percent INTEGER DEFAULT -1,
 is_public INTEGER DEFAULT 0)''')
 
-# Users jadvali
+Users jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
 user_id INTEGER PRIMARY KEY,
 created_at INTEGER,
@@ -80,7 +80,7 @@ if "premium_until" not in columns:
 try: cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
 except Exception: pass
 
-# Flashcards jadvali
+Flashcards jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
 id TEXT PRIMARY KEY,
 user_id INTEGER,
@@ -88,7 +88,7 @@ front TEXT,
 back TEXT,
 created_at INTEGER)''')
 
-# Payments jadvali
+Payments jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS payments (
 tx_id TEXT PRIMARY KEY,
 user_id INTEGER,
@@ -365,16 +365,11 @@ conn.commit()
 conn.close()
 user_status = "Oddiy foydalanuvchi"
 premium_until = 0
-
 if "PRO" in user_status and premium_until > 0:
-# O'zbekiston vaqti UTC+5 bo'lgani uchun 5 soat (5 * 3600 = 18000 sek) qo'shamiz
-uzb_time = time.gmtime(premium_until + 18000)
-readable_date = time.strftime('%d.%m.%Y %H:%M', uzb_time)
+readable_date = time.strftime('%d.%m.%Y %H:%M', time.localtime(premium_until))
 user_status = f"{user_status} (Gacha: {readable_date})"
-
 return {"status": "ok", "user_status": user_status, "free_used": row["free_used"]}
 return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
-
 
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
@@ -475,7 +470,7 @@ continue
 try:
 client = genai.Client(api_key=api_key)
 response = client.models.generate_content(
-model='gemini-3.6-flash',
+model='gemini-2.5-flash',
 contents=extracted_text[:80000],
 config=genai_types.GenerateContentConfig(
 system_instruction=system_instruction,
