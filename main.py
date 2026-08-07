@@ -249,10 +249,10 @@ def get_users_count():
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
+        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users WHERE user_id IS NOT NULL AND user_id != 0")
         count = cursor.fetchone()[0]
         conn.close()
-        return count
+        return count if count is not None else 0
     except Exception as e:
         logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
         return 0
