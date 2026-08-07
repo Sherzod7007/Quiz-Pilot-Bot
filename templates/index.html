@@ -79,7 +79,7 @@
         .p-pro-header h3 { font-size: 20px; color: #ffffff; margin: 0 0 8px 0; font-weight: 700; }
         .p-pro-header p { font-size: 13px; color: var(--text-hint); margin: 0; line-height: 1.4; }
         .tariff-card { background: #1c1936; border-radius: 16px; padding: 18px; border: 1px solid #2c2c35; display: flex; justify-content: space-between; align-items: center; position: relative; }
-        .tariff-card.popular::before { content: "в­ђ"; position: absolute; top: -10px; right: 20px; background: #f2c94c; color: #121214; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        .tariff-card.popular::before { content: "⭐"; position: absolute; top: -10px; right: 20px; background: #f2c94c; color: #121214; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
         .tariff-info { display: flex; flex-direction: column; gap: 4px; max-width: 65%; }
         .tariff-title { font-size: 16px; font-weight: bold; color: #ffffff; display: flex; align-items: center; gap: 6px; }
         .tariff-desc { font-size: 12px; color: var(--text-hint); line-height: 1.3; }
@@ -117,14 +117,14 @@
         <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
         <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
-            <span style="font-size: 40px; display: block; margin-bottom: 10px;">рџ“‚</span>
+            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
             <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
             <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
         </div>
         <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
         <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
-        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish рџљЂ</button>
-        <div id="loading-status" class="loader" data-lang="loading_status">вЏі AI test tayyorlamoqda, iltimos kuting...</div>
+        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
+        <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
     <div id="library-screen" class="screen active">
@@ -133,9 +133,9 @@
             <span id="user-count-badge" class="user-badge">...</span>
         </div>
         <div class="tabs">
-            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">вќ“ Testlar</button>
-            <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">рџЊђ Ommaviy</button>
-            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">рџ—‚пёЏ Kartochkalar</button>
+            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
+            <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
+            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
         </div>
         <div id="lib-content-area"><div id="quiz-list"></div></div>
     </div>
@@ -145,9 +145,9 @@
         <div class="settings-box">
             <span style="font-weight: bold; font-size: 16px;" data-lang="select_lang">Tizim tilini tanlang:</span>
             <div class="lang-group">
-                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">рџ‡єрџ‡ї O'zbekcha</button>
-                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">рџ‡·рџ‡є Р СѓСЃСЃРєРёР№</button>
-                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">рџ‡єрџ‡ё English</button>
+                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha</button>
+                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский</button>
+                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English</button>
             </div>
         </div>
     </div>
@@ -156,19 +156,19 @@
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
         <div class="premium-layout">
             <div class="p-status-box">
-                <h2 data-lang="premium_status_title">рџ’Ћ Sizning Statusingiz</h2>
+                <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
                 <p id="p-status-val">Normal user</p>
                 <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> / 3 <span data-lang="limit_unit">ta</span></p>
             </div>
 
             <div class="p-pro-header">
-                <h3 data-lang="premium_pro_title">Quiz Pilot PRO рџ‘‘</h3>
+                <h3 data-lang="premium_pro_title">Quiz Pilot PRO 👑</h3>
                 <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
             </div>
 
             <div class="tariff-card" id="card-daily">
                 <div class="tariff-info">
-                    <span class="tariff-title">вљЎ Kunlik Cheksiz</span>
+                    <span class="tariff-title">⚡ Kunlik Cheksiz</span>
                     <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
                 </div>
                 <div class="tariff-action">
@@ -179,7 +179,7 @@
 
             <div class="tariff-card popular" id="card-weekly">
                 <div class="tariff-info">
-                    <span class="tariff-title">рџ“… Haftalik Cheksiz</span>
+                    <span class="tariff-title">📅 Haftalik Cheksiz</span>
                     <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
                 </div>
                 <div class="tariff-action">
@@ -190,7 +190,7 @@
 
             <div class="tariff-card" id="card-monthly">
                 <div class="tariff-info">
-                    <span class="tariff-title">рџЊ™ Oylik Cheksiz</span>
+                    <span class="tariff-title">🌙 Oylik Cheksiz</span>
                     <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
                 </div>
                 <div class="tariff-action">
@@ -201,7 +201,7 @@
 
             <div class="tariff-card" id="card-teachers">
                 <div class="tariff-info">
-                    <span class="tariff-title">рџ§‘вЂЌрџЏ« O'qituvchilar Uchun</span>
+                    <span class="tariff-title">🧑‍🏫 O'qituvchilar Uchun</span>
                     <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
                 </div>
                 <div class="tariff-action">
@@ -217,10 +217,10 @@
             <h4 id="m-tariff-title">Tarif</h4>
             <p><span data-lang="modal_payment_text">To'lov summasi:</span> <b id="m-tariff-price" style="color:#fff;">0</b><br><span data-lang="modal_payment_hint">Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:</span></p>
             <div class="card-number-box" onclick="copyCardNumber()">9860 0601 3135 0575</div>
-            <span class="copy-hint" data-lang="copy_hint">Karta raqamiga bosib nusxa oling рџ“„</span>
-            <div id="toast-notif" class="toast-msg" data-lang="toast_copied">Karta raqami nusxalandi! вњ…</div>
+            <span class="copy-hint" data-lang="copy_hint">Karta raqamiga bosib nusxa oling 📄</span>
+            <div id="toast-notif" class="toast-msg" data-lang="toast_copied">Karta raqami nusxalandi! ✅</div>
             <div class="modal-buttons">
-                <button class="btn-send-receipt" onclick="submitPaymentIntent()" data-lang="btn_send_receipt">Chekni yuborish рџ“‘</button>
+                <button class="btn-send-receipt" onclick="submitPaymentIntent()" data-lang="btn_send_receipt">Chekni yuborish 📑</button>
                 <button class="btn-close-modal" onclick="closePaymentModal()" data-lang="btn_close">Yopish</button>
             </div>
         </div>
@@ -228,7 +228,7 @@
 
     <div id="app-dialog" class="app-dialog-overlay">
         <div class="app-dialog-box">
-            <span id="app-dialog-icon" class="app-dialog-icon">вљ пёЏ</span>
+            <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
             <div id="app-dialog-msg" class="app-dialog-msg">Xabar...</div>
             <div class="app-dialog-footer" id="app-dialog-footer">
                 <button class="app-dialog-btn primary" id="app-dialog-ok-btn">OK</button>
@@ -239,7 +239,7 @@
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
-            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">вњ– Chiqish</span>
+            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
         </div>
         <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
         <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
@@ -249,10 +249,10 @@
     </div>
 
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">вћ•пёЏ</span><span data-lang="nav_create">Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">рџ“љ</span><span data-lang="nav_library">Kutubxona</span></button>
-        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">вљ™пёЏ</span><span data-lang="nav_settings">Sozlamalar</span></button>
-        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">рџ‘‘</span><span data-lang="nav_premium">Premium</span></button>
+        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕️</span><span data-lang="nav_create">Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
+        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
+        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
     </div>
 
     <script>
@@ -279,93 +279,93 @@
         const langPack = {
             uz: {
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
-                tab_tests: "вќ“ Testlar", tab_public: "рџЊђ Ommaviy", tab_cards: "рџ—‚пёЏ Kartochkalar",
+                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
-                btn_generate: "AI yordamida yaratish рџљЂ", loading_status: "вЏі AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", btn_exit: "вњ– Chiqish",
+                btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
+                select_lang: "Tizim tilini tanlang:", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
-                btn_next: "Keyingi savol вћЎпёЏ", btn_finish: "Natijani saqlash рџЏЃ", 
-                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "рџЋ‰ Test muvaffaqiyatli yaratildi!", 
+                btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
+                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
                 card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
-                premium_status_title: "рџ’Ћ Sizning Statusingiz", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
+                premium_status_title: "💎 Sizning Statusingiz", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
                 modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
-                copy_hint: "Karta raqamiga bosib nusxa oling рџ“„", toast_copied: "Karta raqami nusxalandi! вњ…",
-                btn_send_receipt: "Chekni yuborish рџ“‘", btn_close: "Yopish", 
-                premium_pro_title: "Quiz Pilot PRO рџ‘‘",
+                copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
+                btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
                 premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!",
-                tariff_daily_title: "вљЎ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
-                tariff_weekly_title: "рџ“… Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
-                tariff_monthly_title: "рџЊ™ Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
-                tariff_teacher_title: "рџ§‘вЂЌрџЏ« O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
-                explanation_label: "рџ’Ў Izoh:", active_users_suffix: "faol foydalanuvchi",
-                alert_limit_over: "вљ пёЏ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
-                confirm_payment: "рџ“‘ Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
-                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "вќЊ Tizim xatoligi yuz berdi.", alert_del_card: "рџ—‘пёЏ Ushbu kartochkani o'chirasizmi?"
+                tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
+                tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
+                tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
+                explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
+                alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
+                confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
+                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?"
             },
             ru: {
-                nav_create: "РЎРѕР·РґР°С‚СЊ", nav_library: "Р‘РёР±Р»РёРѕС‚РµРєР°", nav_settings: "РќР°СЃС‚СЂРѕР№РєРё", nav_premium: "РџСЂРµРјРёСѓРј",
-                tab_tests: "вќ“ РўРµСЃС‚С‹", tab_public: "рџЊђ РџСѓР±Р»РёС‡РЅС‹Рµ", tab_cards: "рџ—‚пёЏ РљР°СЂС‚РѕС‡РєРё",
-                placeholder_title: "РќР°Р·РІР°РЅРёРµ С‚РµСЃС‚Р°...", placeholder_text: "Р’СЃС‚Р°РІСЊС‚Рµ С‚РµРєСЃС‚ С‚РµРјС‹ РёР»Рё РєРѕРЅСЃРїРµРєС‚Р°...",
-                upload_box: "Р—Р°РіСЂСѓР·РёС‚СЊ СѓС‡РµР±РЅРёРє (PDF РёР»Рё DOCX)", or_text: "РёР»Рё РІРІРµРґРёС‚Рµ С‚РµРєСЃС‚:",
-                btn_generate: "РЎРѕР·РґР°С‚СЊ СЃ РїРѕРјРѕС‰СЊСЋ РР рџљЂ", loading_status: "вЏі РР РіРѕС‚РѕРІРёС‚ С‚РµСЃС‚, РїРѕР¶Р°Р»СѓР№СЃС‚Р° РїРѕРґРѕР¶РґРёС‚Рµ...",
-                select_lang: "Р’С‹Р±РµСЂРёС‚Рµ СЏР·С‹Рє СЃРёСЃС‚РµРјС‹:", btn_exit: "вњ– Р’С‹С…РѕРґ",
-                msg_no_tests: "РЈ РІР°СЃ РїРѕРєР° РЅРµС‚ С‚РµСЃС‚РѕРІ.", msg_no_public: "РџСѓР±Р»РёС‡РЅС‹С… С‚РµСЃС‚РѕРІ РїРѕРєР° РЅРµС‚.",
-                msg_no_cards: "РЎРїРёСЃРѕРє РєР°СЂС‚РѕС‡РµРє РїСѓСЃС‚.", score_text: "РџРѕСЃР»РµРґРЅРёР№ СЂРµР·СѓР»СЊС‚Р°С‚", q_count: "Р’РѕРїСЂРѕСЃРѕРІ",
-                btn_next: "РЎР»РµРґСѓСЋС‰РёР№ РІРѕРїСЂРѕСЃ вћЎпёЏ", btn_finish: "РЎРѕС…СЂР°РЅРёС‚СЊ СЂРµР·СѓР»СЊС‚Р°С‚ рџЏЃ", 
-                alert_del_quiz: "Р’С‹ С…РѕС‚РёС‚Рµ СѓРґР°Р»РёС‚СЊ СЌС‚РѕС‚ С‚РµСЃС‚?", alert_success: "рџЋ‰ РўРµСЃС‚ СѓСЃРїРµС€РЅРѕ СЃРѕР·РґР°РЅ!", 
-                card_front: "Р›РёС†РµРІР°СЏ (РўРµСЂРјРёРЅ):", card_back: "РћР±РѕСЂРѕС‚РЅР°СЏ (РџРµСЂРµРІРѕРґ):", btn_add_card: "Р”РѕР±Р°РІРёС‚СЊ РєР°СЂС‚РѕС‡РєСѓ", 
-                premium_status_title: "рџ’Ћ Р’Р°С€ РЎС‚Р°С‚СѓСЃ", premium_limit_text: "Р’Р°С€ Р±РµСЃРїР»Р°С‚РЅС‹Р№ Р»РёРјРёС‚ РЅР° 30 РґРЅРµР№:", limit_unit: "С€С‚", activate_btn: "РђРєС‚РёРІРёСЂРѕРІР°С‚СЊ",
-                modal_payment_text: "РЎСѓРјРјР° РѕРїР»Р°С‚С‹:", modal_payment_hint: "РџРµСЂРµРІРµРґРёС‚Рµ РґРµРЅСЊРіРё РЅР° СЃР»РµРґСѓСЋС‰СѓСЋ РїР»Р°СЃС‚РёРєРѕРІСѓСЋ РєР°СЂС‚Сѓ С‡РµСЂРµР· Payme РёР»Рё Click:",
-                copy_hint: "РќР°Р¶РјРёС‚Рµ РЅР° РЅРѕРјРµСЂ РєР°СЂС‚С‹, С‡С‚РѕР±С‹ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ рџ“„", toast_copied: "РќРѕРјРµСЂ РєР°СЂС‚С‹ СЃРєРѕРїРёСЂРѕРІР°РЅ! вњ…",
-                btn_send_receipt: "РћС‚РїСЂР°РІРёС‚СЊ С‡РµРє рџ“‘", btn_close: "Р—Р°РєСЂС‹С‚СЊ", 
-                premium_pro_title: "Quiz Pilot PRO рџ‘‘",
-                premium_pro_desc: "Р’С‹Р±РµСЂРёС‚Рµ РїРѕРґС…РѕРґСЏС‰РёР№ С‚Р°СЂРёС„, СЃРєРѕРїРёСЂСѓР№С‚Рµ РЅРѕРјРµСЂ РєР°СЂС‚С‹, РѕРїР»Р°С‚РёС‚Рµ Рё РѕС‚РїСЂР°РІСЊС‚Рµ С‡РµРє Р±РѕС‚Сѓ!",
-                tariff_daily_title: "вљЎ РЎСѓС‚РѕС‡РЅС‹Р№ Р‘РµР·Р»РёРјРёС‚", tariff_daily_desc: "24 С‡Р°СЃР° Р°Р±СЃРѕР»СЋС‚РЅРѕ Р±РµР·Р»РёРјРёС‚РЅРѕРіРѕ СЃРѕР·РґР°РЅРёСЏ С‚РµСЃС‚РѕРІ",
-                tariff_weekly_title: "рџ“… РќРµРґРµР»СЊРЅС‹Р№ Р‘РµР·Р»РёРјРёС‚", tariff_weekly_desc: "7 РґРЅРµР№ Р±РµР·Р»РёРјРёС‚РЅРѕРіРѕ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ СЃРёСЃС‚РµРјС‹",
-                tariff_monthly_title: "рџЊ™ РњРµСЃСЏС‡РЅС‹Р№ Р‘РµР·Р»РёРјРёС‚", tariff_monthly_desc: "30 РґРЅРµР№ СЃР°РјРѕРіРѕ СѓРґРѕР±РЅРѕРіРѕ Р±РµР·Р»РёРјРёС‚РЅРѕРіРѕ СЂРµР¶РёРјР°",
-                tariff_teacher_title: "рџ§‘вЂЌрџЏ« Р”Р»СЏ РЈС‡РёС‚РµР»РµР№", tariff_teacher_desc: "30 РґРЅРµР№ РіСЂСѓРїРїРѕРІРѕРіРѕ СЂРµР¶РёРјР° (СЂР°СЃС€РёСЂРµРЅРЅС‹Р№)",
-                explanation_label: "рџ’Ў РџРѕСЏСЃРЅРµРЅРёРµ:", active_users_suffix: "Р°РєС‚РёРІРЅС‹С… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№",
-                alert_limit_over: "вљ пёЏ Р‘РµСЃРїР»Р°С‚РЅС‹Р№ Р»РёРјРёС‚ РёСЃС‡РµСЂРїР°РЅ! РџРѕР¶Р°Р»СѓР№СЃС‚Р°, РІС‹Р±РµСЂРёС‚Рµ С‚Р°СЂРёС„ РґР»СЏ РїСЂРѕРґРѕР»Р¶РµРЅРёСЏ.",
-                confirm_payment: "рџ“‘ РћС‚РїСЂР°РІРёС‚СЊ С‡РµРє? РќРµ Р·Р°Р±СѓРґСЊС‚Рµ РІРµСЂРЅСѓС‚СЊСЃСЏ РІ Р±РѕС‚Р° Рё РѕС‚РїСЂР°РІРёС‚СЊ СЃРєСЂРёРЅС€РѕС‚ С‡РµРєР°.",
-                btn_ok: "РћРљ", btn_cancel: "РћС‚РјРµРЅР°", alert_system_err: "вќЊ РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР° СЃРёСЃС‚РµРјС‹.", alert_del_card: "рџ—‘пёЏ РЈРґР°Р»РёС‚СЊ СЌС‚Сѓ РєР°СЂС‚РѕС‡РєСѓ?"
+                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
+                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
+                placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
+                upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
+                btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
+                select_lang: "Выберите язык системы:", btn_exit: "✖ Выход",
+                msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
+                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
+                btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
+                alert_del_quiz: "Вы хотите удалить этот тест?", alert_success: "🎉 Тест успешно создан!", 
+                card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
+                premium_status_title: "💎 Ваш Статус", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
+                modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
+                copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
+                btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту!",
+                tariff_daily_title: "⚡ Суточный Безлимит", tariff_daily_desc: "24 часа абсолютно безлимитного создания тестов",
+                tariff_weekly_title: "📅 Недельный Безлимит", tariff_weekly_desc: "7 дней безлимитного использования системы",
+                tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
+                tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "30 дней группового режима (расширенный)",
+                explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
+                alert_limit_over: "⚠️ Бесплатный лимит исчерпан! Пожалуйста, выберите тариф для продолжения.",
+                confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?"
             },
             en: {
                 nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
-                tab_tests: "вќ“ Quizzes", tab_public: "рџЊђ Public", tab_cards: "рџ—‚пёЏ Flashcards",
+                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
-                btn_generate: "Generate with AI рџљЂ", loading_status: "вЏі AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", btn_exit: "вњ– Exit",
+                btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
+                select_lang: "Select system language:", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
-                btn_next: "Next Question вћЎпёЏ", btn_finish: "Finish & Save рџЏЃ", 
-                alert_del_quiz: "Do you want to delete this quiz?", alert_success: "рџЋ‰ Quiz successfully created!", 
+                btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
+                alert_del_quiz: "Do you want to delete this quiz?", alert_success: "🎉 Quiz successfully created!", 
                 card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
-                premium_status_title: "рџ’Ћ Your Status", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
+                premium_status_title: "💎 Your Status", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
                 modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
-                copy_hint: "Click on the card number to copy рџ“„", toast_copied: "Card number copied! вњ…",
-                btn_send_receipt: "Send Receipt рџ“‘", btn_close: "Close", 
-                premium_pro_title: "Quiz Pilot PRO рџ‘‘",
+                copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
+                btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
                 premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot!",
-                tariff_daily_title: "вљЎ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
-                tariff_weekly_title: "рџ“… Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
-                tariff_monthly_title: "рџЊ™ Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
-                tariff_teacher_title: "рџ§‘вЂЌрџЏ« For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
-                explanation_label: "рџ’Ў Explanation:", active_users_suffix: "active users",
-                alert_limit_over: "вљ пёЏ Free limit expired! Please choose one of the plans to continue.",
-                confirm_payment: "рџ“‘ Send receipt request? Don't forget to return to the bot and send the screenshot.",
-                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "вќЊ System error occurred.", alert_del_card: "рџ—‘пёЏ Delete this flashcard?"
+                tariff_daily_title: "⚡ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
+                tariff_weekly_title: "📅 Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
+                tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
+                tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
+                explanation_label: "💡 Explanation:", active_users_suffix: "active users",
+                alert_limit_over: "⚠️ Free limit expired! Please choose one of the plans to continue.",
+                confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
+                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?"
             }
         };
 
         const tariffDetails = {
-            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "РЎСѓС‚РѕС‡РЅС‹Р№ Р‘РµР·Р»РёРјРёС‚ (24 С‡)", en: "Daily Unlimited (24h)", price: "7 000 so'm" },
-            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "РќРµРґРµР»СЊРЅС‹Р№ Р‘РµР·Р»РёРјРёС‚ (7 РґРЅ)", en: "Weekly Unlimited (7d)", price: "30 000 so'm" },
-            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "РњРµСЃСЏС‡РЅС‹Р№ Р‘РµР·Р»РёРјРёС‚ (30 РґРЅ)", en: "Monthly Unlimited (30d)", price: "60 000 so'm" },
-            teachers: { uz: "O'qituvchilar Uchun", ru: "Р”Р»СЏ РЈС‡РёС‚РµР»РµР№ (30 РґРЅ)", en: "For Teachers (30d)", price: "90 000 so'm" }
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "7 000 so'm" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "30 000 so'm" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "60 000 so'm" },
+            teachers: { uz: "O'qituvchilar Uchun", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "90 000 so'm" }
         };
 
         function showAppAlert(icon, text, callback = null) {
@@ -428,7 +428,7 @@
                 tariff_price: tariff.price
             };
             
-            showAppConfirm("рџ“‘", langPack[currentLang].confirm_payment, async function() {
+            showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
                 closePaymentModal();
                 
                 // 1-Kanal: To'g'ridan-to'g'ri FastAPI Endpointiga yuborish (Xavfsiz va tezkor)
@@ -547,7 +547,7 @@
             const loader = document.getElementById('loading-status');
 
             if (!textInput && fileInput.files.length === 0) {
-                showAppAlert("вњЌпёЏ", "Iltimos, matn kiriting yoki fayl yuklang!");
+                showAppAlert("✍️", "Iltimos, matn kiriting yoki fayl yuklang!");
                 return;
             }
 
@@ -564,7 +564,7 @@
                 const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData });
                 const data = await response.json();
                 if (data && data.status === "ok") {
-                    showAppAlert("рџљЂ", langPack[currentLang].alert_success, () => {
+                    showAppAlert("🚀", langPack[currentLang].alert_success, () => {
                         document.getElementById('text-input').value = "";
                         document.getElementById('quiz-title-input').value = "";
                         fileInput.value = "";
@@ -573,12 +573,12 @@
                     });
                 } else {
                     if (data.message && (data.message.includes("limit") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
-                        showAppAlert("вљ пёЏ", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
+                        showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
                     } else {
-                        showAppAlert("вќЊ", "Xatolik: " + (data.message || "Xatolik"));
+                        showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik"));
                     }
                 }
-            } catch (error) { showAppAlert("вќЊ", langPack[currentLang].alert_system_err); }
+            } catch (error) { showAppAlert("❌", langPack[currentLang].alert_system_err); }
             finally {
                 genBtn.style.display = "block";
                 loader.style.display = "none";
@@ -593,7 +593,7 @@
                 let liveUsers = 16; 
                 if (data && data.total_users !== undefined) liveUsers = data.total_users;
                 const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
-                document.getElementById('user-count-badge').innerText = `рџџў ${liveUsers} ${suffix}`;
+                document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
 
                 if (data && data.user_lang) {
                     currentLang = data.user_lang;
@@ -617,9 +617,9 @@
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
                                 <div class="action-group">
-                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})">рџЊђ</button>
-                                    <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">рџ—‘пёЏ</button>
-                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">в–¶пёЏ</button>
+                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})">🌐</button>
+                                    <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">🗑️</button>
+                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
                                 </div>
                             </div>
                             <div class="progress-row">
@@ -638,7 +638,7 @@
 
         async function loadPublicQuizzes() {
             const container = document.getElementById('lib-content-area');
-            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">вЏі Loading...</div>`;
+            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Loading...</div>`;
             try {
                 const response = await fetch(`${BASE_URL}/api/public-quizzes?_t=${Date.now()}`);
                 const data = await response.json();
@@ -650,9 +650,9 @@
                         card.innerHTML = `
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
-                                <div class="action-group"><button class="btn-circle" onclick="playQuiz('${quiz.id}')">в–¶пёЏ Play</button></div>
+                                <div class="action-group"><button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️ Play</button></div>
                             </div>
-                            <div class="card-footer"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>рџЊЌ Global</span></div>
+                            <div class="card-footer"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>🌍 Global</span></div>
                         `;
                         container.appendChild(card);
                     });
@@ -670,7 +670,7 @@
         }
 
         function deleteQuiz(quizId) {
-            showAppConfirm("рџ—‘пёЏ", langPack[currentLang].alert_del_quiz, async () => {
+            showAppConfirm("🗑️", langPack[currentLang].alert_del_quiz, async () => {
                 try {
                     const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
                     if ((await response.json()).status === "ok") loadQuizzes();
@@ -684,7 +684,7 @@
                 <div style="margin-bottom: 15px;">
                     <input type="text" id="fc-front" class="input-card" placeholder="${langPack[currentLang].card_front}">
                     <input type="text" id="fc-back" class="input-card" placeholder="${langPack[currentLang].card_back}">
-                    <button class="submit-btn" onclick="addFlashcard()">${langPack[currentLang].btn_add_card} рџ—‚пёЏ</button>
+                    <button class="submit-btn" onclick="addFlashcard()">${langPack[currentLang].btn_add_card} 🗂️</button>
                 </div>
                 <div id="cards-list-div"></div>
             `;
@@ -699,7 +699,7 @@
                         card.innerHTML = `
                             <div class="card-top">
                                 <div id="body-${c.id}" class="fc-display" onclick="flipCard('${c.id}', '${c.front}', '${c.back}')">${c.front}</div>
-                                <button class="btn-delete" onclick="deleteCard('${c.id}')">рџ—‘пёЏ</button>
+                                <button class="btn-delete" onclick="deleteCard('${c.id}')">🗑️</button>
                             </div>
                         `;
                         listDiv.appendChild(card);
@@ -734,7 +734,7 @@
         }
 
         function deleteCard(id) {
-            showAppConfirm("рџ—‘пёЏ", langPack[currentLang].alert_del_card, async () => {
+            showAppConfirm("🗑️", langPack[currentLang].alert_del_card, async () => {
                 try {
                     await fetch(`${BASE_URL}/api/delete-flashcard?card_id=${id}&user_id=${userId}`, { method: 'DELETE' });
                     loadFlashcards();
@@ -753,7 +753,7 @@
                     document.getElementById('game-screen').style.display = 'block';
                     showQuestion();
                 }
-            } catch (error) { showAppAlert("вќЊ", "Yuklashda xatolik."); }
+            } catch (error) { showAppAlert("❌", "Yuklashda xatolik."); }
         }
 
         function showQuestion() {
@@ -796,7 +796,7 @@
             } else {
                 btn.classList.add('wrong'); wrongAnswersCount++;
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
-                const expLabel = langPack[currentLang].explanation_label || "рџ’Ў Izoh:";
+                const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
                 expBox.innerText = `${expLabel} ` + (explanation || "...");
                 expBox.style.display = 'block';
             }
@@ -817,7 +817,7 @@
                     body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
                 });
             } catch (e) {}
-            showAppAlert("рџЏЃ", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
+            showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
         }
 
         function closeGame() {
