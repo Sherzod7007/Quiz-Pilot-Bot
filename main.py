@@ -47,6 +47,100 @@ DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
 
+# --- MULTI-LANGUAGE DICTIONARY ---
+MESSAGES = {
+    "uz": {
+        "welcome": (
+            "👋 Salom, {name}! Quiz Pilot Super Mini App tizimiga xush kelibsiz.\n\n"
+            "🚀 Yangi Yangilanish:\n🔒 Bizning aqlli to'lov tizimimiz ishga tushdi. "
+            "Premium rejalarni faollashtirib, cheksiz testlar yarating!\n\n"
+            "👇 Marhamat, pastdagi tugmani bosib ilovani oching!"
+        ),
+        "btn_app": "Ilovani ochish 📱",
+        "payment_prompt": (
+            "🧾 Siz {tariff_name} ({tariff_price}) tarifini tanladingiz.\n\n"
+            "Iltimos, plastik kartaga to'lov qilganingiz haqidagi To'lov Chekini "
+            "(Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\n"
+            "Sizning buyurtma raqamingiz: {tx_id}"
+        ),
+        "receipt_err": "❌ Iltimos, faqat rasm (skrinshot) ko'rinishidagi to'lov chekini yuboring. Qaytadan urinib ko'ring:",
+        "receipt_sent": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
+        "receipt_admin_err": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
+        "limit_exceeded": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
+        "read_error": "Matn yoki darslikni o'qib bo'lmadi.",
+        "ai_error": "AI test generatsiya qila olmadi.",
+        "ai_empty": "AI savollar ro'yxatini bo'sh qaytardi.",
+        "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
+        "pay_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
+        "pay_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
+        "default_title": "Matnli Test"
+    },
+    "ru": {
+        "welcome": (
+            "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
+            "🚀 Новое обновление:\n🔒 Запущена наша умная система оплаты. "
+            "Активируйте Премиум и создавайте неограниченное количество тестов!\n\n"
+            "👇 Нажмите кнопку ниже, чтобы открыть приложение!"
+        ),
+        "btn_app": "Открыть приложение 📱",
+        "payment_prompt": (
+            "🧾 Вы выбрали тариф {tariff_name} ({tariff_price}).\n\n"
+            "Пожалуйста, отправьте сюда чек об оплате (в виде фото/скриншота).\n"
+            "Ваш номер заказа: {tx_id}"
+        ),
+        "receipt_err": "❌ Пожалуйста, отправьте чек об оплате только в виде фото (скриншота). Попробуйте еще раз:",
+        "receipt_sent": "✅ Спасибо! Ваш чек отправлен администратору. Он будет проверен в ближайшее время.",
+        "receipt_admin_err": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Проверяется через админ-панель.",
+        "limit_exceeded": "Ваш бесплатный лимит на создание 2 тестов в течение 30 дней исчерпан. Пожалуйста, перейдите на Премиум! 👑",
+        "read_error": "Не удалось прочитать текст или учебник.",
+        "ai_error": "ИИ не удалось сгенерировать тест.",
+        "ai_empty": "ИИ вернул пустой список вопросов.",
+        "quiz_ready": "📝 По учебнику {title} успешно подготовлено {count} тестовых вопросов!",
+        "pay_approved": "🎉 Поздравляем! Ваш платеж за тариф {tariff_name} подтвержден. В приложении активирован статус PRO! 👑",
+        "pay_rejected": "❌ Ваш чек об оплате не принят или отклонен. Если вы считаете, что это ошибка, обратитесь к администратору.",
+        "default_title": "Текстовый тест"
+    },
+    "en": {
+        "welcome": (
+            "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
+            "🚀 New Update:\n🔒 Our smart payment system is now live. "
+            "Activate Premium plans and create unlimited quizzes!\n\n"
+            "👇 Tap the button below to open the app!"
+        ),
+        "btn_app": "Open App 📱",
+        "payment_prompt": (
+            "🧾 You selected {tariff_name} ({tariff_price}).\n\n"
+            "Please send your payment receipt (as a photo/screenshot) here.\n"
+            "Your order ID: {tx_id}"
+        ),
+        "receipt_err": "❌ Please send the payment receipt as a photo or screenshot only. Try again:",
+        "receipt_sent": "✅ Thank you! Your payment receipt has been sent to the admin for verification.",
+        "receipt_admin_err": "⚠️ Receipt received, but there was an issue notifying the admin. It will be checked manually.",
+        "limit_exceeded": "Your free limit of 2 tests per 30 days has expired. Please upgrade to Premium! 👑",
+        "read_error": "Could not read the provided text or document.",
+        "ai_error": "AI failed to generate the quiz.",
+        "ai_empty": "AI returned an empty list of questions.",
+        "quiz_ready": "📝 A total of {count} quiz questions for {title} have been created successfully!",
+        "pay_approved": "🎉 Congratulations! Your payment for {tariff_name} has been approved. PRO status is now active! 👑",
+        "pay_rejected": "❌ Your payment receipt was rejected. If you think this is a mistake, please contact the administrator.",
+        "default_title": "Text Quiz"
+    }
+}
+
+
+def get_user_lang(user_id: int) -> str:
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0] in MESSAGES:
+            return row[0]
+    except Exception as e:
+        logging.error(f"Foydalanuvchi tilini olishda xato: {e}")
+    return "uz"
+
 
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -205,14 +299,12 @@ def trigger_payment_flow(user_id, tariff_name, tariff_price):
         conn.commit()
         conn.close()
 
-        prompt_msg = bot.send_message(
-            user_id,
-            f"🧾 Siz {tariff_name} ({tariff_price}) tarifini tanladingiz.\n\nIltimos,"
-            " plastik kartaga to'lov qilganingiz haqidagi To'lov Chekini"
-            " (Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\nSizning buyurtma"
-            f" raqamingiz: {tx_id}",
-            parse_mode="Markdown",
+        user_lang = get_user_lang(user_id)
+        msg_text = MESSAGES[user_lang]["payment_prompt"].format(
+            tariff_name=tariff_name, tariff_price=tariff_price, tx_id=tx_id
         )
+
+        prompt_msg = bot.send_message(user_id, msg_text, parse_mode="Markdown")
         bot.register_next_step_handler(
             prompt_msg, process_receipt, tx_id, tariff_name, tariff_price
         )
@@ -224,12 +316,10 @@ def trigger_payment_flow(user_id, tariff_name, tariff_price):
 def send_welcome(message):
     user_id = message.from_user.id
     add_user_to_db(user_id)
+    user_lang = get_user_lang(user_id)
 
-    welcome_text = (
-        f"👋 Salom, {message.from_user.first_name}! Quiz Pilot Super Mini App"
-        " tizimiga xush kelibsiz.\n\n🚀 Yangi Yangilanish:\n🔒 Bizning aqlli"
-        " to'lov tizimimiz ishga tushdi. Premium rejalarni faollashtirib, cheksiz"
-        " testlar yarating!\n\n👇 Marhamat, pastdagi tugmani bosib ilovani oching!"
+    welcome_text = MESSAGES[user_lang]["welcome"].format(
+        name=message.from_user.first_name
     )
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -239,7 +329,8 @@ def send_welcome(message):
         "MINI_APP_URL", "https://your-railway-url.up.railway.app"
     )
     btn_app = telebot.types.KeyboardButton(
-        text="Ilovani ochish 📱", web_app=telebot.types.WebAppInfo(url=mini_app_url)
+        text=MESSAGES[user_lang]["btn_app"],
+        web_app=telebot.types.WebAppInfo(url=mini_app_url),
     )
 
     markup.row(btn_start, btn_app)
@@ -266,18 +357,18 @@ def handle_webapp_data(message):
 
 
 def process_receipt(message, tx_id, tariff_name, tariff_price):
+    user_id = message.from_user.id
+    user_lang = get_user_lang(user_id)
+
     if not message.photo:
         err_msg = bot.send_message(
-            message.chat.id,
-            "❌ Iltimos, faqat rasm (skrinshot) ko'rinishidagi to'lov chekini"
-            " yuboring. Qaytadan urinib ko'ring:",
+            message.chat.id, MESSAGES[user_lang]["receipt_err"]
         )
         bot.register_next_step_handler(
             err_msg, process_receipt, tx_id, tariff_name, tariff_price
         )
         return
 
-    user_id = message.from_user.id
     username = (
         f"@{message.from_user.username}"
         if message.from_user.username
@@ -315,17 +406,11 @@ def process_receipt(message, tx_id, tariff_name, tariff_price):
             parse_mode="Markdown",
             reply_markup=admin_markup,
         )
-        bot.send_message(
-            message.chat.id,
-            "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada"
-            " tekshirilib, tarifingiz faollashtiriladi.",
-        )
+        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_sent"])
     except Exception as e:
         logging.error(f"Admin ga rasm yuborishda xatolik yuz berdi: {e}")
         bot.send_message(
-            message.chat.id,
-            "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma"
-            " yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
+            message.chat.id, MESSAGES[user_lang]["receipt_admin_err"]
         )
 
 
@@ -358,6 +443,7 @@ def handle_admin_decision(call):
         return
 
     tariff_name = pay_row[1]
+    user_lang = get_user_lang(user_id)
 
     if action == "app":
         current_time = int(time.time())
@@ -410,8 +496,7 @@ def handle_admin_decision(call):
         try:
             bot.send_message(
                 user_id,
-                f"🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan"
-                " to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
+                MESSAGES[user_lang]["pay_approved"].format(tariff_name=tariff_name),
             )
         except Exception:
             pass
@@ -431,11 +516,7 @@ def handle_admin_decision(call):
         except Exception:
             pass
         try:
-            bot.send_message(
-                user_id,
-                "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar"
-                " xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
-            )
+            bot.send_message(user_id, MESSAGES[user_lang]["pay_rejected"])
         except Exception:
             pass
 
@@ -518,7 +599,7 @@ def get_premium_status(user_id: int):
             conn.commit()
             user_status = "Oddiy foydalanuvchi"
             premium_until = 0
-            
+
         conn.close()
 
         if "PRO" in user_status and premium_until > 0:
@@ -531,7 +612,7 @@ def get_premium_status(user_id: int):
             "user_status": user_status,
             "free_used": free_used,
         }
-    
+
     conn.close()
     return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
 
@@ -544,6 +625,8 @@ async def create_quiz_web(
     quiz_title: Optional[str] = Form(None),
 ):
     add_user_to_db(user_id)
+    user_lang = get_user_lang(user_id)
+
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
@@ -583,20 +666,17 @@ async def create_quiz_web(
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
-        # Bepul limit 2 taga o'zgartirildi:
+        # Bepul limit 2 taga o'zgartirildi va ko'p tillilik qo'shildi:
         if "PRO" not in current_status and free_used >= 2:
             conn_check.close()
             return {
                 "status": "error",
-                "message": (
-                    "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos,"
-                    " Premium tarifga o'ting! 👑"
-                ),
+                "message": MESSAGES[user_lang]["limit_exceeded"],
             }
     conn_check.close()
 
     raw_text = ""
-    auto_title = "Matnli Test"
+    auto_title = MESSAGES[user_lang]["default_title"]
 
     if file and file.filename and len(file.filename.strip()) > 0:
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
@@ -629,11 +709,11 @@ async def create_quiz_web(
         )
 
     if not raw_text.strip():
-        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
+        return {"status": "error", "message": MESSAGES[user_lang]["read_error"]}
 
     quiz_json_raw = generate_quiz_from_gemini(raw_text)
     if not quiz_json_raw:
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+        return {"status": "error", "message": MESSAGES[user_lang]["ai_error"]}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -641,7 +721,7 @@ async def create_quiz_web(
         if not items:
             return {
                 "status": "error",
-                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
+                "message": MESSAGES[user_lang]["ai_empty"],
             }
 
         quiz_id = f"q_{int(time.time())}"
@@ -677,8 +757,9 @@ async def create_quiz_web(
         try:
             bot.send_message(
                 user_id,
-                f"📝 {final_title[:30]} darsligi bo'yicha jami {len(items)} ta test"
-                " savoli muvaffaqiyatli tayyorlandi!",
+                MESSAGES[user_lang]["quiz_ready"].format(
+                    title=final_title[:30], count=len(items)
+                ),
             )
         except Exception as e:
             logging.error(f"Telegram xabari yuborilmadi: {e}")
