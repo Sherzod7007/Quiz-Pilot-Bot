@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request,
 UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.middleware.cors import 
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import 
 CORSMiddleware
 import uvicorn
@@ -37,7 +37,7 @@ raw_admin_id else None
 except Exception as e:
 logging.error(f"ADMIN_ID ni int ga o'tkazishda 
 xato: {e}")
-ADMIN_ID = None
+xato: {e}")
 ADMIN_ID = None
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = [k.strip() for k in 
@@ -51,11 +51,11 @@ conn = sqlite3.connect(DB_PATH,
 check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
-Quizzes jadvali
+# Quizzes jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS 
 quizzes (
 id TEXT PRIMARY KEY,
-id TEXT PRIMARY KEY,
+user_id INTEGER,
 user_id INTEGER,
 title TEXT,
 total INTEGER,
@@ -65,7 +65,7 @@ created_at INTEGER,
 last_score INTEGER DEFAULT -1,
 last_percent INTEGER DEFAULT -1,
 is_public INTEGER DEFAULT 0)''')
-Users jadvali
+# Users jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS 
 users (
 user_id INTEGER PRIMARY KEY,
@@ -89,16 +89,16 @@ if "premium_until" not in columns:
 try: cursor.execute("ALTER TABLE users ADD 
 COLUMN premium_until INTEGER DEFAULT 0;")
 except Exception: pass
-Flashcards jadvali
+# Flashcards jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS 
-flashcards (
 flashcards (
 id TEXT PRIMARY KEY,
 user_id INTEGER,
 front TEXT,
 back TEXT,
+back TEXT,
 created_at INTEGER)''')
-Payments jadvali
+# Payments jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS 
 payments (
 tx_id TEXT PRIMARY KEY,
@@ -110,11 +110,11 @@ created_at INTEGER)''')
 conn.commit()
 conn.close()
 init_db()
-init_db()
 class QuizItem(BaseModel):
 question: str = Field(description="Savol matni")
 options: List[str] = Field(description="Jami 4 ta 
 variant ro'yxati (Variant harflarisiz)")
+correct_index: int = Field(description="To'g'ri 
 correct_index: int = Field(description="To'g'ri 
 javob indeks (0 dan 3 gacha)")
 explanation: str = Field(description="Ushbu 
@@ -129,11 +129,11 @@ correct_count: int
 percent: int
 class FlashcardCreateRequest(BaseModel):
 user_id: int
-user_id: int
 front: str
 back: str
 class PaymentIntentRequest(BaseModel):
 action: str
+user_id: int
 user_id: int
 tariff_name: str
 tariff_price: str
@@ -150,11 +150,11 @@ foydalanuvchi', 0, 0)", (user_id, int(time.time())))
 conn.commit()
 conn.close()
 except Exception as e:
-except Exception as e:
 logging.error(f"Foydalanuvchi qo'shishda xato: 
 {e}")
 def get_users_count():
 try:
+conn = sqlite3.connect(DB_PATH, 
 conn = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
 cursor = conn.cursor()
@@ -171,11 +171,11 @@ return 0
 def trigger_payment_flow(user_id, tariff_name, 
 tariff_price):
 try:
-try:
 tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
 conn = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
 cursor = conn.cursor()
+cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("INSERT INTO payments VALUES 
 (?, ?, ?, ?, 'pending', ?)",
@@ -192,12 +192,12 @@ haqidagi To'lov Chekini (Rasm/Skrinshot
 ko'rinishida) shu yerga yuboring.\n"
 f"Sizning buyurtma raqamingiz: {tx_id}",
 parse_mode="Markdown"
-parse_mode="Markdown"
 )
 bot.register_next_step_handler(prompt_msg, 
 process_receipt, tx_id, tariff_name, tariff_price)
 except Exception as e:
 logging.error(f"To'lov jarayonini ishga tushirishda 
+xato: {e}")
 xato: {e}")
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -213,11 +213,11 @@ Premium rejalarni faollashtirib, cheksiz testlar
 yarating!\n\n"
 "👇 Marhamat, pastdagi tugmani bosib ilovani 
 oching!"
-oching!"
 )
 markup = 
 telebot.types.ReplyKeyboardMarkup(resize_keyb
 oard=True)
+btn_start = telebot.types.KeyboardButton(text="/
 btn_start = telebot.types.KeyboardButton(text="/
 start")
 mini_app_url = os.getenv("MINI_APP_URL", 
@@ -232,12 +232,12 @@ bot.send_message(message.chat.id,
 welcome_text, parse_mode="Markdown", 
 reply_markup=markup)
 @bot.message_handler(content_types=['web_ap
-@bot.message_handler(content_types=['web_ap
 p_data'])
 def handle_webapp_data(message):
 try:
 logging.info(f"WebApp dan kelgan xom 
 ma'lumot: {message.web_app_data.data}")
+data = json.loads(message.web_app_data.data)
 data = json.loads(message.web_app_data.data)
 if data.get("action") == "payment_intent":
 user_id = data.get("user_id")
@@ -252,7 +252,6 @@ jiddiy xato: {e}")
 def process_receipt(message, tx_id, tariff_name, 
 tariff_price):
 if not message.photo:
-err_msg = bot.send_message(message.chat.id, 
 err_msg = bot.send_message(message.chat.id, 
 "❌ Iltimos, faqat rasm (skrinshot) ko'rinishidagi 
 to'lov chekini yuboring. Qaytadan urinib ko'ring:")
@@ -274,10 +273,10 @@ Tasdiqlash", callback_data=f"p_app_{tx_id}
 btn_reject = 
 telebot.types.InlineKeyboardButton("❌ Rad 
 etish", callback_data=f"p_rej{tx_id}_{user_id}")
-etish", callback_data=f"p_rej{tx_id}_{user_id}")
 admin_markup.row(btn_approve, btn_reject)
 admin_text = (
 f"💰 YANGI TO'LOV SO'ROVI!\n\n"
+f"👤 Foydalanuvchi: {first_name} ({username})\n"
 f"👤 Foydalanuvchi: {first_name} ({username})\n"
 f"🆔 Telegram ID:{user_id}\n"
 f"📦 Tanlangan Tarif: {tariff_name}\n"
@@ -294,11 +293,11 @@ bot.send_photo(target_admin, file_id,
 caption=admin_text, parse_mode="Markdown", 
 reply_markup=admin_markup)
 bot.send_message(message.chat.id, "✅
-bot.send_message(message.chat.id, "✅
 Rahmat! To'lov chekingiz administratorga 
 yuborildi. Tez orada tekshirilib, tarifingiz 
 faollashtiriladi.")
 except Exception as e:
+logging.error(f"Admin g'a rasm yuborishda 
 logging.error(f"Admin g'a rasm yuborishda 
 xatolik yuz berdi: {e}")
 bot.send_message(message.chat.id, "⚠️ To'lov 
@@ -315,10 +314,10 @@ return
 parts = call.data.split("_")
 action = parts[1]
 tx_id = parts[2]
-tx_id = parts[2]
 user_id = int(parts[3])
 conn = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
+cursor = conn.cursor()
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("SELECT status, tariff_name 
@@ -332,7 +331,6 @@ return
 tariff_name = pay_row[1]
 if action == "app":
 current_time = int(time.time())
-cursor.execute("SELECT premium_until FROM 
 cursor.execute("SELECT premium_until FROM 
 users WHERE user_id = ?", (user_id,))
 u_row = cursor.fetchone()
@@ -353,9 +351,9 @@ elif "hafta" in t_name_lower or "7" in
 t_name_lower:
 duration = 7 * 24 * 3600
 elif "kun" in t_name_lower or "24" in 
-elif "kun" in t_name_lower or "24" in 
 t_name_lower:
 duration = 24 * 3600
+premium_until_timestamp = base_time + 
 premium_until_timestamp = base_time + 
 duration
 cursor.execute("UPDATE payments SET status = 
@@ -374,10 +372,10 @@ call.message.chat.id, call.message.message_id)
 except Exception:
 pass
 try:
-try:
 bot.send_message(user_id, f"🎉 Tabriklaymiz! 
 Sizning {tariff_name} tarifi uchun qilgan 
 to'lovingiz tasdiqlandi. Ilovada PRO status 
+faollashdi! 👑")
 faollashdi! 👑")
 except Exception:
 pass
@@ -396,10 +394,10 @@ pass
 try:
 bot.send_message(user_id, "❌ Siz yuborgan 
 to'lov cheki qabul qilinmadi yoki rad etildi. Agar 
-to'lov cheki qabul qilinmadi yoki rad etildi. Agar 
 xatolik bo'lgan deb o'ylasangiz, administratorga 
 murojaat qiling.")
 except Exception:
+pass
 pass
 conn.close()
 --- FASTAPI ENDPOINTS ---
@@ -416,8 +414,8 @@ def read_root(request: Request):
 response = 
 templates.TemplateResponse("index.html", 
 {"request": request})
-{"request": request})
 response.headers["Cache-Control"] = "no-cache, 
+no-store, must-revalidate"
 no-store, must-revalidate"
 return response
 @app.post("/api/payment-intent")
@@ -437,8 +435,8 @@ conn = sqlite3.connect(DB_PATH,
 check_same_thread=False)
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
-cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
+cursor.execute("SELECT status, free_used, 
 cursor.execute("SELECT status, free_used, 
 premium_until FROM users WHERE user_id = ?", 
 (user_id,))
@@ -459,10 +457,13 @@ conn.commit()
 conn.close()
 user_status = "Oddiy foydalanuvchi"
 premium_until = 0
-premium_until = 0
 if "PRO" in user_status and premium_until > 0૒
+if "PRO" in user_status and premium_until > 0૒
+# O'zbekiston vaqti UTC+5 bo'lgani uchun 5 soat 
+(5 * 3600 = 18000 sek) qo'shamiz
+uzb_time = time.gmtime(premium_until + 18000)
 readable_date = time.strftime('%d.%m.%Y %H:
-%M', time.localtime(premium_until))
+%M', uzb_time)
 user_status = f"{user_status} (Gacha: 
 {readable_date})"
 return {"status": "ok", "user_status": user_status, 
@@ -477,10 +478,10 @@ file: Optional[UploadFile] = File(None),
 quiz_title: Optional[str] = Form(None)
 ):
 add_user_to_db(user_id)
+add_user_to_db(user_id)
 conn_check = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
 conn_check.row_factory = sqlite3.Row
-cursor_check = conn_check.cursor()
 cursor_check = conn_check.cursor()
 cursor_check.execute("SELECT status, 
 premium_until, free_used FROM users WHERE 
@@ -499,10 +500,10 @@ conn_check.commit()
 current_status = "Oddiy foydalanuvchi"
 if "PRO" not in current_status and free_used >= 3૒
 conn_check.close()
+conn_check.close()
 return {"status": "error", "message": "Sizning 
 bepul 3 ta test yaratish limitingiz tugadi. Iltimos, 
 Premium tarifga o'ting! 👑"}
-conn_check.close()
 conn_check.close()
 raw_text = ""
 auto_title = "Matnli Test"
@@ -520,10 +521,10 @@ reader = PdfReader(file_path)
 raw_text = "".join([p.extract_text() + "\n" for p in 
 reader.pages if p.extract_text()])
 auto_title = file.filename.replace('.pdf', '')
+auto_title = file.filename.replace('.pdf', '')
 elif file.filename.endswith('.docx'):
 doc = docx.Document(file_path)
 raw_text = "\n".join([p.text for p in 
-doc.paragraphs])
 doc.paragraphs])
 auto_title = file.filename.replace('.docx', '')
 except Exception as e: 
@@ -540,9 +541,9 @@ quiz_json_raw =
 generate_quiz_from_gemini(raw_text)
 if not quiz_json_raw: return {"status": "error", 
 "message": "AI test generatsiya qila olmadi."}
+"message": "AI test generatsiya qila olmadi."}
 try:
 quiz_data = json.loads(quiz_json_raw)
-items = quiz_data.get("quizzes", [])
 items = quiz_data.get("quizzes", [])
 if not items: return {"status": "error", "message": 
 "AI savollar ro'yxatini bo'sh qaytardi."}
@@ -560,11 +561,11 @@ last_percent, is_public)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
 (quiz_id, user_id, final_title[:30], len(items), 0, 
 quiz_json_raw, int(time.time()), -1, -1)
+1.
+quiz_json_raw, int(time.time()), -1, -1)
 )
 cursor.execute("UPDATE users SET free_used = 
 free_used + 1 WHERE user_id = ?", (user_id,))
-conn.commit()
-1.
 conn.commit()
 conn.close()
 try: bot.send_message(user_id, f"📝
@@ -581,10 +582,10 @@ if not GOOGLE_API_KEYS: return None
 system_instruction = """You are an advanced AI 
 quiz generator.
 CRITICAL RULES:
+1.
+CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the 
 provided text. You MUST generate the 
-questions, choices, and explanations in the 
-1.
 questions, choices, and explanations in the 
 EXACT SAME language as the input text.
 2. QUESTION COUNT RULE: Look at the input 
@@ -603,10 +604,10 @@ len(GOOGLE_API_KEYS)
 continue
 try:
 client = genai.Client(api_key=api_key)
-response = client.models.generate_content(
-model='gemini-3.6-flash',
-contents=extracted_text[:80000],
 2.
+client = genai.Client(api_key=api_key)
+response = client.models.generate_content(
+model='gemini-2.5-flash',
 contents=extracted_text[:80000],
 config=genai_types.GenerateContentConfig(
 system_instruction=system_instruction,
@@ -626,9 +627,9 @@ return None
 def get_user_quizzes(user_id: int):
 add_user_to_db(user_id)
 total_users = get_users_count()
+total_users = get_users_count()
 conn = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
-conn.row_factory = sqlite3.Row
 conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
@@ -648,9 +649,9 @@ quizzes = [{
 "answered": r["answered"],
 "created_at": r["created_at"], "last_score": 
 r["last_score"], "last_percent": r["last_percent"], 
+r["last_score"], "last_percent": r["last_percent"], 
 "is_public": r["is_public"]
 } for r in personal_rows]
-return {"status": "ok", "quizzes": quizzes, 
 return {"status": "ok", "quizzes": quizzes, 
 "total_users": total_users, "user_lang": user_lang}
 @app.get("/api/public-quizzes")
@@ -672,7 +673,6 @@ return {"status": "ok", "quizzes": quizzes}
 @app.post("/api/toggle-public")
 def toggle_public(quiz_id: str, user_id: int, 
 is_public: int):
-is_public: int):
 conn = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
 cursor = conn.cursor()
@@ -690,10 +690,10 @@ check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("UPDATE users SET language = ? 
+cursor.execute("UPDATE users SET language = ? 
 WHERE user_id = ?", (lang, user_id))
 conn.commit()
 conn.close()
-return {"status": "ok"}
 return {"status": "ok"}
 @app.get("/api/flashcards")
 def get_flashcards(user_id: int):
@@ -711,10 +711,10 @@ cards = [{"id": r["id"], "front": r["front"], "back":
 r["back"]} for r in rows]
 return {"status": "ok", "cards": cards}
 @app.post("/api/create-flashcard")
+@app.post("/api/create-flashcard")
 def create_flashcard(req: 
 FlashcardCreateRequest):
 card_id = f"c_{int(time.time())}
-_{os.urandom(2).hex()}"
 _{os.urandom(2).hex()}"
 conn = sqlite3.connect(DB_PATH, 
 check_same_thread=False)
@@ -733,10 +733,10 @@ check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("DELETE FROM flashcards 
+cursor.execute("DELETE FROM flashcards 
 WHERE id = ? AND user_id = ?", (card_id, user_id))
 conn.commit()
 conn.close()
-return {"status": "ok"}
 return {"status": "ok"}
 @app.get("/api/quiz-detail")
 def get_quiz_detail(quiz_id: str):
@@ -754,10 +754,10 @@ json.loads(row["quiz_json"])}
 raise HTTPException(status_code=404, 
 detail="Test topilmadi")
 @app.post("/api/update-progress")
+@app.post("/api/update-progress")
 def update_progress(data: 
 ProgressUpdateRequest):
 conn = sqlite3.connect(DB_PATH, 
-check_same_thread=False)
 check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
@@ -776,10 +776,10 @@ conn = sqlite3.connect(DB_PATH,
 check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
+cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("DELETE FROM quizzes WHERE 
 id = ? AND user_id = ?", (quiz_id, user_id))
 conn.commit()
-conn.close()
 conn.close()
 return {"status": "ok", "message": "Test o'chirildi."}
 except Exception as e: raise 
@@ -795,5 +795,6 @@ async def startup_event():
 threading.Thread(target=start_bot_polling, 
 daemon=True).start()
 if name == "main":
+port = int(os.environ.get("PORT", 8080))
 port = int(os.environ.get("PORT", 8080))
 uvicorn.run(app, host="0.0.0.0", port=port)
