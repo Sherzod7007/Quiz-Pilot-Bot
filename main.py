@@ -63,10 +63,9 @@ MESSAGES = {
             "(Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\n"
             "Sizning buyurtma raqamingiz: {tx_id}"
         ),
-        "photo_only_error": "❌ Iltimos, faqat rasm (skrinshot) ko'rinishidagi to'lov chekini yuboring. Qaytadan urinib ko'ring:",
         "receipt_received": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
         "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
-        "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
+        "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to me to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
         "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
         "quiz_limit_reached": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
@@ -84,7 +83,6 @@ MESSAGES = {
             "Пожалуйста, отправьте чек об оплате (в виде фото/скриншота) сюда.\n"
             "Ваш номер заказа: {tx_id}"
         ),
-        "photo_only_error": "❌ Пожалуйста, отправьте чек об оплате только в виде изображения (скриншота). Попробуйте еще раз:",
         "receipt_received": "✅ Спасибо! Ваш чек отправлен администратору. В ближайшее время он будет проверен, и ваш тариф активируется.",
         "receipt_error": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Он будет проверен через админ-панель.",
         "payment_approved": "🎉 Поздравляем! Ваш платеж по тарифу {tariff_name} подтвержден. В приложении активирован PRO статус! 👑",
@@ -105,7 +103,6 @@ MESSAGES = {
             "Please send your payment receipt (as a Photo/Screenshot) here.\n"
             "Your Order ID is: {tx_id}"
         ),
-        "photo_only_error": "❌ Please send the payment receipt only as an image (screenshot). Please try again:",
         "receipt_received": "✅ Thank you! Your payment receipt has been sent to the administrator. It will be verified shortly, and your plan will be activated.",
         "receipt_error": "⚠️ Your receipt was received, but there was an issue notifying the admin. It will be reviewed via the admin panel.",
         "payment_approved": "🎉 Congratulations! Your payment for the {tariff_name} plan has been confirmed. PRO status is now active! 👑",
@@ -172,6 +169,11 @@ def init_db():
             cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
         except Exception:
             pass
+
+    # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
+    cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
+    cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi' WHERE status IS NULL;")
+    cursor.execute("UPDATE users SET premium_until = 0 WHERE premium_until IS NULL;")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS flashcards (
         id TEXT PRIMARY KEY,
@@ -263,6 +265,9 @@ def trigger_payment_flow(user_id, tariff_name, tariff_price):
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
+
+        # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
+        cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
             "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
             (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
@@ -277,10 +282,7 @@ def trigger_payment_flow(user_id, tariff_name, tariff_price):
             tx_id=tx_id
         )
 
-        prompt_msg = bot.send_message(user_id, msg_text, parse_mode="Markdown")
-        bot.register_next_step_handler(
-            prompt_msg, process_receipt, tx_id, tariff_name, tariff_price
-        )
+        bot.send_message(user_id, msg_text, parse_mode="Markdown")
     except Exception as e:
         logging.error(f"To'lov jarayonini ishga tushirishda xato: {e}")
 
@@ -320,19 +322,25 @@ def handle_webapp_data(message):
         logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
 
-def process_receipt(message, tx_id, tariff_name, tariff_price):
+# --- ISHONCHLI TO'LOV CHEKI QABUL QILISH (STABLE PHOTO HANDLER) ---
+@bot.message_handler(content_types=["photo"])
+def handle_receipt_photo(message):
     user_id = message.from_user.id
     user_lang = get_user_lang(user_id)
 
-    if not message.photo:
-        err_msg = bot.send_message(
-            message.chat.id,
-            MESSAGES[user_lang]["photo_only_error"]
-        )
-        bot.register_next_step_handler(
-            err_msg, process_receipt, tx_id, tariff_name, tariff_price
-        )
-        return
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        (user_id,)
+    )
+    pending_pay = cursor.fetchone()
+    conn.close()
+
+    if not pending_pay:
+        return  # Kutilayotgan to'lov yo'q bo'lsa javob berilmaydi
+
+    tx_id, tariff_name, tariff_price = pending_pay
 
     username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
     first_name = message.from_user.first_name
@@ -494,6 +502,7 @@ def api_payment_intent(req: PaymentIntentRequest):
 
 @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
+    add_user_to_db(user_id)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -505,9 +514,9 @@ def get_premium_status(user_id: int):
     row = cursor.fetchone()
 
     if row:
-        user_status = row["status"]
-        premium_until = row["premium_until"]
-        free_used = row["free_used"]
+        user_status = row["status"] or "Oddiy foydalanuvchi"
+        premium_until = row["premium_until"] or 0
+        free_used = row["free_used"] if row["free_used"] is not None else 0
         created_at = row["created_at"] or int(time.time())
         current_now = int(time.time())
 
@@ -570,9 +579,9 @@ async def create_quiz_web(
     user_row = cursor_check.fetchone()
 
     if user_row:
-        current_status = user_row["status"]
-        premium_until = user_row["premium_until"]
-        free_used = user_row["free_used"]
+        current_status = user_row["status"] or "Oddiy foydalanuvchi"
+        premium_until = user_row["premium_until"] or 0
+        free_used = user_row["free_used"] if user_row["free_used"] is not None else 0
         created_at = user_row["created_at"] or int(time.time())
         current_now = int(time.time())
 
@@ -597,6 +606,7 @@ async def create_quiz_web(
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
+        # LİMİT TEKSHIRUVI (AQLLI VA QAT'IY)
         if "PRO" not in current_status and free_used >= 2:
             conn_check.close()
             return {
@@ -677,8 +687,9 @@ async def create_quiz_web(
                 -1,
             ),
         )
+        # COALESCE BAZADAGI NULL XATOLIKLARINI OLINI OLADI:
         cursor.execute(
-            "UPDATE users SET free_used = free_used + 1 WHERE user_id = ?",
+            "UPDATE users SET free_used = COALESCE(free_used, 0) + 1 WHERE user_id = ?",
             (user_id,),
         )
         conn.commit()
