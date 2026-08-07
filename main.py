@@ -65,7 +65,7 @@ MESSAGES = {
 ),
 "receipt_received": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
 "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
-"payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
+"payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to me to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
 "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
 "quiz_limit_reached": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
 "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
@@ -405,10 +405,12 @@ tariff_name = pay_row[1]
 
 if action == "app":
 current_time = int(time.time())
+cursor.execute("SELECT premium_until FROM users WHERE user_id = ?", (user_id,))
+u_row = cursor.fetchone()
+user_current_until = u_row[0] if u_row and u_row[0] else 0
 
-# Yangi to'lov berilganda har doim hozirgi vaqtdan hisoblash (eski test xatolarini bartaraf etadi)
-base_time = current_time
-
+base_time = user_current_until if user_current_until > current_time else current_time
+duration = 24 * 3600
 t_name_lower = tariff_name.lower()
 
 if "umrbod" in t_name_lower or "unlimited" in t_name_lower:
@@ -417,9 +419,7 @@ elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_low
 duration = 30 * 24 * 3600
 elif "hafta" in t_name_lower or "7" in t_name_lower:
 duration = 7 * 24 * 3600
-elif "1 kun" in t_name_lower or "kun" in t_name_lower or "24" in t_name_lower or "day" in t_name_lower:
-duration = 24 * 3600
-else:
+elif "kun" in t_name_lower or "24" in t_name_lower:
 duration = 24 * 3600
 
 premium_until_timestamp = base_time + duration
@@ -545,9 +545,9 @@ premium_until = 0
 conn.close()
 
 if "PRO" in user_status and premium_until > 0:
-# Toshkent vaqtida (+5 soat / UTC+5) ko'rsatish
-uzbek_time = time.gmtime(premium_until + 5 * 3600)
-readable_date = time.strftime("%d.%m.%Y %H:%M", uzbek_time)
+readable_date = time.strftime(
+"%d.%m.%Y %H:%M", time.localtime(premium_until)
+)
 user_status = f"{user_status} (Gacha: {readable_date})"
 return {
 "status": "ok",
