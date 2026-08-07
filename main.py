@@ -45,7 +45,7 @@ conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
 
-Quizzes jadvali
+# Quizzes jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS quizzes (
 id TEXT PRIMARY KEY,
 user_id INTEGER,
@@ -58,7 +58,7 @@ last_score INTEGER DEFAULT -1,
 last_percent INTEGER DEFAULT -1,
 is_public INTEGER DEFAULT 0)''')
 
-Users jadvali
+# Users jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS users (
 user_id INTEGER PRIMARY KEY,
 created_at INTEGER,
@@ -80,7 +80,7 @@ if "premium_until" not in columns:
 try: cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
 except Exception: pass
 
-Flashcards jadvali
+# Flashcards jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS flashcards (
 id TEXT PRIMARY KEY,
 user_id INTEGER,
@@ -88,7 +88,7 @@ front TEXT,
 back TEXT,
 created_at INTEGER)''')
 
-Payments jadvali
+# Payments jadvali
 cursor.execute('''CREATE TABLE IF NOT EXISTS payments (
 tx_id TEXT PRIMARY KEY,
 user_id INTEGER,
@@ -139,8 +139,7 @@ conn.close()
 except Exception as e:
 logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
-def get_users_count(
-[07.08.2026 16:53] Sherzod: ):
+def get_users_count():
 try:
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
@@ -241,8 +240,7 @@ target_admin = ADMIN_ID if ADMIN_ID else user_id # ADMIN_ID bo'lmasa foydalanuvc
 
 try:
 bot.send_photo(target_admin, file_id, caption=admin_text, parse_mode="Markdown", reply_markup=admin_markup)
-bot.send_message(message.chat.id, "✅ Rahmat! To'lov chekingiz administratorga yuborildi. T
-[07.08.2026 16:53] Sherzod: ez orada tekshirilib, tarifingiz faollashtiriladi.")
+bot.send_message(message.chat.id, "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.")
 except Exception as e:
 logging.error(f"Admin g'a rasm yuborishda xatolik yuz berdi: {e}")
 bot.send_message(message.chat.id, "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.")
@@ -353,8 +351,7 @@ conn.row_factory = sqlite3.Row
 cursor = conn.cursor()
 cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("SELECT status, free_used, premium_until FROM users WHERE user_id = ?", (user_id,))
-row =
-[07.08.2026 16:53] Sherzod: cursor.fetchone()
+row = cursor.fetchone()
 conn.close()
 
 if row:
@@ -452,8 +449,7 @@ conn.commit()
 conn.close()
 
 try: bot.send_message(user_id, f"📝 {final_title[:30]} darsligi bo'yicha jami {len(items)} ta test savoli muvaffaqiyatli tayyorlandi!")
-except Exception
-[07.08.2026 16:53] Sherzod: as e: logging.error(f"Telegram xabari yuborilmadi: {e}")
+except Exception as e: logging.error(f"Telegram xabari yuborilmadi: {e}")
 return {"status": "ok"}
 except Exception as e: return {"status": "error", "message": str(e)}
 
@@ -550,8 +546,7 @@ cursor.execute("PRAGMA journal_mode=WAL;")
 cursor.execute("SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
 rows = cursor.fetchall()
 conn.close()
-cards = [{"id": r["id"], "fro
-[07.08.2026 16:53] Sherzod: nt": r["front"], "back": r["back"]} for r in rows]
+cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
 return {"status": "ok", "cards": cards}
 
 @app.post("/api/create-flashcard")
@@ -621,4 +616,4 @@ threading.Thread(target=start_bot_polling, daemon=True).start()
 
 if name == "main":
 port = int(os.environ.get("PORT", 8080))
-uvicorn.run(app, host="0.0.0.0", port=port)
+uvicorn.run(app, host="0.0.0.0", port=port) 
