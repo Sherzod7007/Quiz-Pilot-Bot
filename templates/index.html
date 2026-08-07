@@ -58,7 +58,7 @@
         .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
         .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-red); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-around: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-item.active { color: var(--accent-blue); }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
@@ -130,7 +130,7 @@
     <div id="library-screen" class="screen active">
         <div class="header">
             <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
-            <span id="user-count-badge" class="user-badge">...</span>
+            <span id="user-count-badge" class="user-badge">🟢 ...</span>
         </div>
         <div class="tabs">
             <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
@@ -418,7 +418,6 @@
             });
         }
 
-        // FIXED: Dual-kanal orqali xabar yuborish (2-MUAMMO TO'LIQ YECHIMI)
         function submitPaymentIntent() {
             const tariff = tariffDetails[selectedTariffKey];
             const paymentData = {
@@ -431,7 +430,6 @@
             showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
                 closePaymentModal();
                 
-                // 1-Kanal: To'g'ridan-to'g'ri FastAPI Endpointiga yuborish (Xavfsiz va tezkor)
                 try {
                     await fetch(`${BASE_URL}/api/payment-intent`, {
                         method: 'POST',
@@ -440,17 +438,14 @@
                     });
                 } catch(e) { console.log("API Fetch xatosi:", e); }
                 
-                // 2-Kanal: Agar WebApp klaviatura orqali ochilgan bo'lsa chatga ham tashlaydi
                 try {
                     tg.sendData(JSON.stringify(paymentData));
                 } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
                 
-                // Bot chatiga qaytarish
                 setTimeout(() => { tg.close(); }, 200);
             });
         }
 
-        // FIXED: Premium bo'limining barcha tariflari tillarga qarab to'liq tarjima qilinadigan bo'ldi (3-MUAMMO YECHIMI)
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.getAttribute('data-lang');
@@ -461,7 +456,6 @@
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
             });
             
-            // Premium Premium Dynamic Card Translation
             const dailyCard = document.getElementById('card-daily');
             if(dailyCard) {
                 dailyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_daily_title;
@@ -590,7 +584,7 @@
                 const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
                 const data = await response.json();
                 
-                let liveUsers = 16; 
+                let liveUsers = 0; 
                 if (data && data.total_users !== undefined) liveUsers = data.total_users;
                 const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
                 document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
