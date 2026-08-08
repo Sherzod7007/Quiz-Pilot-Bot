@@ -170,7 +170,6 @@ def init_db():
         except Exception:
             pass
 
-    # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
     cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
     cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi' WHERE status IS NULL;")
     cursor.execute("UPDATE users SET premium_until = 0 WHERE premium_until IS NULL;")
@@ -266,7 +265,6 @@ def trigger_payment_flow(user_id, tariff_name, tariff_price):
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
 
-        # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
         cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
             "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
@@ -322,7 +320,6 @@ def handle_webapp_data(message):
         logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
 
-# --- ISHONCHLI TO'LOV CHEKI QABUL QILISH (STABLE PHOTO HANDLER) ---
 @bot.message_handler(content_types=["photo"])
 def handle_receipt_photo(message):
     user_id = message.from_user.id
@@ -338,7 +335,7 @@ def handle_receipt_photo(message):
     conn.close()
 
     if not pending_pay:
-        return  # Kutilayotgan to'lov yo'q bo'lsa javob berilmaydi
+        return
 
     tx_id, tariff_name, tariff_price = pending_pay
 
@@ -405,10 +402,7 @@ def handle_admin_decision(call):
 
     if action == "app":
         current_time = int(time.time())
-        
-        # Yangi to'lov berilganda har doim hozirgi vaqtdan hisoblash (eski test xatolarini bartaraf etadi)
         base_time = current_time
-        
         t_name_lower = tariff_name.lower()
 
         if "umrbod" in t_name_lower or "unlimited" in t_name_lower:
@@ -541,11 +535,10 @@ def get_premium_status(user_id: int):
             conn.commit()
             user_status = "Oddiy foydalanuvchi"
             premium_until = 0
-            
+
         conn.close()
 
         if "PRO" in user_status and premium_until > 0:
-            # Toshkent vaqtida (+5 soat / UTC+5) ko'rsatish
             uzbek_time = time.gmtime(premium_until + 5 * 3600)
             readable_date = time.strftime("%d.%m.%Y %H:%M", uzbek_time)
             user_status = f"{user_status} (Gacha: {readable_date})"
@@ -554,7 +547,7 @@ def get_premium_status(user_id: int):
             "user_status": user_status,
             "free_used": free_used,
         }
-    
+
     conn.close()
     return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0}
 
@@ -606,7 +599,6 @@ async def create_quiz_web(
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
-        # LİMİT TEKSHIRUVI (AQLLI VA QAT'IY)
         if "PRO" not in current_status and free_used >= 2:
             conn_check.close()
             return {
@@ -687,7 +679,6 @@ async def create_quiz_web(
                 -1,
             ),
         )
-        # COALESCE BAZADAGI NULL XATOLIKLARINI OLINI OLADI:
         cursor.execute(
             "UPDATE users SET free_used = COALESCE(free_used, 0) + 1 WHERE user_id = ?",
             (user_id,),
@@ -799,6 +790,29 @@ def get_user_quizzes(user_id: int):
     }
 
 
+@app.get("/api/get-quiz/{quiz_id}")
+def get_quiz_detail(quiz_id: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT id, title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+
+    return {
+        "status": "ok",
+        "quiz": {
+            "id": row["id"],
+            "title": row["title"],
+            "data": json.loads(row["quiz_json"]),
+        },
+    }
+
+
 @app.get("/api/public-quizzes")
 def get_public_quizzes():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -820,6 +834,20 @@ def get_public_quizzes():
     return {"status": "ok", "quizzes": quizzes}
 
 
+@app.post("/api/update-progress")
+def update_progress(req: ProgressUpdateRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "UPDATE quizzes SET last_score = ?, last_percent = ? WHERE id = ? AND user_id = ?",
+        (req.correct_count, req.percent, req.quiz_id, req.user_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
 @app.post("/api/toggle-public")
 def toggle_public(quiz_id: str, user_id: int, is_public: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -828,6 +856,19 @@ def toggle_public(quiz_id: str, user_id: int, is_public: int):
     cursor.execute(
         "UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?",
         (is_public, quiz_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+
+@app.post("/api/delete-quiz")
+def delete_quiz(quiz_id: str, user_id: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
     )
     conn.commit()
     conn.close()
@@ -854,8 +895,7 @@ def get_flashcards(user_id: int):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY"
-        " created_at DESC",
+        "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY created_at DESC",
         (user_id,),
     )
     rows = cursor.fetchall()
@@ -871,15 +911,15 @@ def create_flashcard(req: FlashcardCreateRequest):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO flashcards (id, user_id, front, back, created_at) VALUES (?, ?, ?, ?, ?)",
         (card_id, req.user_id, req.front, req.back, int(time.time())),
     )
     conn.commit()
     conn.close()
-    return {"status": "ok"}
+    return {"status": "ok", "id": card_id}
 
 
-@app.delete("/api/delete-flashcard")
+@app.post("/api/delete-flashcard")
 def delete_flashcard(card_id: str, user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
@@ -892,64 +932,17 @@ def delete_flashcard(card_id: str, user_id: int):
     return {"status": "ok"}
 
 
-@app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-    raise HTTPException(status_code=404, detail="Test topilmadi")
-
-
-@app.post("/api/update-progress")
-def update_progress(data: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
-        " WHERE id = ? AND user_id = ?",
-        (data.correct_count, data.percent, data.quiz_id, data.user_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-
-@app.delete("/api/delete-quiz")
-def delete_quiz(quiz_id: str, user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute(
-            "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
-        )
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "message": "Test o'chirildi."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Xatolik.")
-
-
-def start_bot_polling():
-    while True:
-        try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=10)
-        except Exception:
-            time.sleep(5)
-
-
-@app.on_event("startup")
-async def startup_event():
-    threading.Thread(target=start_bot_polling, daemon=True).start()
+def run_bot():
+    if TELEGRAM_BOT_TOKEN:
+        logging.info("Telegram Bot Polling ishga tushmoqda...")
+        bot.infinity_polling(skip_pending=True)
+    else:
+        logging.warning("TELEGRAM_BOT_TOKEN kiritilmagan, bot ishlamaydi.")
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
