@@ -28,12 +28,14 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
 
+# Admin ID ni to'g'ri o'qib olish va tekshirish
 raw_admin_id = os.getenv("ADMIN_ID")
-try:
-    ADMIN_ID = int(raw_admin_id.strip()) if raw_admin_id else None
-except Exception as e:
-    logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
-    ADMIN_ID = None
+ADMIN_ID = None
+if raw_admin_id:
+    try:
+        ADMIN_ID = int(raw_admin_id.strip())
+    except Exception as e:
+        logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
 
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = (
@@ -58,13 +60,13 @@ MESSAGES = {
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
-            "🧾 Siz {tariff_name} ({tariff_price}) tarifini tanladingiz.\n\n"
+            "🧾 Siz **{tariff_name}** ({tariff_price}) tarifini tanladingiz.\n\n"
             "Iltimos, plastik kartaga to'lov qilganingiz haqidagi To'lov Chekini "
-            "(Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\n"
-            "Sizning buyurtma raqamingiz: {tx_id}"
+            "(Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\n\n"
+            "🆔 Buyurtma raqamingiz: `{tx_id}`"
         ),
         "receipt_received": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
-        "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
+        "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, lekin adminga yuborishda xatolik bo'ldi. Tez orada admin paneldan tekshiriladi.",
         "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
         "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
         "quiz_limit_reached": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
@@ -79,12 +81,12 @@ MESSAGES = {
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
-            "🧾 Вы выбрали тариф {tariff_name} ({tariff_price}).\n\n"
-            "Пожалуйста, отправьте чек об оплате (в виде фото/скриншота) сюда.\n"
-            "Ваш номер заказа: {tx_id}"
+            "🧾 Вы выбрали тариф **{tariff_name}** ({tariff_price}).\n\n"
+            "Пожалуйста, отправьте чек об оплате (в виде фото/скриншота) сюда.\n\n"
+            "🆔 Ваш номер заказа: `{tx_id}`"
         ),
         "receipt_received": "✅ Спасибо! Ваш чек отправлен администратору. В ближайшее время он будет проверен, и ваш тариф активируется.",
-        "receipt_error": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Он будет проверен через админ-панель.",
+        "receipt_error": "⚠️ Ваш чек принят, но возникла проблема с отправкой администратору.",
         "payment_approved": "🎉 Поздравляем! Ваш платеж по тарифу {tariff_name} подтвержден. В приложении активирован PRO статус! 👑",
         "payment_rejected": "❌ Ваш чек об оплате был отклонен. Если вы считаете, что произошла ошибка, свяжитесь с администратором.",
         "quiz_limit_reached": "Ваш лимит на создание 2 бесплатных тестов в течение 30 дней исчерпан. Пожалуйста, перейдите на Premium тариф! 👑",
@@ -99,14 +101,14 @@ MESSAGES = {
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
-            "🧾 You have selected the {tariff_name} ({tariff_price}) plan.\n\n"
-            "Please send your payment receipt (as a Photo/Screenshot) here.\n"
-            "Your Order ID is: {tx_id}"
+            "🧾 You have selected the **{tariff_name}** ({tariff_price}) plan.\n\n"
+            "Please send your payment receipt (as a Photo/Screenshot) here.\n\n"
+            "🆔 Your Order ID: `{tx_id}`"
         ),
-        "receipt_received": "✅ Thank you! Your payment receipt has been sent to the administrator. It will be verified shortly, and your plan will be activated.",
-        "receipt_error": "⚠️ Your receipt was received, but there was an issue notifying the admin. It will be reviewed via the admin panel.",
+        "receipt_received": "✅ Thank you! Your payment receipt has been sent to the administrator.",
+        "receipt_error": "⚠️ Your receipt was received, but there was an issue notifying the admin.",
         "payment_approved": "🎉 Congratulations! Your payment for the {tariff_name} plan has been confirmed. PRO status is now active! 👑",
-        "payment_rejected": "❌ Your payment receipt was rejected. If you believe this is an error, please contact support.",
+        "payment_rejected": "❌ Your payment receipt was rejected.",
         "quiz_limit_reached": "You have reached your free limit of 2 quizzes within 30 days. Please upgrade to a Premium plan! 👑",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
     }
@@ -340,7 +342,7 @@ def handle_receipt_photo(message):
     tx_id, tariff_name, tariff_price = pending_pay
 
     username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
-    first_name = message.from_user.first_name
+    first_name = message.from_user.first_name or "Foydalanuvchi"
     file_id = message.photo[-1].file_id
 
     admin_markup = telebot.types.InlineKeyboardMarkup()
@@ -349,29 +351,33 @@ def handle_receipt_photo(message):
     admin_markup.row(btn_approve, btn_reject)
 
     admin_text = (
-        f"💰 YANGI TO'LOV SO'ROVI!\n\n"
-        f"👤 Foydalanuvchi: {first_name} ({username})\n"
-        f"🆔 Telegram ID: {user_id}\n"
-        f"🌐 Til kodi: {user_lang.upper()}\n"
-        f"📦 Tanlangan Tarif: {tariff_name}\n"
-        f"💵 To'lov Summasi: {tariff_price}\n"
-        f"🧩 Tranzaksiya ID: {tx_id}\n\n"
-        f"Chek to'g'riligini tekshiring va pastdagi tugmalardan birini bosing."
+        f"💰 **YANGI TO'LOV SO'ROVI!**\n\n"
+        f"👤 **Foydalanuvchi:** {first_name} ({username})\n"
+        f"🆔 **Telegram ID:** `{user_id}`\n"
+        f"🌐 **Til:** {user_lang.upper()}\n"
+        f"📦 **Tarif:** {tariff_name}\n"
+        f"💵 **Narxi:** {tariff_price}\n"
+        f"🧩 **Tranzaksiya ID:** `{tx_id}`\n\n"
+        f"Chekni tekshirib, qarorni tanlang:"
     )
 
-    target_admin = ADMIN_ID if ADMIN_ID else user_id
+    if not ADMIN_ID:
+        logging.error("CRITICAL: ADMIN_ID environment o'zgaruvchisi o'rnatilmagan!")
+        bot.send_message(message.chat.id, "⚠️ Tizimda admin ID sozlanmagan. Iltimos adminga xabar bering.")
+        return
 
     try:
+        # Adminga to'lov rasmini yuborish
         bot.send_photo(
-            target_admin,
-            file_id,
+            chat_id=ADMIN_ID,
+            photo=file_id,
             caption=admin_text,
             parse_mode="Markdown",
             reply_markup=admin_markup,
         )
         bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_received"])
     except Exception as e:
-        logging.error(f"Admin ga rasm yuborishda xatolik yuz berdi: {e}")
+        logging.error(f"Adminga (ID: {ADMIN_ID}) rasm yuborishda xatolik yuz berdi: {e}")
         bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_error"])
 
 
@@ -402,21 +408,19 @@ def handle_admin_decision(call):
 
     if action == "app":
         current_time = int(time.time())
-        base_time = current_time
         t_name_lower = tariff_name.lower()
 
-        if "umrbod" in t_name_lower or "unlimited" in t_name_lower:
-            duration = 365 * 10 * 24 * 3600
-        elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower:
-            duration = 30 * 24 * 3600
-        elif "hafta" in t_name_lower or "7" in t_name_lower:
+        # YANGI TARIF MUDDATLARI LOGIKASI
+        if "1 kun" in t_name_lower or "kunlik" in t_name_lower:
+            duration = 1 * 24 * 3600
+        elif "7 kun" in t_name_lower or "hafta" in t_name_lower:
             duration = 7 * 24 * 3600
-        elif "1 kun" in t_name_lower or "kun" in t_name_lower or "24" in t_name_lower or "day" in t_name_lower:
-            duration = 24 * 3600
+        elif "30 kun" in t_name_lower or "o'qituvchi" in t_name_lower or "oylik" in t_name_lower:
+            duration = 30 * 24 * 3600
         else:
-            duration = 24 * 3600
+            duration = 30 * 24 * 3600
 
-        premium_until_timestamp = base_time + duration
+        premium_until_timestamp = current_time + duration
         cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
         cursor.execute(
             "UPDATE users SET status = ?, premium_until = ? WHERE user_id = ?",
@@ -427,9 +431,9 @@ def handle_admin_decision(call):
         bot.answer_callback_query(call.id, "To'lov tasdiqlandi!")
         try:
             bot.edit_message_caption(
-                f"✅ {call.message.caption}\n\n🟢 TASDIQLANDI!",
-                call.message.chat.id,
-                call.message.message_id,
+                caption=f"✅ {call.message.caption}\n\n🟢 TASDIQLANDI!",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
             )
         except Exception:
             pass
@@ -445,9 +449,9 @@ def handle_admin_decision(call):
         bot.answer_callback_query(call.id, "To'lov rad etildi.")
         try:
             bot.edit_message_caption(
-                f"❌ {call.message.caption}\n\n🔴 RAD ETILDI!",
-                call.message.chat.id,
-                call.message.message_id,
+                caption=f"❌ {call.message.caption}\n\n🔴 RAD ETILDI!",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
             )
         except Exception:
             pass
