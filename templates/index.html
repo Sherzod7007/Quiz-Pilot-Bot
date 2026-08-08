@@ -95,7 +95,7 @@
         .card-number-box { background: #24242b; border: 1px dashed #f2c94c; padding: 14px; border-radius: 12px; font-size: 18px; font-weight: bold; color: #ffffff; letter-spacing: 1px; cursor: pointer; margin-bottom: 8px; position: relative; transition: background 0.2s; }
         .card-number-box:active { background: #2c2c35; }
         .copy-hint { font-size: 11px; color: #f2c94c; display: block; margin-bottom: 15px; }
-        .toast-msg { background: #34c759; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 8px; display: inline-block; margin-bottom: 15px; display: none; width: max-content; margin-left: auto; margin-right: auto; }
+        .toast-msg { background: #34c759; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 8px; margin-bottom: 15px; display: none; width: max-content; margin-left: auto; margin-right: auto; }
         .modal-buttons { display: flex; flex-direction: column; gap: 10px; }
         .btn-send-receipt { background: var(--accent-blue); color: #fff; border: none; padding: 14px; border-radius: 12px; font-size: 14px; font-weight: bold; cursor: pointer; }
         .btn-close-modal { background: #24242b; color: var(--text-hint); border: none; padding: 12px; border-radius: 12px; font-size: 14px; cursor: pointer; }
@@ -418,7 +418,6 @@
             });
         }
 
-        // FIXED: Dual-kanal orqali xabar yuborish (2-MUAMMO TO'LIQ YECHIMI)
         function submitPaymentIntent() {
             const tariff = tariffDetails[selectedTariffKey];
             const paymentData = {
@@ -431,26 +430,24 @@
             showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
                 closePaymentModal();
                 
-                // 1-Kanal: To'g'ridan-to'g'ri FastAPI Endpointiga yuborish (Xavfsiz va tezkor)
+                // Direct API Endpoint Fallback
                 try {
                     await fetch(`${BASE_URL}/api/payment-intent`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(paymentData)
                     });
-                } catch(e) { console.log("API Fetch xatosi:", e); }
+                } catch(e) { console.log("API Fetch Error:", e); }
                 
-                // 2-Kanal: Agar WebApp klaviatura orqali ochilgan bo'lsa chatga ham tashlaydi
+                // WebApp Keyboard Fallback
                 try {
                     tg.sendData(JSON.stringify(paymentData));
-                } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
+                } catch(e) { console.log("tg.sendData bypassed"); }
                 
-                // Bot chatiga qaytarish
                 setTimeout(() => { tg.close(); }, 200);
             });
         }
 
-        // FIXED: Premium bo'limining barcha tariflari tillarga qarab to'liq tarjima qilinadigan bo'ldi (3-MUAMMO YECHIMI)
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.getAttribute('data-lang');
@@ -461,7 +458,6 @@
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
             });
             
-            // Premium Premium Dynamic Card Translation
             const dailyCard = document.getElementById('card-daily');
             if(dailyCard) {
                 dailyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_daily_title;
