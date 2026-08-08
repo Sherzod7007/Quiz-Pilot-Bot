@@ -166,13 +166,14 @@
                 <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
             </div>
 
+            <!-- TARIFLAR VA ULARNING NARXLARI -->
             <div class="tariff-card" id="card-daily">
                 <div class="tariff-info">
                     <span class="tariff-title">⚡ Kunlik Cheksiz</span>
                     <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">7 000 so'm</span>
+                    <span class="tariff-price" id="price-daily">5 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('daily')">Faollashtirish</button>
                 </div>
             </div>
@@ -183,7 +184,7 @@
                     <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">30 000 so'm</span>
+                    <span class="tariff-price" id="price-weekly">20 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('weekly')">Faollashtirish</button>
                 </div>
             </div>
@@ -194,7 +195,7 @@
                     <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">60 000 so'm</span>
+                    <span class="tariff-price" id="price-monthly">45 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('monthly')">Faollashtirish</button>
                 </div>
             </div>
@@ -202,10 +203,10 @@
             <div class="tariff-card" id="card-teachers">
                 <div class="tariff-info">
                     <span class="tariff-title">🧑‍🏫 O'qituvchilar Uchun</span>
-                    <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
+                    <span class="tariff-desc">30 kunlik guruh va analitika rejimi</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">90 000 so'm</span>
+                    <span class="tariff-price" id="price-teachers">70 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
                 </div>
             </div>
@@ -299,7 +300,7 @@
                 tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
                 tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
                 tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
-                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh va analitika rejimi",
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
                 alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
                 confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
@@ -361,11 +362,12 @@
             }
         };
 
+        // SHU YERDA NARXLAR YANGILANDI:
         const tariffDetails = {
-            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "7 000 so'm" },
-            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "30 000 so'm" },
-            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "60 000 so'm" },
-            teachers: { uz: "O'qituvchilar Uchun", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "90 000 so'm" }
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "5 000 so'm" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "20 000 so'm" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "45 000 so'm" },
+            teachers: { uz: "O'qituvchilar Uchun", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "70 000 so'm" }
         };
 
         function showAppAlert(icon, text, callback = null) {
@@ -430,7 +432,6 @@
             showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
                 closePaymentModal();
                 
-                // Direct API Endpoint Fallback
                 try {
                     await fetch(`${BASE_URL}/api/payment-intent`, {
                         method: 'POST',
@@ -439,7 +440,6 @@
                     });
                 } catch(e) { console.log("API Fetch Error:", e); }
                 
-                // WebApp Keyboard Fallback
                 try {
                     tg.sendData(JSON.stringify(paymentData));
                 } catch(e) { console.log("tg.sendData bypassed"); }
