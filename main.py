@@ -2,7 +2,7 @@
 import docx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
@@ -18,6 +18,12 @@ import time
 from typing import List, Optional
 import uvicorn
 import uuid
+import io
+
+# PDF Eksport uchun ReportLab kutubxonasi
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -69,6 +75,9 @@ MESSAGES = {
         "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
         "quiz_limit_reached": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
+        "teacher_only": "⚠️ Bu imkoniyat faqat 'O'qituvchilar Uchun' tarifi foydalanuvchilariga mavjud!",
+        "pdf_title": "TEST VARIANTI",
+        "pdf_answers": "JAVOBLAR KALITI"
     },
     "ru": {
         "welcome": (
@@ -89,6 +98,9 @@ MESSAGES = {
         "payment_rejected": "❌ Ваш чек об оплате был отклонен. Если вы считаете, что произошла ошибка, свяжитесь с администратором.",
         "quiz_limit_reached": "Ваш лимит на создание 2 бесплатных тестов в течение 30 дней исчерпан. Пожалуйста, перейдите на Premium тариф! 👑",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
+        "teacher_only": "⚠️ Эта функция доступна только для пользователей тарифа 'Для Учителей'!",
+        "pdf_title": "ТЕСТОВЫЙ ВАРИАНТ",
+        "pdf_answers": "КЛЮЧИ К ОТВЕТАМ"
     },
     "en": {
         "welcome": (
@@ -109,6 +121,9 @@ MESSAGES = {
         "payment_rejected": "❌ Your payment receipt was rejected. If you believe this is an error, please contact support.",
         "quiz_limit_reached": "You have reached your free limit of 2 quizzes within 30 days. Please upgrade to a Premium plan! 👑",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
+        "teacher_only": "⚠️ This feature is exclusively available for 'For Teachers' plan users!",
+        "pdf_title": "QUIZ VARIANT",
+        "pdf_answers": "ANSWER KEY"
     }
 }
 
@@ -190,6 +205,22 @@ def init_db():
         status TEXT DEFAULT 'pending',
         created_at INTEGER)""")
 
+    # --- O'QITUVCHILAR UCHUN YANGI JADVALLAR ---
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_groups (
+        id TEXT PRIMARY KEY,
+        teacher_id INTEGER,
+        group_name TEXT,
+        created_at INTEGER)""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS exam_results (
+        id TEXT PRIMARY KEY,
+        group_id TEXT,
+        quiz_id TEXT,
+        student_name TEXT,
+        score INTEGER,
+        total INTEGER,
+        created_at INTEGER)""")
+
     conn.commit()
     conn.close()
 
@@ -226,6 +257,11 @@ class PaymentIntentRequest(BaseModel):
     user_id: int
     tariff_name: str
     tariff_price: str
+
+
+class GroupCreateRequest(BaseModel):
+    teacher_id: int
+    group_name: str
 
 
 def add_user_to_db(user_id: int):
@@ -413,7 +449,7 @@ def handle_admin_decision(call):
 
         if "umrbod" in t_name_lower or "unlimited" in t_name_lower:
             duration = 365 * 10 * 24 * 3600
-        elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower:
+        elif "oyl" in t_name_lower or "30" in t_name_lower or "o'qituvchi" in t_name_lower or "учител" in t_name_lower or "teacher" in t_name_lower:
             duration = 30 * 24 * 3600
         elif "hafta" in t_name_lower or "7" in t_name_lower:
             duration = 7 * 24 * 3600
@@ -935,6 +971,119 @@ def delete_quiz(quiz_id: str, user_id: int):
         return {"status": "ok", "message": "Test o'chirildi."}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Xatolik.")
+
+
+# =====================================================================
+# --- O'QITUVCHILAR UCHUN EXCLUSIVE ENDPOINTLAR (PRO TEACHER MODE) ---
+# =====================================================================
+
+def is_teacher_user(user_id: int) -> bool:
+    """Foydalanuvchi O'qituvchi tarifida ekanligini tekshirish"""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("SELECT status, premium_until FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        status, premium_until = row[0] or "", row[1] or 0
+        current_now = int(time.time())
+        if ("o'qituvchi" in status.lower() or "учител" in status.lower() or "teacher" in status.lower()) and premium_until > current_now:
+            return True
+    return False
+
+
+@app.post("/api/teacher/groups")
+def create_teacher_group(req: GroupCreateRequest):
+    if not is_teacher_user(req.teacher_id):
+        user_lang = get_user_lang(req.teacher_id)
+        return {"status": "error", "message": MESSAGES[user_lang]["teacher_only"]}
+
+    group_id = f"grp_{int(time.time())}_{os.urandom(2).hex()}"
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "INSERT INTO teacher_groups VALUES (?, ?, ?, ?)",
+        (group_id, req.teacher_id, req.group_name.strip(), int(time.time())),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "group_id": group_id}
+
+
+@app.get("/api/teacher/groups")
+def get_teacher_groups(teacher_id: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "SELECT id, group_name, created_at FROM teacher_groups WHERE teacher_id = ? ORDER BY created_at DESC",
+        (teacher_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    groups = [{"id": r["id"], "group_name": r["group_name"], "created_at": r["created_at"]} for r in rows]
+    return {"status": "ok", "groups": groups}
+
+
+@app.get("/api/teacher/export-pdf")
+def export_quiz_pdf(quiz_id: str, user_id: int):
+    user_lang = get_user_lang(user_id)
+    if not is_teacher_user(user_id):
+        raise HTTPException(status_code=403, detail=MESSAGES[user_lang]["teacher_only"])
+
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, quiz_json FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+
+    title = row["title"]
+    quiz_data = json.loads(row["quiz_json"]).get("quizzes", [])
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Sarlavha
+    header_text = f"<b>{title.upper()} - {MESSAGES[user_lang]['pdf_title']}</b>"
+    story.append(Paragraph(header_text, styles['Heading1']))
+    story.append(Spacer(1, 12))
+
+    letters = ["A", "B", "C", "D"]
+    answers_summary = []
+
+    for idx, item in enumerate(quiz_data, 1):
+        q_text = f"<b>{idx}. {item['question']}</b>"
+        story.append(Paragraph(q_text, styles['Normal']))
+        
+        for opt_idx, opt in enumerate(item['options']):
+            opt_letter = letters[opt_idx] if opt_idx < len(letters) else str(opt_idx + 1)
+            story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;&nbsp;{opt_letter}) {opt}", styles['Normal']))
+            
+            if opt_idx == item['correct_index']:
+                answers_summary.append(f"{idx}-{opt_letter}")
+        story.append(Spacer(1, 8))
+
+    # Javoblar kaliti qismi
+    story.append(Spacer(1, 20))
+    story.append(Paragraph(f"<b>--- {MESSAGES[user_lang]['pdf_answers']} ---</b>", styles['Heading2']))
+    story.append(Paragraph(", ".join(answers_summary), styles['Normal']))
+
+    doc.build(story)
+    buffer.seek(0)
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=quiz_{quiz_id}.pdf"}
+    )
 
 
 def start_bot_polling():
