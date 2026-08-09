@@ -68,6 +68,7 @@ MESSAGES = {
         "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
         "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
         "quiz_limit_reached": "Sizning 30 kun ichida bepul 2 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
+        "public_quiz_restricted": "🚨 Ommaviy bo'limdagi testlarni yechish uchun sizda Limit (PRO status) bo'lishi kerak. Iltimos, tarifni faollashtiring!",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
     "ru": {
@@ -88,6 +89,7 @@ MESSAGES = {
         "payment_approved": "🎉 Поздравляем! Ваш платеж по тарифу {tariff_name} подтвержден. В приложении активирован PRO статус! 👑",
         "payment_rejected": "❌ Ваш чек об оплате был отклонен. Если вы считаете, что произошла ошибка, свяжитесь с администратором.",
         "quiz_limit_reached": "Ваш лимит на создание 2 бесплатных тестов в течение 30 дней исчерпан. Пожалуйста, перейдите на Premium тариф! 👑",
+        "public_quiz_restricted": "🚨 Для доступа к тестам в Публичном разделе необходимо иметь Лимит (PRO статус). Пожалуйста, активируйте тариф!",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
     "en": {
@@ -108,6 +110,7 @@ MESSAGES = {
         "payment_approved": "🎉 Congratulations! Your payment for the {tariff_name} plan has been confirmed. PRO status is now active! 👑",
         "payment_rejected": "❌ Your payment receipt was rejected. If you believe this is an error, please contact support.",
         "quiz_limit_reached": "You have reached your free limit of 2 quizzes within 30 days. Please upgrade to a Premium plan! 👑",
+        "public_quiz_restricted": "🚨 You need to have Limit (PRO status) to access quizzes in the Public section. Please activate a plan!",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
     }
 }
@@ -800,7 +803,36 @@ def get_user_quizzes(user_id: int):
 
 
 @app.get("/api/public-quizzes")
-def get_public_quizzes():
+def get_public_quizzes(user_id: Optional[int] = None):
+    # Agar user_id yuborilgan bo'lsa, foydalanuvchining limit statusini tekshiramiz
+    if user_id:
+        add_user_to_db(user_id)
+        user_lang = get_user_lang(user_id)
+        
+        conn_user = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn_user.row_factory = sqlite3.Row
+        cursor_user = conn_user.cursor()
+        cursor_user.execute(
+            "SELECT status, premium_until FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        u_row = cursor_user.fetchone()
+        
+        if u_row:
+            u_status = u_row["status"] or "Oddiy foydalanuvchi"
+            u_premium_until = u_row["premium_until"] or 0
+            current_now = int(time.time())
+            
+            # Agar foydalanuvchi PRO bo'lmasa yoki muddati o'tgan bo'lsa:
+            is_pro = "PRO" in u_status and (u_premium_until == 0 or current_now <= u_premium_until)
+            if not is_pro:
+                conn_user.close()
+                return {
+                    "status": "error",
+                    "message": MESSAGES[user_lang]["public_quiz_restricted"]
+                }
+        conn_user.close()
+
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -871,85 +903,9 @@ def create_flashcard(req: FlashcardCreateRequest):
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO flashcards (id, user_id, front, back, created_at) VALUES (?, ?, ?, ?, ?)",
         (card_id, req.user_id, req.front, req.back, int(time.time())),
     )
     conn.commit()
     conn.close()
-    return {"status": "ok"}
-
-
-@app.delete("/api/delete-flashcard")
-def delete_flashcard(card_id: str, user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id)
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-
-@app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-    raise HTTPException(status_code=404, detail="Test topilmadi")
-
-
-@app.post("/api/update-progress")
-def update_progress(data: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
-        " WHERE id = ? AND user_id = ?",
-        (data.correct_count, data.percent, data.quiz_id, data.user_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-
-@app.delete("/api/delete-quiz")
-def delete_quiz(quiz_id: str, user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute(
-            "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
-        )
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "message": "Test o'chirildi."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Xatolik.")
-
-
-def start_bot_polling():
-    while True:
-        try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=10)
-        except Exception:
-            time.sleep(5)
-
-
-@app.on_event("startup")
-async def startup_event():
-    threading.Thread(target=start_bot_polling, daemon=True).start()
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    return {"status": "ok", "card_id": card_id}
