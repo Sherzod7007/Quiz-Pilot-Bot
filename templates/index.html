@@ -2,7 +2,7 @@
 <html lang="uz">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Quiz Pilot - Super TMA</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -16,21 +16,26 @@
             --accent-red: #ff3b30;
             --border-color: #2c2c35;
             --accent-yellow: #f2c94c;
+            --accent-purple: #9b51e0;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
-            margin: 0; padding: 15px; padding-bottom: 90px;
-            -webkit-user-select: none; user-select: none;
+            margin: 0; 
+            padding: 15px; 
+            padding-bottom: calc(90px + env(safe-area-inset-bottom));
+            -webkit-user-select: none; 
+            user-select: none;
         }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
         .header h1 { font-size: 26px; margin: 0; font-weight: 700; }
         .user-badge { font-size: 13px; color: var(--accent-green); background: rgba(52, 199, 89, 0.1); padding: 5px 12px; border-radius: 14px; font-weight: 600; border: 1px solid rgba(52, 199, 89, 0.2); }
-        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-        .tab { background: #24242b; border: none; padding: 10px 16px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center; }
+        .tabs { display: flex; gap: 6px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 4px; }
+        .tab { background: #24242b; border: none; padding: 10px 14px; border-radius: 20px; color: var(--text-hint); font-weight: 600; font-size: 13px; cursor: pointer; flex: 1; text-align: center; white-space: nowrap; }
         .tab.active { background: var(--accent-blue); color: #fff; }
-        .quiz-card, .flash-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
+        
+        .quiz-card, .flash-card, .group-card { background: var(--card-bg); border-radius: 20px; padding: 18px; margin-bottom: 14px; border: 1px solid var(--border-color); }
         .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
         .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .action-group { display: flex; gap: 8px; align-items: center; }
@@ -38,17 +43,21 @@
         .btn-delete { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 15px; cursor: pointer; color: var(--accent-red); }
         .btn-public { background: #24242b; border: none; border-radius: 12px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 14px; cursor: pointer; color: var(--text-hint); }
         .btn-public.is-active { color: var(--accent-yellow); background: #2c2c35; }
+        
         .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
         .progress-line-container { background: #2c2c35; border-radius: 6px; height: 6px; flex: 1; margin-right: 15px; overflow: hidden; }
         .progress-line-bar { height: 100%; border-radius: 6px; transition: width 0.3s; background: var(--accent-blue); }
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 8px; }
+        
         .screen { display: none; }
         .screen.active { display: block; }
+        
         .upload-box { border: 2px dashed var(--border-color); border-radius: 20px; padding: 30px 20px; text-align: center; cursor: pointer; background: var(--card-bg); margin-bottom: 15px; color: var(--text-hint); }
         .input-title, .input-card { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; color: #fff; font-size: 15px; margin-bottom: 15px; outline: none; transition: border-color 0.2s; }
         .input-title:focus, .input-card:focus { border-color: var(--accent-blue); }
         .input-text { width: 100%; box-sizing: border-box; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 15px; color: #fff; font-size: 15px; resize: vertical; margin-bottom: 20px; }
         .submit-btn { background: var(--accent-blue); color: #fff; border: none; width: 100%; padding: 16px; border-radius: 14px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        
         #game-screen { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg-color); z-index: 1000; padding: 20px; display: none; overflow-y: auto; }
         .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 30px; }
         .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; }
@@ -58,7 +67,8 @@
         .opt-btn.wrong { background: var(--accent-red) !important; border-color: var(--accent-red); }
         .explanation-box { background: #24242b; border-radius: 12px; padding: 14px; margin-top: 20px; font-size: 14px; border-left: 4px solid var(--accent-red); display: none; }
         .next-btn { background: var(--accent-blue); color: white; border: none; padding: 15px; border-radius: 14px; font-size: 16px; font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; }
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
+        
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 75px; padding-bottom: env(safe-area-inset-bottom); background: #16161a; display: flex; justify-content: space-around; border-top: 1px solid var(--border-color); align-items: center; z-index: 99; }
         .nav-item { display: flex; flex-direction: column; align-items: center; background: none; border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; }
         .nav-item.active { color: var(--accent-blue); }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); }
@@ -78,14 +88,19 @@
         .p-pro-header { background: #1c1936; border-radius: 16px; padding: 16px; border: 1px solid #2c2c35; text-align: center; }
         .p-pro-header h3 { font-size: 20px; color: #ffffff; margin: 0 0 8px 0; font-weight: 700; }
         .p-pro-header p { font-size: 13px; color: var(--text-hint); margin: 0; line-height: 1.4; }
+        
         .tariff-card { background: #1c1936; border-radius: 16px; padding: 18px; border: 1px solid #2c2c35; display: flex; justify-content: space-between; align-items: center; position: relative; }
-        .tariff-card.popular::before { content: "⭐"; position: absolute; top: -10px; right: 20px; background: #f2c94c; color: #121214; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        .tariff-card.popular::before { content: "⭐ OMMABOP"; position: absolute; top: -10px; right: 20px; background: #f2c94c; color: #121214; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        .tariff-card.teacher-special { border: 1px solid var(--accent-purple); background: linear-gradient(135deg, #1c1936 0%, #2a1b4e 100%); }
+        .tariff-card.teacher-special::before { content: "🧑‍🏫 MAXSUS"; position: absolute; top: -10px; right: 20px; background: var(--accent-purple); color: #fff; font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 6px; }
+        
         .tariff-info { display: flex; flex-direction: column; gap: 4px; max-width: 65%; }
         .tariff-title { font-size: 16px; font-weight: bold; color: #ffffff; display: flex; align-items: center; gap: 6px; }
         .tariff-desc { font-size: 12px; color: var(--text-hint); line-height: 1.3; }
         .tariff-action { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-        .tariff-price { font-size: 16px; font-weight: 800; color: #ffffff; white-space: nowrap; }
+        .tariff-price { font-size: 15px; font-weight: 800; color: #ffffff; white-space: nowrap; }
         .activate-btn { background: #f2c94c; color: #121214; border: none; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+        .activate-btn.teacher-btn { background: var(--accent-purple); color: #fff; }
         .activate-btn:active { opacity: 0.8; }
         
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 10000; display: none; align-items: center; justify-content: center; padding: 20px; }
@@ -113,9 +128,10 @@
 </head>
 <body>
 
+    <!-- YARATISH EKRANI -->
     <div id="create-screen" class="screen">
         <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
-        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
+        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika 8-Sinf)..." data-placeholder="placeholder_title">
         <div class="upload-box" onclick="document.getElementById('file-input').click()">
             <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
             <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
@@ -127,6 +143,7 @@
         <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
+    <!-- KUTUBXONA EKRANI -->
     <div id="library-screen" class="screen active">
         <div class="header">
             <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
@@ -136,10 +153,12 @@
             <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
             <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
             <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
+            <button id="tab-groups" class="tab" onclick="switchLibTab('groups')" data-lang="tab_groups">👥 Guruhlar</button>
         </div>
         <div id="lib-content-area"><div id="quiz-list"></div></div>
     </div>
 
+    <!-- SOZLAMALAR EKRANI -->
     <div id="settings-screen" class="screen">
         <div class="header"><h1 data-lang="nav_settings">Sozlamalar</h1></div>
         <div class="settings-box">
@@ -152,6 +171,7 @@
         </div>
     </div>
 
+    <!-- PREMIUM EKRANI -->
     <div id="premium-screen" class="screen">
         <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
         <div class="premium-layout">
@@ -199,19 +219,21 @@
                 </div>
             </div>
 
-            <div class="tariff-card" id="card-teachers">
+            <!-- O'QITUVCHILAR UCHUN MAXSUS TARIF -->
+            <div class="tariff-card teacher-special" id="card-teachers">
                 <div class="tariff-info">
                     <span class="tariff-title">🧑‍🏫 O'qituvchilar Uchun</span>
-                    <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
+                    <span class="tariff-desc">Guruh rejimi, studentlar statistikasi va kengaytirilgan 30 kunlik rejim</span>
                 </div>
                 <div class="tariff-action">
                     <span class="tariff-price">90 000 so'm</span>
-                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
+                    <button class="activate-btn teacher-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- TO'LOV MODAL darchasi -->
     <div id="payment-modal" class="modal-overlay">
         <div class="modal-box">
             <h4 id="m-tariff-title">Tarif</h4>
@@ -226,6 +248,7 @@
         </div>
     </div>
 
+    <!-- OGOHLANTIRISH DIALOGI -->
     <div id="app-dialog" class="app-dialog-overlay">
         <div class="app-dialog-box">
             <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
@@ -236,6 +259,7 @@
         </div>
     </div>
 
+    <!-- TEST O'YNASH EKRANI -->
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -248,6 +272,7 @@
         <button class="next-btn" id="next-question-btn" onclick="nextQuestion()"></button>
     </div>
 
+    <!-- PASTKI NAVIGATSIYA MENU -->
     <div class="bottom-nav">
         <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕️</span><span data-lang="nav_create">Yaratish</span></button>
         <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
@@ -267,6 +292,7 @@
         }
 
         let currentLang = 'uz';
+        let currentScreen = 'library';
         let currentTab = 'personal'; 
         let currentQuizQuestions = [];
         let currentQuestionIdx = 0;
@@ -279,17 +305,18 @@
         const langPack = {
             uz: {
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
-                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
+                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar", tab_groups: "👥 Guruhlar",
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
                 select_lang: "Tizim tilini tanlang:", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
-                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
+                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", msg_no_groups: "Sizda hali sinf/guruhlar yo'q.", score_text: "Oxirgi natija", q_count: "Savollar",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
                 alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
                 card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
+                btn_create_group: "Yangi guruh yaratish ➕",
                 premium_status_title: "💎 Sizning Statusingiz", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
                 modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
                 copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
@@ -299,7 +326,7 @@
                 tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
                 tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
                 tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
-                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "Guruh rejimi, studentlar statistikasi va kengaytirilgan 30 kunlik rejim",
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
                 alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
                 confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
@@ -307,16 +334,17 @@
             },
             ru: {
                 nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
-                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
+                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", tab_groups: "👥 Группы",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
                 select_lang: "Выберите язык системы:", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
-                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
+                msg_no_cards: "Список карточек пуст.", msg_no_groups: "У вас пока нет созданных групп.", score_text: "Последний результат", q_count: "Вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
                 alert_del_quiz: "Вы хотите удалить этот тест?", alert_success: "🎉 Тест успешно создан!", 
                 card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
+                btn_create_group: "Создать новую группу ➕",
                 premium_status_title: "💎 Ваш Статус", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
                 modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
                 copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
@@ -326,7 +354,7 @@
                 tariff_daily_title: "⚡ Суточный Безлимит", tariff_daily_desc: "24 часа абсолютно безлимитного создания тестов",
                 tariff_weekly_title: "📅 Недельный Безлимит", tariff_weekly_desc: "7 дней безлимитного использования системы",
                 tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
-                tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "30 дней группового режима (расширенный)",
+                tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "Групповой режим, статистика студентов и расширенный 30-дневный доступ",
                 explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
                 alert_limit_over: "⚠️ Бесплатный лимит исчерпан! Пожалуйста, выберите тариф для продолжения.",
                 confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
@@ -334,16 +362,17 @@
             },
             en: {
                 nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
-                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
+                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", tab_groups: "👥 Groups",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
                 select_lang: "Select system language:", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
-                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
+                msg_no_cards: "Flashcard list is empty.", msg_no_groups: "You don't have any groups created yet.", score_text: "Last score", q_count: "Questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
                 alert_del_quiz: "Do you want to delete this quiz?", alert_success: "🎉 Quiz successfully created!", 
                 card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
+                btn_create_group: "Create New Group ➕",
                 premium_status_title: "💎 Your Status", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
                 modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
                 copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
@@ -353,7 +382,7 @@
                 tariff_daily_title: "⚡ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
                 tariff_weekly_title: "📅 Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
                 tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
-                tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
+                tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "Group mode, student analytics, and expanded 30-day plan",
                 explanation_label: "💡 Explanation:", active_users_suffix: "active users",
                 alert_limit_over: "⚠️ Free limit expired! Please choose one of the plans to continue.",
                 confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
@@ -365,7 +394,7 @@
             daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "7 000 so'm" },
             weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "30 000 so'm" },
             monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "60 000 so'm" },
-            teachers: { uz: "O'qituvchilar Uchun", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "90 000 so'm" }
+            teachers: { uz: "O'qituvchilar Uchun (30 kun)", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "90 000 so'm" }
         };
 
         function showAppAlert(icon, text, callback = null) {
@@ -418,7 +447,6 @@
             });
         }
 
-        // FIXED: Dual-kanal orqali xabar yuborish (2-MUAMMO TO'LIQ YECHIMI)
         function submitPaymentIntent() {
             const tariff = tariffDetails[selectedTariffKey];
             const paymentData = {
@@ -430,8 +458,6 @@
             
             showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
                 closePaymentModal();
-                
-                // 1-Kanal: To'g'ridan-to'g'ri FastAPI Endpointiga yuborish (Xavfsiz va tezkor)
                 try {
                     await fetch(`${BASE_URL}/api/payment-intent`, {
                         method: 'POST',
@@ -440,17 +466,14 @@
                     });
                 } catch(e) { console.log("API Fetch xatosi:", e); }
                 
-                // 2-Kanal: Agar WebApp klaviatura orqali ochilgan bo'lsa chatga ham tashlaydi
                 try {
                     tg.sendData(JSON.stringify(paymentData));
-                } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
+                } catch(e) { console.log("tg.sendData ishlamadi:", e); }
                 
-                // Bot chatiga qaytarish
                 setTimeout(() => { tg.close(); }, 200);
             });
         }
 
-        // FIXED: Premium bo'limining barcha tariflari tillarga qarab to'liq tarjima qilinadigan bo'ldi (3-MUAMMO YECHIMI)
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.getAttribute('data-lang');
@@ -461,7 +484,6 @@
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
             });
             
-            // Premium Premium Dynamic Card Translation
             const dailyCard = document.getElementById('card-daily');
             if(dailyCard) {
                 dailyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_daily_title;
@@ -489,6 +511,7 @@
         }
 
         function switchScreen(screenName) {
+            currentScreen = screenName;
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
             document.getElementById(`${screenName}-screen`).classList.add('active');
@@ -530,12 +553,15 @@
             } else if(tabName === 'cards') {
                 document.getElementById('tab-cards').classList.add('active');
                 loadFlashcards();
+            } else if(tabName === 'groups') {
+                document.getElementById('tab-groups').classList.add('active');
+                loadTeacherGroups();
             }
         }
 
         function fileSelected(input) {
             if(input.files && input.files.length > 0) {
-                document.getElementById('upload-text').innerText = "Selected: " + input.files[0].name;
+                document.getElementById('upload-text').innerText = "Tanlandi: " + input.files[0].name;
             }
         }
 
@@ -600,6 +626,8 @@
                     applyLocalization();
                 }
 
+                if (currentScreen !== 'library' || currentTab !== 'personal') return;
+
                 const container = document.getElementById('lib-content-area');
                 container.innerHTML = `<div id="quiz-list"></div>`;
                 const listDiv = document.getElementById('quiz-list');
@@ -638,7 +666,7 @@
 
         async function loadPublicQuizzes() {
             const container = document.getElementById('lib-content-area');
-            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Loading...</div>`;
+            container.innerHTML = `<div style="text-align: center; color: var(--accent-blue); padding: 20px;">⏳ Yuklanmoqda...</div>`;
             try {
                 const response = await fetch(`${BASE_URL}/api/public-quizzes?_t=${Date.now()}`);
                 const data = await response.json();
@@ -660,6 +688,59 @@
                     container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_public}</div>`;
                 }
             } catch(e) { container.innerHTML = "Error."; }
+        }
+
+        async function loadTeacherGroups() {
+            const container = document.getElementById('lib-content-area');
+            container.innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="group-title-input" class="input-card" placeholder="Guruh nomi (Masalan: 9-A Sinf Informatika)...">
+                    <button class="submit-btn" style="background: var(--accent-purple);" onclick="createNewGroup()">${langPack[currentLang].btn_create_group}</button>
+                </div>
+                <div id="groups-list-div"></div>
+            `;
+            const listDiv = document.getElementById('groups-list-div');
+            try {
+                const res = await fetch(`${BASE_URL}/api/my-groups?user_id=${userId}&_t=${Date.now()}`);
+                const data = await res.json();
+                if(data && data.groups && data.groups.length > 0) {
+                    data.groups.forEach(g => {
+                        const card = document.createElement('div');
+                        card.className = 'group-card';
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div class="card-title" style="color: var(--accent-purple);">${g.title}</div>
+                                <span style="font-size: 12px; background: rgba(155, 81, 224, 0.2); color: var(--accent-purple); padding: 4px 8px; border-radius: 8px;">Kod: ${g.code}</span>
+                            </div>
+                            <div class="card-footer"><span>👥 O'quvchilar: ${g.students_count || 0} ta</span><span>📚 Testlar: ${g.quizzes_count || 0} ta</span></div>
+                        `;
+                        listDiv.appendChild(card);
+                    });
+                } else {
+                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 30px;">${langPack[currentLang].msg_no_groups}</div>`;
+                }
+            } catch(e){
+                listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 30px;">${langPack[currentLang].msg_no_groups}</div>`;
+            }
+        }
+
+        async function createNewGroup() {
+            const titleInput = document.getElementById('group-title-input');
+            const title = titleInput ? titleInput.value.trim() : "";
+            if(!title) return;
+            try {
+                const res = await fetch(`${BASE_URL}/api/create-group`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, title: title })
+                });
+                const data = await res.json();
+                if(data.status === 'ok') {
+                    showAppAlert("👥", "Guruh muvaffaqiyatli yaratildi!", () => loadTeacherGroups());
+                } else {
+                    showAppAlert("⚠️", data.message || "Xatolik yuz berdi");
+                }
+            } catch(e) { showAppAlert("❌", "Tizim xatosi"); }
         }
 
         async function togglePublic(quizId, newState) {
@@ -828,7 +909,11 @@
         window.onload = function() {
             applyLocalization();
             loadQuizzes();
-            setInterval(loadQuizzes, 20000); 
+            setInterval(() => {
+                if(currentScreen === 'library' && currentTab === 'personal') {
+                    loadQuizzes();
+                }
+            }, 25000); 
         };
     </script>
 </body>
