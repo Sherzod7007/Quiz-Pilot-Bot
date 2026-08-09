@@ -329,33 +329,6 @@
         .app-dialog-btn.primary { background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: #fff; border-color: #00d2ff; }
         .app-dialog-btn.secondary { background: rgba(255,255,255,0.1); color: var(--text-hint); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-        /* ================= TEACHER GROUP MODE ================= */
-        .teacher-panel { margin-top: 8px; }
-        .teacher-head { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:14px; }
-        .teacher-head h2 { margin:0; font-size:20px; }
-        .teacher-badge { background:rgba(255,215,0,.14); border:1px solid rgba(255,215,0,.4); color:#ffd700; padding:6px 10px; border-radius:18px; font-size:12px; font-weight:700; }
-        .teacher-section-title { font-size:15px; font-weight:700; margin:18px 0 10px; }
-        .teacher-session-card { background:rgba(255,255,255,.07); border:1px solid var(--aero-border); border-radius:12px; padding:14px; margin-bottom:10px; }
-        .teacher-session-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
-        .teacher-session-title { font-weight:700; font-size:15px; }
-        .teacher-status { font-size:11px; padding:4px 8px; border-radius:12px; background:rgba(0,210,255,.12); color:#66dcff; border:1px solid rgba(0,210,255,.3); white-space:nowrap; }
-        .teacher-meta { color:var(--text-hint); font-size:12px; margin:7px 0; line-height:1.5; }
-        .teacher-actions { display:flex; gap:7px; flex-wrap:wrap; margin-top:9px; }
-        .teacher-action-btn { border:1px solid var(--aero-border); background:rgba(255,255,255,.1); color:#fff; padding:8px 10px; border-radius:8px; font-size:12px; cursor:pointer; }
-        .teacher-action-btn.primary { background:linear-gradient(180deg,#0099ff,#005a9e); border-color:#00d2ff; }
-        .teacher-action-btn.danger { border-color:rgba(232,17,35,.5); color:#ff8790; }
-        .teacher-quiz-card { background:rgba(255,255,255,.05); border:1px solid var(--aero-border); border-radius:11px; padding:12px; margin-bottom:9px; }
-        .teacher-empty { color:var(--text-hint); text-align:center; padding:24px 10px; font-size:13px; }
-        .teacher-link-box { background:rgba(0,0,0,.35); border:1px dashed #00d2ff; border-radius:8px; padding:9px; font-size:11px; word-break:break-all; margin-top:8px; color:#d9f6ff; }
-        .teacher-ranking { width:100%; border-collapse:collapse; font-size:11px; margin-top:8px; }
-        .teacher-ranking th,.teacher-ranking td { border-bottom:1px solid rgba(255,255,255,.12); padding:8px 4px; text-align:left; }
-        .teacher-ranking th { color:#9edfff; }
-        .teacher-rank { font-weight:800; color:#ffd700; }
-        .teacher-result-title { margin:0 0 8px; font-size:16px; }
-        .teacher-export-row { display:flex; gap:7px; flex-wrap:wrap; margin:10px 0 14px; }
-        .teacher-export-row button { flex:1; min-width:82px; }
-        #teacher-session-timer { color:#ffd700; font-weight:700; font-size:12px; }
     </style>
 </head>
 <body>
@@ -383,7 +356,6 @@
             <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
             <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
             <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
-            <button id="tab-teacher" class="tab" style="display:none;" onclick="switchLibTab('teacher')" data-lang="tab_teacher">👨‍🏫 O'qituvchi</button>
         </div>
         <div id="lib-content-area"><div id="quiz-list"></div></div>
     </div>
@@ -406,12 +378,23 @@
             <div class="p-status-box">
                 <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
                 <p id="p-status-val">Normal user</p>
-                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> / 3 <span data-lang="limit_unit">ta</span></p>
+                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> / 1 <span data-lang="limit_unit">ta</span></p>
             </div>
 
             <div class="p-pro-header">
                 <h3 data-lang="premium_pro_title">Quiz Pilot PRO 👑</h3>
                 <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
+            </div>
+
+            <div id="teacher-panel" class="p-status-box" style="display:none; text-align:left;">
+                <h2 style="justify-content:center;">👨‍🏫 <span data-lang="teacher_panel_title">O'qituvchi rejimi</span></h2>
+                <p data-lang="teacher_panel_desc" style="text-align:center; margin-bottom:12px;">Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.</p>
+                <select id="teacher-quiz-select" class="input-card" style="width:100%; box-sizing:border-box;"></select>
+                <select id="teacher-duration" class="input-card" style="width:100%; box-sizing:border-box;">
+                    <option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option>
+                </select>
+                <button class="submit-btn" onclick="createTeacherSession()" data-lang="teacher_create_btn">🚀 Guruh testini boshlash</button>
+                <div id="teacher-sessions-list" style="margin-top:12px;"></div>
             </div>
 
             <div class="tariff-card" id="card-daily">
@@ -420,7 +403,7 @@
                     <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">7 000 so'm</span>
+                    <span class="tariff-price">10 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('daily')">Faollashtirish</button>
                 </div>
             </div>
@@ -431,7 +414,7 @@
                     <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">30 000 so'm</span>
+                    <span class="tariff-price">35 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('weekly')">Faollashtirish</button>
                 </div>
             </div>
@@ -442,7 +425,7 @@
                     <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">60 000 so'm</span>
+                    <span class="tariff-price">65 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('monthly')">Faollashtirish</button>
                 </div>
             </div>
@@ -453,7 +436,7 @@
                     <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">90 000 so'm</span>
+                    <span class="tariff-price">95 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
                 </div>
             </div>
@@ -487,7 +470,6 @@
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
-            <span id="teacher-session-timer"></span>
             <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
         </div>
         <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
@@ -524,17 +506,12 @@
         let correctAnswersCount = 0;
         let wrongAnswersCount = 0;
         let selectedTariffKey = "";
-        let isTeacherUser = false;
-        let teacherSessionToken = "";
-        let teacherSessionMode = false;
-        let teacherSessionStartedAt = 0;
-        let teacherSessionExpiresAt = 0;
-        let teacherTimerInterval = null;
+        let currentTeacherSessionId = null;
 
         const langPack = {
             uz: {
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
-                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar", tab_teacher: "👨‍🏫 O'qituvchi", teacher_title: "👨‍🏫 O'qituvchi rejimi", teacher_desc: "Guruhga test yuboring, natijalarni ko'ring va reytingni boshqaring.", teacher_start: "🚀 Guruh testini boshlash", teacher_sessions: "📋 Test sessiyalari", teacher_results: "📊 Natijalar", teacher_close: "⛔ Tugatish", teacher_copy: "🔗 Havolani nusxalash", teacher_reuse: "🔄 Qayta ishlatish", teacher_no_sessions: "Hali guruh sessiyalari yo'q.", teacher_no_quizzes: "Avval test yarating.", teacher_participants: "qatnashchi", teacher_active: "Faol", teacher_closed: "Yopilgan", teacher_expired: "Vaqti tugagan", teacher_duration: "Vaqt (daq.)", teacher_link: "O'quvchilarga yuboriladigan havola:", teacher_export: "Eksport", teacher_xlsx: "Excel", teacher_pdf: "PDF", teacher_docx: "Word", teacher_rank: "Reyting", teacher_name: "O'quvchi", teacher_score: "Natija", teacher_start_prompt: "Test uchun vaqtni daqiqada kiriting (0 = qo'lda tugatish):", teacher_created: "Guruh testi yaratildi!", teacher_link_copied: "Havola nusxalandi!", teacher_need_plan: "Bu bo'lim faqat O'qituvchi tarifida mavjud.", teacher_no_results: "Hali natija yo'q.", teacher_time_up: "⏰ Test vaqti tugadi!", teacher_entered: "Guruh testi",
+                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
@@ -558,11 +535,12 @@
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
                 alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
                 confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
-                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?"
+                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
+                teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️ Ishlash"
             },
             ru: {
                 nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
-                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", tab_teacher: "👨‍🏫 Учитель", teacher_title: "👨‍🏫 Режим учителя", teacher_desc: "Отправляйте тест группе, смотрите результаты и управляйте рейтингом.", teacher_start: "🚀 Запустить тест для группы", teacher_sessions: "📋 Сессии тестов", teacher_results: "📊 Результаты", teacher_close: "⛔ Завершить", teacher_copy: "🔗 Копировать ссылку", teacher_reuse: "🔄 Использовать снова", teacher_no_sessions: "Групповых сессий пока нет.", teacher_no_quizzes: "Сначала создайте тест.", teacher_participants: "участников", teacher_active: "Активна", teacher_closed: "Закрыта", teacher_expired: "Время истекло", teacher_duration: "Время (мин.)", teacher_link: "Ссылка для учеников:", teacher_export: "Экспорт", teacher_xlsx: "Excel", teacher_pdf: "PDF", teacher_docx: "Word", teacher_rank: "Рейтинг", teacher_name: "Ученик", teacher_score: "Результат", teacher_start_prompt: "Введите время теста в минутах (0 = завершить вручную):", teacher_created: "Групповой тест создан!", teacher_link_copied: "Ссылка скопирована!", teacher_need_plan: "Этот раздел доступен только по тарифу Для Учителей.", teacher_no_results: "Результатов пока нет.", teacher_time_up: "⏰ Время теста истекло!", teacher_entered: "Групповой тест",
+                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
@@ -585,11 +563,12 @@
                 explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
                 alert_limit_over: "⚠️ Бесплатный лимит исчерпан! Пожалуйста, выберите тариф для продолжения.",
                 confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
-                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?"
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
+                teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест, создайте групповую сессию и отправьте ссылку ученикам.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️ Пройти"
             },
             en: {
                 nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
-                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", tab_teacher: "👨‍🏫 Teacher", teacher_title: "👨‍🏫 Teacher mode", teacher_desc: "Send quizzes to a group, view results and manage rankings.", teacher_start: "🚀 Start group quiz", teacher_sessions: "📋 Quiz sessions", teacher_results: "📊 Results", teacher_close: "⛔ End", teacher_copy: "🔗 Copy link", teacher_reuse: "🔄 Reuse", teacher_no_sessions: "No group sessions yet.", teacher_no_quizzes: "Create a quiz first.", teacher_participants: "participants", teacher_active: "Active", teacher_closed: "Closed", teacher_expired: "Expired", teacher_duration: "Time (min.)", teacher_link: "Student link:", teacher_export: "Export", teacher_xlsx: "Excel", teacher_pdf: "PDF", teacher_docx: "Word", teacher_rank: "Ranking", teacher_name: "Student", teacher_score: "Score", teacher_start_prompt: "Enter test duration in minutes (0 = end manually):", teacher_created: "Group quiz created!", teacher_link_copied: "Link copied!", teacher_need_plan: "This section is available only with the Teacher plan.", teacher_no_results: "No results yet.", teacher_time_up: "⏰ Test time is over!", teacher_entered: "Group quiz",
+                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
@@ -612,15 +591,16 @@
                 explanation_label: "💡 Explanation:", active_users_suffix: "active users",
                 alert_limit_over: "⚠️ Free limit expired! Please choose one of the plans to continue.",
                 confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
-                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?"
+                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
+                teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz, start a group session and send the link to students.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️ Take quiz"
             }
         };
 
         const tariffDetails = {
-            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "7 000 so'm" },
-            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "30 000 so'm" },
-            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "60 000 so'm" },
-            teachers: { uz: "O'qituvchilar Uchun", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "90 000 so'm" }
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "10 000 so'm" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "35 000 so'm" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "65 000 so'm" },
+            teachers: { uz: "O'qituvchilar Uchun (30 kun)", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "95 000 so'm" }
         };
 
         function showAppAlert(icon, text, callback = null) {
@@ -678,7 +658,8 @@
             const paymentData = {
                 action: "payment_intent",
                 user_id: userId,
-                tariff_name: tariff['uz'], 
+                tariff_key: selectedTariffKey,
+                tariff_name: tariff[currentLang] || tariff['uz'],
                 tariff_price: tariff.price
             };
             
@@ -744,7 +725,7 @@
             document.getElementById(`nav-${screenName}`).classList.add('active');
             applyLocalization();
             if(screenName === 'library') loadQuizzes();
-            if(screenName === 'premium') loadPremiumStatus();
+            if(screenName === 'premium') { loadPremiumStatus(); loadTeacherPanel(); }
         }
 
         async function loadPremiumStatus() {
@@ -754,6 +735,7 @@
                 if(data && data.status === 'ok') {
                     document.getElementById('p-status-val').innerText = data.user_status || "Normal user";
                     document.getElementById('p-limit-val').innerText = data.free_used !== undefined ? data.free_used : "0";
+                    const tp=document.getElementById('teacher-panel'); if(tp) tp.style.display=data.is_teacher ? 'block' : 'none';
                 }
             } catch(e){}
         }
@@ -764,7 +746,8 @@
             try {
                 await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
             } catch(e){}
-            if(currentTab === 'personal' || currentTab === 'public' || currentTab === 'teacher') switchLibTab(currentTab);
+            loadPremiumStatus();
+            if(currentTab === 'personal' || currentTab === 'public') switchLibTab(currentTab);
         }
 
         function switchLibTab(tabName) {
@@ -779,10 +762,6 @@
             } else if(tabName === 'cards') {
                 document.getElementById('tab-cards').classList.add('active');
                 loadFlashcards();
-            } else if(tabName === 'teacher') {
-                const teacherTab = document.getElementById('tab-teacher');
-                if(teacherTab) teacherTab.classList.add('active');
-                loadTeacherDashboard();
             }
         }
 
@@ -825,7 +804,7 @@
                         switchScreen('library');
                     });
                 } else {
-                    if (data.message && (data.message.includes("limit") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
+                    if (data.error_code === "free_limit" || data.message && (data.message.includes("limit") || data.message.includes("лимит") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
                         showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
                     } else {
                         showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik"));
@@ -843,11 +822,7 @@
                 const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
                 const data = await response.json();
                 
-                isTeacherUser = !!data.is_teacher;
-                 const teacherTab = document.getElementById('tab-teacher');
-                 if (teacherTab) teacherTab.style.display = isTeacherUser ? 'block' : 'none';
-
-                 let liveUsers = 16; 
+                let liveUsers = 16; 
                 if (data && data.total_users !== undefined) liveUsers = data.total_users;
                 const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
                 document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
@@ -855,10 +830,6 @@
                 if (data && data.user_lang) {
                     currentLang = data.user_lang;
                     applyLocalization();
-                }
-                if (currentTab === 'teacher') {
-                    await loadTeacherDashboard();
-                    return;
                 }
 
                 const container = document.getElementById('lib-content-area');
@@ -901,17 +872,18 @@
             const container = document.getElementById('lib-content-area');
             container.innerHTML = `<div style="text-align: center; color: #00d2ff; padding: 20px;">⏳ Loading...</div>`;
             try {
-                const response = await fetch(`${BASE_URL}/api/public-quizzes?_t=${Date.now()}`);
+                const response = await fetch(`${BASE_URL}/api/public-quizzes?user_id=${userId}&_t=${Date.now()}`);
                 const data = await response.json();
                 container.innerHTML = "";
                 if(data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
                     data.quizzes.forEach(quiz => {
                         const card = document.createElement('div');
                         card.className = 'quiz-card';
+                        const action = data.is_paid ? `<button class="btn-circle" onclick="playQuiz('${quiz.id}', true)">${langPack[currentLang].public_open}</button>` : `<button class="btn-circle" onclick="showPublicLocked()">🔒</button>`;
                         card.innerHTML = `
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
-                                <div class="action-group"><button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️ Play</button></div>
+                                <div class="action-group">${action}</div>
                             </div>
                             <div class="card-footer"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>🌍 Global</span></div>
                         `;
@@ -1003,177 +975,13 @@
             });
         }
 
-
-        // ================= TEACHER GROUP MODE =================
-        async function loadTeacherDashboard() {
-            const container = document.getElementById('lib-content-area');
-            container.innerHTML = `<div class="teacher-panel">
-                <div class="teacher-head"><h2>${langPack[currentLang].teacher_title}</h2><span class="teacher-badge">90 000 so'm / 30 kun</span></div>
-                <div class="teacher-session-card"><div style="font-size:13px;color:var(--text-hint);line-height:1.5;">${langPack[currentLang].teacher_desc}</div></div>
-                <div class="teacher-section-title">📝 ${langPack[currentLang].teacher_start}</div>
-                <div id="teacher-quiz-list"></div>
-                <div class="teacher-section-title">${langPack[currentLang].teacher_sessions}</div>
-                <div id="teacher-sessions-list"></div>
-            </div>`;
-            if (!isTeacherUser) {
-                document.getElementById('teacher-quiz-list').innerHTML = `<div class="teacher-empty">${langPack[currentLang].teacher_need_plan}</div>`;
-                return;
-            }
+        async function playQuiz(quizId, isPublic=false, sessionId=null) {
             try {
-                const qRes = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
-                const qData = await qRes.json();
-                const qBox = document.getElementById('teacher-quiz-list');
-                if (!qData.quizzes || !qData.quizzes.length) {
-                    qBox.innerHTML = `<div class="teacher-empty">${langPack[currentLang].teacher_no_quizzes}</div>`;
-                } else {
-                    qBox.innerHTML = qData.quizzes.map(q => `<div class="teacher-quiz-card">
-                        <div style="font-weight:700;">${escapeHtml(q.title)}</div>
-                        <div class="teacher-meta">${langPack[currentLang].q_count}: ${q.total}</div>
-                        <div class="teacher-actions">
-                            <button class="teacher-action-btn primary" onclick="createTeacherSession('${q.id}')">${langPack[currentLang].teacher_start}</button>
-                        </div>
-                    </div>`).join('');
-                }
-                await loadTeacherSessions();
-            } catch(e) {
-                document.getElementById('teacher-sessions-list').innerHTML = `<div class="teacher-empty">${langPack[currentLang].alert_system_err}</div>`;
-            }
-        }
-
-        function escapeHtml(value) {
-            return String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-        }
-
-        async function createTeacherSession(quizId) {
-            const raw = window.prompt(langPack[currentLang].teacher_start_prompt, '60');
-            if (raw === null) return;
-            const duration = Number.parseInt(raw, 10);
-            if (!Number.isInteger(duration) || duration < 0 || duration > 1440) {
-                showAppAlert('⚠️', '0 dan 1440 gacha bo‘lgan daqiqani kiriting.'); return;
-            }
-            try {
-                const res = await fetch(`${BASE_URL}/api/teacher/sessions`, {
-                    method:'POST', headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({teacher_id:userId, quiz_id:quizId, duration_minutes:duration})
-                });
-                const data = await res.json();
-                if (data.status !== 'ok') { showAppAlert('❌', data.detail || data.message || 'Xatolik'); return; }
-                showAppAlert('🚀', `${langPack[currentLang].teacher_created}\n\n${data.link}`, async () => {
-                    await copyTeacherLink(data.link, true);
-                    loadTeacherDashboard();
-                });
-            } catch(e) { showAppAlert('❌', langPack[currentLang].alert_system_err); }
-        }
-
-        async function loadTeacherSessions() {
-            const box = document.getElementById('teacher-sessions-list');
-            if (!box) return;
-            try {
-                const res = await fetch(`${BASE_URL}/api/teacher/sessions?teacher_id=${userId}&_t=${Date.now()}`);
-                const data = await res.json();
-                if (data.status !== 'ok' || !data.sessions.length) {
-                    box.innerHTML = `<div class="teacher-empty">${langPack[currentLang].teacher_no_sessions}</div>`; return;
-                }
-                box.innerHTML = data.sessions.map(s => {
-                    const statusText = s.status === 'active' ? langPack[currentLang].teacher_active : (s.status === 'closed' ? langPack[currentLang].teacher_closed : langPack[currentLang].teacher_expired);
-                    const link = `${window.location.origin}/?teacher_test=${s.token}`;
-                    const canClose = s.status === 'active';
-                    return `<div class="teacher-session-card">
-                        <div class="teacher-session-top"><div class="teacher-session-title">${escapeHtml(s.title)}</div><span class="teacher-status">${statusText}</span></div>
-                        <div class="teacher-meta">👥 ${s.participant_count} ${langPack[currentLang].teacher_participants} · ${langPack[currentLang].teacher_duration}: ${s.duration_minutes || '∞'} · ID: ${s.id.replace('ts_','')}</div>
-                        <div class="teacher-link-box">${escapeHtml(link)}</div>
-                        <div class="teacher-actions">
-                            <button class="teacher-action-btn primary" onclick="loadTeacherResults('${s.id}')">${langPack[currentLang].teacher_results}</button>
-                            <button class="teacher-action-btn" onclick="copyTeacherLink('${link}')">${langPack[currentLang].teacher_copy}</button>
-                            ${canClose ? `<button class="teacher-action-btn danger" onclick="closeTeacherSession('${s.id}')">${langPack[currentLang].teacher_close}</button>` : ''}
-                        </div>
-                    </div>`;
-                }).join('');
-            } catch(e) { box.innerHTML = `<div class="teacher-empty">${langPack[currentLang].alert_system_err}</div>`; }
-        }
-
-        async function closeTeacherSession(sessionId) {
-            showAppConfirm('⛔', langPack[currentLang].teacher_close + '?', async () => {
-                try {
-                    const res = await fetch(`${BASE_URL}/api/teacher/sessions/close`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({teacher_id:userId,session_id:sessionId})});
-                    const data=await res.json();
-                    if(data.status==='ok') loadTeacherSessions(); else showAppAlert('❌',data.detail||'Xatolik');
-                } catch(e) { showAppAlert('❌',langPack[currentLang].alert_system_err); }
-            });
-        }
-
-        async function copyTeacherLink(link, closeAfter=false) {
-            try { await navigator.clipboard.writeText(link); } catch(e) {
-                const area=document.createElement('textarea'); area.value=link; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
-            }
-            if (!closeAfter) showAppAlert('🔗', langPack[currentLang].teacher_link_copied);
-        }
-
-        async function loadTeacherResults(sessionId) {
-            const container=document.getElementById('lib-content-area');
-            container.innerHTML=`<div class="teacher-panel"><div class="teacher-head"><h2 class="teacher-result-title">${langPack[currentLang].teacher_results}</h2><button class="teacher-action-btn" onclick="loadTeacherDashboard()">↩️</button></div><div id="teacher-results-box" class="teacher-session-card">⏳ ...</div></div>`;
-            try {
-                const res=await fetch(`${BASE_URL}/api/teacher/session-results?teacher_id=${userId}&session_id=${sessionId}&_t=${Date.now()}`); const data=await res.json();
-                if(data.status!=='ok'){document.getElementById('teacher-results-box').innerText=data.detail||'Xatolik';return;}
-                const box=document.getElementById('teacher-results-box');
-                let html=`<h3 style="margin:0 0 4px;">${escapeHtml(data.title)}</h3>`;
-                html+=`<div class="teacher-export-row"><button class="teacher-action-btn" onclick="downloadTeacherExport('${sessionId}','xlsx')">📊 ${langPack[currentLang].teacher_xlsx}</button><button class="teacher-action-btn" onclick="downloadTeacherExport('${sessionId}','pdf')">📄 ${langPack[currentLang].teacher_pdf}</button><button class="teacher-action-btn" onclick="downloadTeacherExport('${sessionId}','docx')">📝 ${langPack[currentLang].teacher_docx}</button></div>`;
-                if(!data.results.length){html+=`<div class="teacher-empty">${langPack[currentLang].teacher_no_results}</div>`;} else {
-                    html+=`<table class="teacher-ranking"><thead><tr><th>#</th><th>${langPack[currentLang].teacher_name}</th><th>${langPack[currentLang].teacher_score}</th><th>%</th></tr></thead><tbody>`;
-                    data.results.forEach((r,i)=>{const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);html+=`<tr><td class="teacher-rank">${medal}</td><td>${escapeHtml(r.participant_name)}${r.username?`<br><span style="color:var(--text-hint);font-size:10px;">@${escapeHtml(r.username.replace(/^@/,''))}</span>`:''}</td><td>${r.correct_count}/${r.total}</td><td><b>${r.percent}%</b></td></tr>`});
-                    html+='</tbody></table>';
-                }
-                box.innerHTML=html;
-            } catch(e){document.getElementById('teacher-results-box').innerText=langPack[currentLang].alert_system_err;}
-        }
-
-        function downloadTeacherExport(sessionId, format) {
-            window.open(`${BASE_URL}/api/teacher/export?teacher_id=${userId}&session_id=${encodeURIComponent(sessionId)}&format=${format}`,'_blank');
-        }
-
-        function initTeacherSessionMode() {
-            const params=new URLSearchParams(window.location.search); const token=params.get('teacher_test');
-            if(!token) return false;
-            teacherSessionMode=true; teacherSessionToken=token;
-            document.querySelectorAll('.screen,.bottom-nav').forEach(el=>el.style.display='none');
-            document.getElementById('game-screen').style.display='block';
-            loadTeacherSession(token); return true;
-        }
-
-        async function loadTeacherSession(token) {
-            try {
-                const response=await fetch(`${BASE_URL}/api/teacher/session/${encodeURIComponent(token)}?_t=${Date.now()}`); const data=await response.json();
-                if(response.status!==200 || data.status!=='ok') throw new Error(data.detail||'Test topilmadi');
-                currentQuizId=data.session_id; currentQuizQuestions=data.quiz_json.quizzes||[]; currentQuestionIdx=0; correctAnswersCount=0; wrongAnswersCount=0;
-                teacherSessionStartedAt=Math.floor(Date.now()/1000); teacherSessionExpiresAt=data.expires_at||0;
-                document.getElementById('game-title').innerText=`${data.title}`;
-                document.getElementById('teacher-session-timer').style.display='inline';
-                startTeacherTimer(); showQuestion();
-            } catch(e) { document.getElementById('game-screen').style.display='none'; showAppAlert('❌',e.message||'Testni yuklab bo‘lmadi.'); }
-        }
-
-        function startTeacherTimer() {
-            if(teacherTimerInterval) clearInterval(teacherTimerInterval);
-            const el=document.getElementById('teacher-session-timer');
-            function tick(){
-                if(!teacherSessionMode){el.innerText='';return;}
-                if(!teacherSessionExpiresAt){el.innerText='♾️';return;}
-                const left=Math.max(0,teacherSessionExpiresAt-Math.floor(Date.now()/1000));
-                const m=Math.floor(left/60), sec=left%60; el.innerText=`⏱ ${m}:${String(sec).padStart(2,'0')}`;
-                if(left<=0){clearInterval(teacherTimerInterval); showAppAlert('⏰',langPack[currentLang].teacher_time_up,()=>finishQuiz(true));}
-            }
-            tick(); teacherTimerInterval=setInterval(tick,1000);
-        }
-
-        async function submitTeacherResult() {
-            const participant=tg.initDataUnsafe?.user||{};
-            const payload={session_token:teacherSessionToken,participant_id:participant.id||userId,participant_name:participant.first_name||'Ishtirokchi',username:participant.username||'',correct_count:correctAnswersCount,total:currentQuizQuestions.length,started_at:teacherSessionStartedAt};
-            const res=await fetch(`${BASE_URL}/api/teacher/session-result`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); return await res.json();
-        }
-
-        async function playQuiz(quizId) {
-            try {
-                const response = await fetch(BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now());
+                let url;
+                if (sessionId) url = `${BASE_URL}/api/quiz-detail?quiz_id=${quizId}&_t=${Date.now()}`;
+                else if (isPublic) url = `${BASE_URL}/api/public-quiz-detail?quiz_id=${quizId}&user_id=${userId}&_t=${Date.now()}`;
+                else url = BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now();
+                const response = await fetch(url);
                 const data = await response.json();
                 if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
                     currentQuizId = quizId;
@@ -1191,7 +999,7 @@
             }
             isAnswered = false;
             const q = currentQuizQuestions[currentQuestionIdx];
-            document.getElementById('game-progress').innerText = `Question: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
+            document.getElementById('game-progress').innerText = `${currentLang === 'ru' ? 'Вопрос' : currentLang === 'en' ? 'Question' : 'Savol'}: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
             document.getElementById('question-text').innerText = q.question;
             
             const container = document.getElementById('options-container');
@@ -1236,46 +1044,124 @@
             currentQuestionIdx++; showQuestion();
         }
 
-        async function finishQuiz(timeUp=false) {
+        async function finishQuiz() {
             const total = currentQuizQuestions.length;
-            const scorePercent = total ? Math.round((correctAnswersCount / total) * 100) : 0;
-            if (teacherSessionMode) {
-                try {
-                    const data = await submitTeacherResult();
-                    if (data && data.status === 'ok') {
-                        showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
-                    } else {
-                        showAppAlert("❌", data.detail || "Natijani saqlab bo'lmadi.");
-                    }
-                } catch(e) { showAppAlert("❌", langPack[currentLang].alert_system_err); }
-                return;
-            }
+            const scorePercent = Math.round((correctAnswersCount / total) * 100);
             try {
-                await fetch(BASE_URL + '/api/update-progress', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({quiz_id:currentQuizId,user_id:userId,correct_count:correctAnswersCount,percent:scorePercent}) });
-            } catch(e) {}
+                if (currentTeacherSessionId) {
+                    const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
+                    await fetch(BASE_URL + '/api/teacher-submit', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: currentTeacherSessionId, user_id: userId, first_name: u.first_name || 'Telegram User', username: u.username || '', score: correctAnswersCount, total: total, percent: scorePercent })
+                    });
+                } else {
+                    await fetch(BASE_URL + '/api/update-progress', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
+                    });
+                }
+            } catch (e) {}
+            currentTeacherSessionId = null;
             showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
         }
 
         function closeGame() {
             document.getElementById('game-screen').style.display = 'none';
-            if (teacherTimerInterval) clearInterval(teacherTimerInterval);
-            if (teacherSessionMode) {
-                teacherSessionMode=false;
-                teacherSessionToken='';
-                teacherSessionExpiresAt=0;
-                document.querySelectorAll('.screen,.bottom-nav').forEach(el=>el.style.display='');
-                switchScreen('library');
-                return;
-            }
             loadQuizzes();
+        }
+
+        function showPublicLocked() {
+            showAppAlert("🔒", langPack[currentLang].public_locked, () => switchScreen('premium'));
+        }
+
+        async function loadTeacherPanel() {
+            try {
+                const statusRes = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
+                const status = await statusRes.json();
+                const panel = document.getElementById('teacher-panel');
+                if (!panel) return;
+                panel.style.display = status.is_teacher ? 'block' : 'none';
+                if (!status.is_teacher) return;
+                const qRes = await fetch(`${BASE_URL}/api/teacher-quizzes?user_id=${userId}`);
+                const qData = await qRes.json();
+                const select = document.getElementById('teacher-quiz-select');
+                select.innerHTML = '';
+                if (!qData.quizzes || !qData.quizzes.length) {
+                    select.innerHTML = `<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
+                } else {
+                    qData.quizzes.forEach(q => { const o=document.createElement('option'); o.value=q.id; o.textContent=`${q.title} (${q.total})`; select.appendChild(o); });
+                }
+                loadTeacherSessions();
+            } catch(e) {}
+        }
+
+        async function createTeacherSession() {
+            const quizId=document.getElementById('teacher-quiz-select').value;
+            const duration=Number(document.getElementById('teacher-duration').value);
+            if(!quizId) { showAppAlert('⚠️', langPack[currentLang].teacher_no_quizzes); return; }
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher/create-session`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quizId,duration_minutes:duration})});
+                const data=await res.json();
+                if(data.status==='ok') {
+                    const link=`${BASE_URL}/?session=${data.code}`;
+                    try { await navigator.clipboard.writeText(link); } catch(e) {}
+                    showAppAlert('🚀', `${langPack[currentLang].teacher_created}\n\n${link}`);
+                    loadTeacherSessions();
+                } else showAppAlert('❌', data.detail || data.message || 'Error');
+            } catch(e){ showAppAlert('❌', langPack[currentLang].alert_system_err); }
+        }
+
+        async function loadTeacherSessions() {
+            const box=document.getElementById('teacher-sessions-list'); if(!box) return;
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`); const data=await res.json();
+                box.innerHTML='';
+                (data.sessions||[]).slice(0,8).forEach(s=>{
+                    const link=`${BASE_URL}/?session=${s.code}`;
+                    const div=document.createElement('div'); div.className='quiz-card'; div.style.padding='12px';
+                    div.innerHTML=`<div style="font-weight:bold;">${s.title}</div><div style="font-size:12px;color:var(--text-hint);margin:6px 0;">${s.code} · ${s.active?'🟢':'🔴'}</div><div class="action-group" style="flex-wrap:wrap;justify-content:flex-end;"><button class="activate-btn" onclick="copyTeacherLink('${link}')">${langPack[currentLang].teacher_copy}</button><button class="activate-btn" onclick="showTeacherResults('${s.id}')">${langPack[currentLang].teacher_results}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','xlsx')">${langPack[currentLang].teacher_excel}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','docx')">${langPack[currentLang].teacher_word}</button></div>`; box.appendChild(div);
+                });
+            } catch(e) {}
+        }
+
+        async function copyTeacherLink(link){ try{await navigator.clipboard.writeText(link);showAppAlert('🔗',link);}catch(e){showAppAlert('🔗',link);} }
+
+        function downloadTeacherExport(sessionId, format) {
+            const url=`${BASE_URL}/api/teacher-export?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&format=${format}`;
+            window.open(url, '_blank');
+        }
+
+        async function showTeacherResults(sessionId) {
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-session-results?session_id=${sessionId}&user_id=${userId}`); const data=await res.json();
+                if(data.status!=='ok'){showAppAlert('❌',data.detail||'Error');return;}
+                let text=`${data.session.quiz_title}\n\n`;
+                if(!data.participants.length) text+=langPack[currentLang].teacher_no_results;
+                data.participants.forEach((p,i)=>{text+=`${i+1}. ${p.first_name||'-'} — ${p.score}/${p.total} (${p.percent}%)\n`;});
+                text+=`\nExcel: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=xlsx\nPDF: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=pdf\nWord: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=docx`;
+                showAppAlert('📊',text);
+            }catch(e){showAppAlert('❌',langPack[currentLang].alert_system_err);}
+        }
+
+        async function openTeacherSessionFromUrl() {
+            const code=new URLSearchParams(window.location.search).get('session');
+            if(!code) return;
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-session?code=${encodeURIComponent(code)}&user_id=${userId}`); const data=await res.json();
+                if(data.status==='ok'){
+                    const go=confirm(`${data.title}\n\n${data.total} questions\n${langPack[currentLang].teacher_panel_title}`);
+                    if(go){ currentTeacherSessionId=data.session_id; await playQuiz(data.quiz_id,false,data.session_id); }
+                } else showAppAlert('🔒',data.detail||'Session error');
+            }catch(e){}
         }
 
         window.onload = function() {
             applyLocalization();
-            if (!initTeacherSessionMode()) {
-                loadQuizzes();
-                setInterval(loadQuizzes, 20000);
-            }
+            loadQuizzes();
+            loadPremiumStatus();
+            loadTeacherPanel();
+            openTeacherSessionFromUrl();
+            setInterval(loadQuizzes, 20000); 
         };
     </script>
 </body>
