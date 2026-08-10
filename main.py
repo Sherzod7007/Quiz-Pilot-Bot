@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import docx
+import asyncio
+import re
 from docx import Document
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +53,9 @@ GOOGLE_API_KEYS = (
 )
 current_key_index = 0
 key_lock = threading.Lock()
+# Bir vaqtning o'zida Gemini'ga juda ko'p so'rov yuborilib ketmasligi uchun.
+# 7 ta key mavjud bo'lgani sababli 7 ta parallel Gemini requestga ruxsat beriladi.
+gemini_semaphore = threading.Semaphore(max(1, min(7, len(GOOGLE_API_KEYS))))
 
 DOWNLOADS_DIR = "downloads"
 DB_PATH = (
@@ -675,7 +680,7 @@ async def create_quiz_web(
         current_now = int(time.time())
 
         thirty_days_sec = 30 * 24 * 3600
-        if current_now - created_at >= thirty_days_sec and free_used > 0:
+        if current_now - created_at >= thirty_days_sec:
             cursor_check.execute(
                 "UPDATE users SET free_used = 0, created_at = ? WHERE user_id = ?",
                 (current_now, user_id),
@@ -695,14 +700,31 @@ async def create_quiz_web(
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
-        # 30 kunlik bepul limit: faqat 1 ta. Pullik tariflar cheksiz.
-        if "PRO" not in current_status and free_used >= FREE_QUIZ_LIMIT:
-            conn_check.close()
-            return {
-                "status": "error",
-                "error_code": "free_limit",
-                "message": MESSAGES[user_lang]["quiz_limit_reached"],
-            }
+        # 30 kunlik bepul limit: faqat 1 ta.
+        # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
+        # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
+        # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
+        if "PRO" not in current_status:
+            cursor_check.execute(
+                "UPDATE users "
+                "SET free_used = COALESCE(free_used, 0) + 1 "
+                "WHERE user_id = ? AND COALESCE(free_used, 0) < ?",
+                (user_id, FREE_QUIZ_LIMIT),
+            )
+            if cursor_check.rowcount != 1:
+                conn_check.close()
+                return {
+                    "status": "error",
+                    "error_code": "free_limit",
+                    "message": MESSAGES[user_lang]["quiz_limit_reached"],
+                }
+            conn_check.commit()
+            free_slot_reserved = True
+        else:
+            free_slot_reserved = False
+    else:
+        free_slot_reserved = False
+
     conn_check.close()
 
     raw_text = ""
@@ -741,8 +763,25 @@ async def create_quiz_web(
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
-    quiz_json_raw = generate_quiz_from_gemini(raw_text)
+    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
+    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
+    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
+        if free_slot_reserved:
+            try:
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                cur_restore = conn_restore.cursor()
+                cur_restore.execute(
+                    "UPDATE users "
+                    "SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 "
+                    "THEN free_used - 1 ELSE 0 END "
+                    "WHERE user_id = ?",
+                    (user_id,),
+                )
+                conn_restore.commit()
+                conn_restore.close()
+            except Exception as e:
+                logging.error(f"Bepul limitni qaytarishda xato: {e}")
         return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
@@ -754,7 +793,7 @@ async def create_quiz_web(
                 "message": "AI savollar ro'yxatini bo'sh qaytardi.",
             }
 
-        quiz_id = f"q_{int(time.time())}"
+        quiz_id = f"q_{uuid.uuid4().hex}"
         final_title = (
             quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         )
@@ -777,13 +816,6 @@ async def create_quiz_web(
                 -1,
             ),
         )
-        # COALESCE BAZADAGI NULL XATOLIKLARINI OLINI OLADI:
-        # Pullik foydalanuvchining bepul limit hisoblagichi oshirilmaydi.
-        if "PRO" not in current_status:
-            cursor.execute(
-                "UPDATE users SET free_used = COALESCE(free_used, 0) + 1 WHERE user_id = ?",
-                (user_id,),
-            )
         conn.commit()
         conn.close()
 
@@ -814,41 +846,46 @@ CRITICAL RULES:
 
     total_keys = len(GOOGLE_API_KEYS)
 
+    # Har bir yangi test yaratish jarayoniga navbatdagi key beriladi.
+    # Lock parallel requestlar bir xil start_index olishini oldini oladi.
     with key_lock:
         start_index = current_key_index
         current_key_index = (current_key_index + 1) % total_keys
 
-    for i in range(total_keys):
-        key_idx = (start_index + i) % total_keys
-        api_key = GOOGLE_API_KEYS[key_idx].strip()
+    # 7 ta key bo'lsa, bir vaqtning o'zida maksimal 7 ta Gemini request.
+    # Qolgan requestlar navbat kutadi va serverni birdaniga bosib yubormaydi.
+    with gemini_semaphore:
+        for i in range(total_keys):
+            key_idx = (start_index + i) % total_keys
+            api_key = GOOGLE_API_KEYS[key_idx].strip()
 
-        if not api_key:
-            continue
+            if not api_key:
+                continue
 
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=extracted_text[:80000],
-                config=genai_types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=QuizResponse,
-                    temperature=0.2,
-                ),
-            )
-
-            if response and response.text:
-                logging.info(
-                    f"Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi: [{key_idx}]"
+            try:
+                client = genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=extracted_text[:80000],
+                    config=genai_types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=QuizResponse,
+                        temperature=0.2,
+                    ),
                 )
-                return response.text
 
-        except Exception as e:
-            logging.warning(
-                f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. Xatolik: {e}."
-                " Keyingi kalitga o'tilmoqda..."
-            )
+                if response and response.text:
+                    logging.info(
+                        f"Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi: [{key_idx}]"
+                    )
+                    return response.text
+
+            except Exception as e:
+                logging.warning(
+                    f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. "
+                    f"Xatolik: {e}. Keyingi kalitga o'tilmoqda..."
+                )
 
     logging.error("Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi.")
     return None
