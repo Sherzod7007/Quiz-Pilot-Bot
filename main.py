@@ -85,7 +85,9 @@ TARIFFS = {
         "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
     },
 }
-FREE_QUIZ_LIMIT = 1
+FREE_QUIZ_LIMIT = 3
+FREE_PUBLIC_LIMIT = 3
+FREE_FLASHCARD_LIMIT = 3
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
     return bool(status and "PRO" in status and premium_until and int(time.time()) <= premium_until)
@@ -128,7 +130,9 @@ MESSAGES = {
         "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
         "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
         "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
-        "quiz_limit_reached": "Sizning 30 kun ichida bepul 1 ta test yaratish limitingiz tugadi. Iltimos, Premium tarifga o'ting! 👑",
+        "quiz_limit_reached": "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+        "public_limit_reached": "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
+        "flashcard_limit_reached": "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
     "ru": {
@@ -148,7 +152,9 @@ MESSAGES = {
         "receipt_error": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Он будет проверен через админ-панель.",
         "payment_approved": "🎉 Поздравляем! Ваш платеж по тарифу {tariff_name} подтвержден. В приложении активирован PRO статус! 👑",
         "payment_rejected": "❌ Ваш чек об оплате был отклонен. Если вы считаете, что произошла ошибка, свяжитесь с администратором.",
-        "quiz_limit_reached": "Ваш лимит на создание 1 бесплатного теста в течение 30 дней исчерпан. Пожалуйста, перейдите на Premium тариф! 👑",
+        "quiz_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать тесты, перейдите на Premium тариф. 👑",
+        "public_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
+        "flashcard_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
     "en": {
@@ -168,7 +174,9 @@ MESSAGES = {
         "receipt_error": "⚠️ Your receipt was received, but there was an issue notifying the admin. It will be reviewed via the admin panel.",
         "payment_approved": "🎉 Congratulations! Your payment for the {tariff_name} plan has been confirmed. PRO status is now active! 👑",
         "payment_rejected": "❌ Your payment receipt was rejected. If you believe this is an error, please contact support.",
-        "quiz_limit_reached": "You have reached your free limit of 1 quiz within 30 days. Please upgrade to a Premium plan! 👑",
+        "quiz_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating quizzes. 👑",
+        "public_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
+        "flashcard_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
     }
 }
@@ -211,6 +219,8 @@ def init_db():
         status TEXT DEFAULT 'Oddiy foydalanuvchi',
         plan_key TEXT DEFAULT '',
         free_used INTEGER DEFAULT 0,
+        public_free_used INTEGER DEFAULT 0,
+        flashcard_free_used INTEGER DEFAULT 0,
         premium_until INTEGER DEFAULT 0)""")
 
     cursor.execute("PRAGMA table_info(users);")
@@ -231,6 +241,16 @@ def init_db():
             cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
         except Exception:
             pass
+    if "public_free_used" not in columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN public_free_used INTEGER DEFAULT 0;")
+        except Exception:
+            pass
+    if "flashcard_free_used" not in columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN flashcard_free_used INTEGER DEFAULT 0;")
+        except Exception:
+            pass
     if "plan_key" not in columns:
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN plan_key TEXT DEFAULT '';" )
@@ -239,6 +259,8 @@ def init_db():
 
     # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
     cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
+    cursor.execute("UPDATE users SET public_free_used = 0 WHERE public_free_used IS NULL;")
+    cursor.execute("UPDATE users SET flashcard_free_used = 0 WHERE flashcard_free_used IS NULL;")
     cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi' WHERE status IS NULL;")
     cursor.execute("UPDATE users SET premium_until = 0 WHERE premium_until IS NULL;")
     cursor.execute("UPDATE users SET plan_key = '' WHERE plan_key IS NULL;")
@@ -326,8 +348,8 @@ def add_user_to_db(user_id: int):
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, premium_until) "
-            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0)",
+            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until) "
+            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0)",
             (user_id, int(time.time())),
         )
         conn.commit()
@@ -612,7 +634,11 @@ def get_premium_status(user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT status, plan_key, free_used, premium_until, created_at FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute(
+        "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at "
+        "FROM users WHERE user_id = ?",
+        (user_id,),
+    )
     row = cursor.fetchone()
     if not row:
         conn.close()
@@ -622,6 +648,8 @@ def get_premium_status(user_id: int):
     plan_key = row["plan_key"] or get_plan_key(user_status)
     premium_until = row["premium_until"] or 0
     free_used = row["free_used"] if row["free_used"] is not None else 0
+    public_free_used = row["public_free_used"] if row["public_free_used"] is not None else 0
+    flashcard_free_used = row["flashcard_free_used"] if row["flashcard_free_used"] is not None else 0
     created_at = row["created_at"] or int(time.time())
     now = int(time.time())
 
@@ -634,9 +662,14 @@ def get_premium_status(user_id: int):
 
     # 30 kunlik bepul hisob davri pullik davrdan mustaqil ishlaydi.
     if now - created_at >= 30 * 24 * 3600 and not is_active_paid_status(user_status, premium_until):
-        cursor.execute("UPDATE users SET free_used = 0, created_at = ? WHERE user_id = ?", (now, user_id))
+        cursor.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (now, user_id),
+        )
         conn.commit()
         free_used = 0
+        public_free_used = 0
+        flashcard_free_used = 0
 
     is_paid = is_active_paid_status(user_status, premium_until)
     is_teacher = is_paid and plan_key == "teachers"
@@ -650,7 +683,19 @@ def get_premium_status(user_id: int):
         elif lang == "en": display_status += f" (Until: {readable_date})"
         else: display_status += f" (Gacha: {readable_date})"
     conn.close()
-    return {"status": "ok", "user_status": display_status, "free_used": free_used, "plan_key": plan_key, "is_paid": is_paid, "is_teacher": is_teacher}
+    return {
+        "status": "ok",
+        "user_status": display_status,
+        "free_used": free_used,
+        "public_free_used": public_free_used,
+        "flashcard_free_used": flashcard_free_used,
+        "public_remaining": max(0, FREE_PUBLIC_LIMIT - public_free_used),
+        "flashcard_remaining": max(0, FREE_FLASHCARD_LIMIT - flashcard_free_used),
+        "quiz_remaining": max(0, FREE_QUIZ_LIMIT - free_used),
+        "plan_key": plan_key,
+        "is_paid": is_paid,
+        "is_teacher": is_teacher,
+    }
 
 
 @app.post("/api/create-quiz-web")
@@ -682,7 +727,7 @@ async def create_quiz_web(
         thirty_days_sec = 30 * 24 * 3600
         if current_now - created_at >= thirty_days_sec:
             cursor_check.execute(
-                "UPDATE users SET free_used = 0, created_at = ? WHERE user_id = ?",
+                "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
                 (current_now, user_id),
             )
             conn_check.commit()
@@ -934,14 +979,47 @@ def get_public_quizzes(user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute(
+        "SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
+        (user_id,),
+    )
     u = cursor.fetchone()
+    now = int(time.time())
+    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_active_paid_status(u["status"] or "", u["premium_until"] or 0):
+        cursor.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (now, user_id),
+        )
+        conn.commit()
+        public_free_used = 0
+    else:
+        public_free_used = (u["public_free_used"] or 0) if u else 0
+
     is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
+    public_remaining = max(0, FREE_PUBLIC_LIMIT - public_free_used)
+
     cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
     rows = cursor.fetchall()
     conn.close()
-    quizzes = [{"id": r["id"], "title": r["title"], "total": r["total"], "created_at": r["created_at"], "locked": not is_paid} for r in rows]
-    return {"status": "ok", "quizzes": quizzes, "is_paid": is_paid}
+
+    quizzes = [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "total": r["total"],
+            "created_at": r["created_at"],
+            "locked": (not is_paid and public_remaining <= 0),
+        }
+        for r in rows
+    ]
+    return {
+        "status": "ok",
+        "quizzes": quizzes,
+        "is_paid": is_paid,
+        "public_free_used": public_free_used,
+        "public_remaining": public_remaining,
+        "public_limit": FREE_PUBLIC_LIMIT,
+    }
 
 
 @app.get("/api/public-quiz-detail")
@@ -950,22 +1028,56 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT status, premium_until FROM users WHERE user_id = ?", (user_id,))
+
+    cursor.execute(
+        "SELECT status, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
+        (user_id,),
+    )
     u = cursor.fetchone()
-    if not u or not is_active_paid_status(u["status"] or "", u["premium_until"] or 0):
-        conn.close()
-        lang = get_user_lang(user_id)
-        messages = {
-            "uz": "🔒 Ommaviy testlardan foydalanish faqat faol Premium yoki O'qituvchi tarifida mumkin.",
-            "ru": "🔒 Использование публичных тестов доступно только при активном тарифе Premium или Для Учителей.",
-            "en": "🔒 Public quizzes are available only with an active Premium or Teacher plan."
-        }
-        raise HTTPException(status_code=403, detail=messages.get(lang, messages["uz"]))
+
+    now = int(time.time())
+    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
+
+    # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
+    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
+        cursor.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (now, user_id),
+        )
+        conn.commit()
+        public_free_used = 0
+    else:
+        public_free_used = (u["public_free_used"] or 0) if u else 0
+
+    # Premium / Teacher: cheksiz.
+    if not is_paid:
+        cursor.execute(
+            "UPDATE users SET public_free_used = COALESCE(public_free_used, 0) + 1 "
+            "WHERE user_id = ? AND COALESCE(public_free_used, 0) < ?",
+            (user_id, FREE_PUBLIC_LIMIT),
+        )
+        if cursor.rowcount != 1:
+            conn.close()
+            lang = get_user_lang(user_id)
+            messages = {
+                "uz": MESSAGES["uz"]["public_limit_reached"],
+                "ru": MESSAGES["ru"]["public_limit_reached"],
+                "en": MESSAGES["en"]["public_limit_reached"],
+            }
+            return {
+                "status": "error",
+                "error_code": "public_limit",
+                "message": messages.get(lang, messages["uz"]),
+            }
+        conn.commit()
+
     cursor.execute("SELECT quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
+
     if not row or row["is_public"] != 1:
         raise HTTPException(status_code=404, detail="Test topilmadi")
+
     return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
 
 
@@ -1189,10 +1301,50 @@ def get_flashcards(user_id: int):
 
 @app.post("/api/create-flashcard")
 def create_flashcard(req: FlashcardCreateRequest):
-    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
+    add_user_to_db(req.user_id)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
+
+    cursor.execute(
+        "SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = ?",
+        (req.user_id,),
+    )
+    u = cursor.fetchone()
+    now = int(time.time())
+    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
+
+    # 30 kunlik bepul davr tugagan bo'lsa, uchala hisoblagichni reset qilamiz.
+    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
+        cursor.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (now, req.user_id),
+        )
+        conn.commit()
+
+    # Premium / Teacher: cheksiz.
+    if not is_paid:
+        cursor.execute(
+            "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
+            "WHERE user_id = ? AND COALESCE(flashcard_free_used, 0) < ?",
+            (req.user_id, FREE_FLASHCARD_LIMIT),
+        )
+        if cursor.rowcount != 1:
+            conn.close()
+            lang = get_user_lang(req.user_id)
+            messages = {
+                "uz": MESSAGES["uz"]["flashcard_limit_reached"],
+                "ru": MESSAGES["ru"]["flashcard_limit_reached"],
+                "en": MESSAGES["en"]["flashcard_limit_reached"],
+            }
+            return {
+                "status": "error",
+                "error_code": "flashcard_limit",
+                "message": messages.get(lang, messages["uz"]),
+            }
+        conn.commit()
+
+    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
     cursor.execute(
         "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
         (card_id, req.user_id, req.front, req.back, int(time.time())),
