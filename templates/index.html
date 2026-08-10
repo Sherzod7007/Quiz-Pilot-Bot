@@ -533,7 +533,9 @@
                 tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
                 tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
-                alert_limit_over: "⚠️ Bepul limitingiz tugadi! Iltimos, davom etish uchun tariflardan birini tanlang.",
+                alert_limit_over: "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+                public_limit_over: "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
+                flashcard_limit_over: "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
                 confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
                 btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
                 teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️ Ishlash"
@@ -561,7 +563,9 @@
                 tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
                 tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "30 дней группового режима (расширенный)",
                 explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
-                alert_limit_over: "⚠️ Бесплатный лимит исчерпан! Пожалуйста, выберите тариф для продолжения.",
+                alert_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать тесты, перейдите на Premium тариф. 👑",
+                public_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
+                flashcard_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
                 confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
                 btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
                 teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест, создайте групповую сессию и отправьте ссылку ученикам.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️ Пройти"
@@ -589,7 +593,9 @@
                 tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
                 tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
                 explanation_label: "💡 Explanation:", active_users_suffix: "active users",
-                alert_limit_over: "⚠️ Free limit expired! Please choose one of the plans to continue.",
+                alert_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating quizzes. 👑",
+                public_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
+                flashcard_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
                 confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
                 btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
                 teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz, start a group session and send the link to students.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️ Take quiz"
@@ -879,7 +885,10 @@
                     data.quizzes.forEach(quiz => {
                         const card = document.createElement('div');
                         card.className = 'quiz-card';
-                        const action = data.is_paid ? `<button class="btn-circle" onclick="playQuiz('${quiz.id}', true)">${langPack[currentLang].public_open}</button>` : `<button class="btn-circle" onclick="showPublicLocked()">🔒</button>`;
+                        const canOpenPublic = data.is_paid || (data.public_remaining !== undefined && data.public_remaining > 0);
+                        const action = canOpenPublic
+                            ? `<button class="btn-circle" onclick="playQuiz('${quiz.id}', true)">${langPack[currentLang].public_open}</button>`
+                            : `<button class="btn-circle" onclick="showPublicLimitLocked()">🔒</button>`;
                         card.innerHTML = `
                             <div class="card-top">
                                 <div class="card-title">${quiz.title}</div>
@@ -953,7 +962,14 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: userId, front: front, back: back })
                 });
-                if((await response.json()).status === 'ok') loadFlashcards();
+                const data = await response.json();
+                if(data && data.status === 'ok') {
+                    document.getElementById('fc-front').value = "";
+                    document.getElementById('fc-back').value = "";
+                    loadFlashcards();
+                } else if(data && data.error_code === 'flashcard_limit') {
+                    showAppAlert("🔒", langPack[currentLang].flashcard_limit_over, () => switchScreen('premium'));
+                }
             } catch(e){}
         }
 
@@ -983,6 +999,10 @@
                 else url = BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now();
                 const response = await fetch(url);
                 const data = await response.json();
+                if (data && data.error_code === "public_limit") {
+                    showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
+                    return;
+                }
                 if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
                     currentQuizId = quizId;
                     currentQuizQuestions = data.quiz_json.quizzes;
@@ -1072,6 +1092,10 @@
 
         function showPublicLocked() {
             showAppAlert("🔒", langPack[currentLang].public_locked, () => switchScreen('premium'));
+        }
+
+        function showPublicLimitLocked() {
+            showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
         }
 
         async function loadTeacherPanel() {
