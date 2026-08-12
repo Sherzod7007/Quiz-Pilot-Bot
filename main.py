@@ -642,7 +642,19 @@ def get_premium_status(user_id: int):
     row = cursor.fetchone()
     if not row:
         conn.close()
-        return {"status": "ok", "user_status": "Oddiy foydalanuvchi", "free_used": 0, "plan_key": "", "is_paid": False, "is_teacher": False}
+        return {
+            "status": "ok",
+            "user_status": "Oddiy foydalanuvchi",
+            "free_used": 0,
+            "public_free_used": 0,
+            "flashcard_free_used": 0,
+            "public_remaining": FREE_PUBLIC_LIMIT,
+            "flashcard_remaining": FREE_FLASHCARD_LIMIT,
+            "quiz_remaining": FREE_QUIZ_LIMIT,
+            "plan_key": "",
+            "is_paid": False,
+            "is_teacher": False,
+        }
 
     user_status = row["status"] or "Oddiy foydalanuvchi"
     plan_key = row["plan_key"] or get_plan_key(user_status)
