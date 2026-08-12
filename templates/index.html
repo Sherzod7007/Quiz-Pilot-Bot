@@ -377,8 +377,8 @@
         <div class="premium-layout">
             <div class="p-status-box">
                 <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
-                <p id="p-status-val">Normal user</p>
-                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> / 1 <span data-lang="limit_unit">ta</span></p>
+                <p id="p-status-val">Oddiy foydalanuvchi</p>
+                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> <span data-lang="limit_unit">ta</span></p>
             </div>
 
             <div class="p-pro-header">
@@ -522,7 +522,7 @@
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
                 alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
                 card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
-                premium_status_title: "💎 Sizning Statusingiz", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
+                premium_status_title: "💎 Sizning Statusingiz", regular_user: "Oddiy foydalanuvchi", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
                 modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
                 copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
                 btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
@@ -552,7 +552,7 @@
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
                 alert_del_quiz: "Вы хотите удалить этот тест?", alert_success: "🎉 Тест успешно создан!", 
                 card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
-                premium_status_title: "💎 Ваш Статус", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
+                premium_status_title: "💎 Ваш Статус", regular_user: "Обычный пользователь", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
                 modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
                 copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
                 btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
@@ -582,7 +582,7 @@
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
                 alert_del_quiz: "Do you want to delete this quiz?", alert_success: "🎉 Quiz successfully created!", 
                 card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
-                premium_status_title: "💎 Your Status", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
+                premium_status_title: "💎 Your Status", regular_user: "Regular User", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
                 modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
                 copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
                 btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
@@ -739,9 +739,19 @@
                 const res = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
                 const data = await res.json();
                 if(data && data.status === 'ok') {
-                    document.getElementById('p-status-val').innerText = data.user_status || "Normal user";
-                    document.getElementById('p-limit-val').innerText = data.free_used !== undefined ? data.free_used : "0";
-                    const tp=document.getElementById('teacher-panel'); if(tp) tp.style.display=data.is_teacher ? 'block' : 'none';
+                    const localizedRegularUser = (langPack[currentLang] && langPack[currentLang].regular_user)
+                        ? langPack[currentLang].regular_user
+                        : (data.user_status || "Regular User");
+                    document.getElementById('p-status-val').innerText =
+                        data.is_paid ? (data.user_status || "PRO") : localizedRegularUser;
+
+                    // Premium oynasida foydalanuvchiga TEST yaratish bo'yicha qolgan
+                    // 30 kunlik bepul limit ko'rsatiladi: 3 → 2 → 1 → 0.
+                    document.getElementById('p-limit-val').innerText =
+                        data.quiz_remaining !== undefined ? data.quiz_remaining : "0";
+
+                    const tp=document.getElementById('teacher-panel');
+                    if(tp) tp.style.display=data.is_teacher ? 'block' : 'none';
                 }
             } catch(e){}
         }
