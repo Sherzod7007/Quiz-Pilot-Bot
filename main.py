@@ -221,7 +221,8 @@ def init_db():
         free_used INTEGER DEFAULT 0,
         public_free_used INTEGER DEFAULT 0,
         flashcard_free_used INTEGER DEFAULT 0,
-        premium_until INTEGER DEFAULT 0)""")
+        premium_until INTEGER DEFAULT 0,
+        last_active INTEGER DEFAULT 0)""")
 
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
@@ -254,6 +255,12 @@ def init_db():
     if "plan_key" not in columns:
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN plan_key TEXT DEFAULT '';" )
+        except Exception:
+            pass
+
+    if "last_active" not in columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN last_active INTEGER DEFAULT 0;")
         except Exception:
             pass
 
@@ -348,9 +355,9 @@ def add_user_to_db(user_id: int):
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until) "
-            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0)",
-            (user_id, int(time.time())),
+            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, last_active) "
+            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0, ?)",
+            (user_id, int(time.time()), int(time.time())),
         )
         conn.commit()
         conn.close()
@@ -363,13 +370,32 @@ def get_users_count():
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
+        active_since = int(time.time()) - 5 * 60
+        cursor.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= ?",
+            (active_since,),
+        )
         count = cursor.fetchone()[0]
         conn.close()
         return count
     except Exception as e:
-        logging.error(f"Foydalanuvchilar sonini olishda xato: {e}")
+        logging.error(f"Faol foydalanuvchilar sonini olishda xato: {e}")
         return 0
+
+
+def update_user_activity(user_id: int):
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute(
+            "UPDATE users SET last_active = ? WHERE user_id = ?",
+            (int(time.time()), user_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Faol foydalanuvchi vaqtini yangilashda xato: {e}")
 
 
 def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_key=None):
@@ -941,6 +967,13 @@ CRITICAL RULES:
 
     logging.error("Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi.")
     return None
+
+
+@app.get("/api/heartbeat")
+def user_heartbeat(user_id: int):
+    add_user_to_db(user_id)
+    update_user_activity(user_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/quizzes")
