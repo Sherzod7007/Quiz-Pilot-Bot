@@ -847,7 +847,7 @@
                 const libraryScreen = document.getElementById('library-screen');
                 if (currentTab !== 'personal' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
                 
-                let liveUsers = 16; 
+                let liveUsers = 0;
                 if (data && data.total_users !== undefined) liveUsers = data.total_users;
                 const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
                 document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
@@ -1204,11 +1204,13 @@
 
         window.onload = function() {
             applyLocalization();
+            fetch(`${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${Date.now()}`).catch(() => {});
             loadQuizzes();
             loadPremiumStatus();
             loadTeacherPanel();
             openTeacherSessionFromUrl();
             setInterval(() => {
+                fetch(`${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${Date.now()}`).catch(() => {});
                 // Avtomatik yangilash faqat "Testlar" bo'limida ishlaydi.
                 // Ommaviy va Kartochkalar bo'limlarini o'z-o'zidan Testlarga almashtirmaydi.
                 const libraryScreen = document.getElementById('library-screen');
