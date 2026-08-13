@@ -426,7 +426,16 @@ def send_welcome(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
 
-    mini_app_url = os.getenv("MINI_APP_URL", "https://your-railway-url.up.railway.app")
+    # Mini App URL: avval aniq MINI_APP_URL, bo'lmasa Railway'ning public domenidan foydalanamiz.
+    # Placeholder URL ishlatilmasligi uchun fallback ham haqiqiy domen bo'lsa-gina olinadi.
+    mini_app_url = os.getenv("MINI_APP_URL", "").strip().rstrip("/")
+    if not mini_app_url:
+        railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
+        if railway_domain:
+            mini_app_url = railway_domain if railway_domain.startswith("http") else f"https://{railway_domain}"
+    if not mini_app_url:
+        mini_app_url = "https://your-railway-url.up.railway.app"
+
     btn_app = telebot.types.KeyboardButton(
         text=MESSAGES[user_lang]["open_app"], web_app=telebot.types.WebAppInfo(url=mini_app_url)
     )
