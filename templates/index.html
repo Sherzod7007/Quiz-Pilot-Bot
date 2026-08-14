@@ -370,6 +370,13 @@
                 <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English</button>
             </div>
         </div>
+            <div class="settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="vibration_title">📳 Vibratsiya</span>
+                <button id="vibration-toggle" class="lang-btn" type="button" onclick="toggleVibration()" style="min-width:110px;">ON</button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="vibration_desc">Tugmalarni bosganda yengil vibratsiya.</div>
+        </div>
     </div>
 
     <div id="premium-screen" class="screen">
@@ -516,7 +523,7 @@
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", btn_exit: "✖ Chiqish",
+                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
@@ -546,7 +553,7 @@
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
-                select_lang: "Выберите язык системы:", btn_exit: "✖ Выход",
+                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
@@ -576,7 +583,7 @@
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", btn_exit: "✖ Exit",
+                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
@@ -688,11 +695,53 @@
             });
         }
 
+        // ===== Vibratsiya sozlamasi =====
+        const VIBRATION_STORAGE_KEY = `quizpilot_vibration_${userId}`;
+        let vibrationEnabled = localStorage.getItem(VIBRATION_STORAGE_KEY) !== 'off';
+
+        function updateVibrationToggle() {
+            const btn = document.getElementById('vibration-toggle');
+            if (!btn) return;
+            btn.innerText = vibrationEnabled
+                ? (langPack[currentLang].vibration_on || 'ON')
+                : (langPack[currentLang].vibration_off || 'OFF');
+        }
+
+        function toggleVibration() {
+            vibrationEnabled = !vibrationEnabled;
+            localStorage.setItem(VIBRATION_STORAGE_KEY, vibrationEnabled ? 'on' : 'off');
+            updateVibrationToggle();
+            if (vibrationEnabled) triggerSoftVibration();
+        }
+
+        function triggerSoftVibration() {
+            if (!vibrationEnabled) return;
+            try {
+                if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.impactOccurred === 'function') {
+                    tg.HapticFeedback.impactOccurred('light');
+                } else if (navigator.vibrate) {
+                    navigator.vibrate(10);
+                }
+            } catch (_) {}
+        }
+
+        function setupVibration() {
+            document.addEventListener('pointerdown', (event) => {
+                if (!vibrationEnabled) return;
+                const target = event.target && event.target.closest
+                    ? event.target.closest('button, a, [role="button"], input, select, textarea')
+                    : null;
+                if (target) triggerSoftVibration();
+            }, { passive: true });
+            updateVibrationToggle();
+        }
+
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.getAttribute('data-lang');
                 if (langPack[currentLang][key]) el.innerText = langPack[currentLang][key];
             });
+            updateVibrationToggle();
             document.querySelectorAll('[data-placeholder]').forEach(el => {
                 const key = el.getAttribute('data-placeholder');
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
@@ -1204,6 +1253,7 @@
 
         window.onload = function() {
             applyLocalization();
+            setupVibration();
 
             // Faol foydalanuvchini faqat Mini App ko'rinib turganda yuritamiz.
             // Ilova fon rejimiga o'tsa heartbeat to'xtaydi va foydalanuvchi
