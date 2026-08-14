@@ -117,6 +117,9 @@
         
         .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
         
+        .support-contact-btn { width:100%; padding:12px 16px; border-radius:10px; cursor:pointer; color:#fff; font-weight:700; font-size:15px; text-align:center; background:linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.28) 100%); border:1px solid var(--aero-border); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(0,0,0,0.2); transition:all .2s ease; }
+        .support-contact-btn:hover, .support-contact-btn:active { background:linear-gradient(180deg,#0099ff 0%,#005a9e 100%); border-color:#00d2ff; box-shadow:0 0 12px rgba(0,153,255,.55), inset 0 1px 0 rgba(255,255,255,.5); }
+
         .screen { display: none; }
         .screen.active { display: block; }
 
@@ -396,6 +399,10 @@
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="sound_desc">Test jarayonida tovushlar ijro etiladi.</div>
         </div>
+        <div class="settings-box">
+            <button class="support-contact-btn" type="button" onclick="contactAdmin()">💬 <span data-lang="contact_admin">Admin bilan bog'lanish</span></button>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="contact_admin_desc">Savol yoki muammo bo'lsa, biz bilan bog'laning.</div>
+        </div>
     </div>
 
     <div id="premium-screen" class="screen">
@@ -542,7 +549,7 @@
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
+                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
@@ -572,7 +579,7 @@
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
-                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
@@ -602,7 +609,7 @@
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
+                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
@@ -825,6 +832,20 @@
                 if (target) triggerSoftVibration();
             }, { passive: true });
             updateVibrationToggle();
+        }
+
+        function contactAdmin() {
+            const payload = { action: 'contact_admin', user_id: userId };
+            try {
+                if (tg && typeof tg.sendData === 'function') {
+                    tg.sendData(JSON.stringify(payload));
+                    setTimeout(() => { try { tg.close(); } catch (_) {} }, 200);
+                } else {
+                    showAppAlert('💬', langPack[currentLang].contact_admin_desc);
+                }
+            } catch (e) {
+                console.log("Admin bilan bog'lanish xatosi:", e);
+            }
         }
 
         function applyLocalization() {
