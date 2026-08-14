@@ -377,6 +377,13 @@
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="vibration_desc">Tugmalarni bosganda yengil vibratsiya.</div>
         </div>
+        <div class="settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="sound_title">🔊 Ovoz</span>
+                <button id="sound-toggle" class="lang-btn" type="button" onclick="toggleSound()" style="min-width:110px;">ON</button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="sound_desc">Test jarayonida tovushlar ijro etiladi.</div>
+        </div>
     </div>
 
     <div id="premium-screen" class="screen">
@@ -523,7 +530,7 @@
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
-                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", btn_exit: "✖ Chiqish",
+                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
@@ -553,7 +560,7 @@
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
-                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
@@ -583,7 +590,7 @@
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
-                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", btn_exit: "✖ Exit",
+                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
@@ -695,6 +702,77 @@
             });
         }
 
+        // ===== Ovoz sozlamasi =====
+        const SOUND_STORAGE_KEY = `quizpilot_sound_${userId}`;
+        let soundEnabled = localStorage.getItem(SOUND_STORAGE_KEY) !== 'off';
+        let audioContext = null;
+
+        function updateSoundToggle() {
+            const btn = document.getElementById('sound-toggle');
+            if (!btn) return;
+            btn.innerText = soundEnabled
+                ? (langPack[currentLang].sound_on || 'ON')
+                : (langPack[currentLang].sound_off || 'OFF');
+            btn.classList.toggle('active', soundEnabled);
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            localStorage.setItem(SOUND_STORAGE_KEY, soundEnabled ? 'on' : 'off');
+            updateSoundToggle();
+            if (soundEnabled) playQuizSound('tap');
+        }
+
+        function getAudioContext() {
+            if (!audioContext) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return null;
+                audioContext = new AudioCtx();
+            }
+            if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
+            return audioContext;
+        }
+
+        function playTone(ctx, frequency, start, duration, type='sine', volume=0.055) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(frequency, start);
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + duration + 0.02);
+        }
+
+        function playQuizSound(kind) {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return;
+                const now = ctx.currentTime + 0.01;
+                if (kind === 'correct') {
+                    playTone(ctx, 660, now, 0.12, 'sine', 0.06);
+                    playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.055);
+                } else if (kind === 'wrong') {
+                    playTone(ctx, 220, now, 0.16, 'sine', 0.06);
+                    playTone(ctx, 165, now + 0.10, 0.18, 'sine', 0.05);
+                } else if (kind === 'good') {
+                    playTone(ctx, 523.25, now, 0.12, 'sine', 0.055);
+                    playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.055);
+                    playTone(ctx, 783.99, now + 0.20, 0.22, 'sine', 0.06);
+                } else if (kind === 'bad') {
+                    playTone(ctx, 330, now, 0.14, 'sine', 0.05);
+                    playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.05);
+                    playTone(ctx, 196, now + 0.23, 0.22, 'sine', 0.045);
+                } else {
+                    playTone(ctx, 520, now, 0.045, 'sine', 0.025);
+                }
+            } catch (_) {}
+        }
+
         // ===== Vibratsiya sozlamasi =====
         const VIBRATION_STORAGE_KEY = `quizpilot_vibration_${userId}`;
         let vibrationEnabled = localStorage.getItem(VIBRATION_STORAGE_KEY) !== 'off';
@@ -705,6 +783,7 @@
             btn.innerText = vibrationEnabled
                 ? (langPack[currentLang].vibration_on || 'ON')
                 : (langPack[currentLang].vibration_off || 'OFF');
+            btn.classList.toggle('active', vibrationEnabled);
         }
 
         function toggleVibration() {
@@ -742,6 +821,7 @@
                 if (langPack[currentLang][key]) el.innerText = langPack[currentLang][key];
             });
             updateVibrationToggle();
+            updateSoundToggle();
             document.querySelectorAll('[data-placeholder]').forEach(el => {
                 const key = el.getAttribute('data-placeholder');
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
@@ -1121,9 +1201,9 @@
             const expBox = document.getElementById('explanation-container');
 
             if (idx === correctIdx) {
-                btn.classList.add('correct'); correctAnswersCount++;
+                btn.classList.add('correct'); correctAnswersCount++; playQuizSound('correct');
             } else {
-                btn.classList.add('wrong'); wrongAnswersCount++;
+                btn.classList.add('wrong'); wrongAnswersCount++; playQuizSound('wrong');
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
                 const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
                 expBox.innerText = `${expLabel} ` + (explanation || "...");
@@ -1139,6 +1219,7 @@
         async function finishQuiz() {
             const total = currentQuizQuestions.length;
             const scorePercent = Math.round((correctAnswersCount / total) * 100);
+            playQuizSound(scorePercent >= 70 ? 'good' : 'bad');
             try {
                 if (currentTeacherSessionId) {
                     const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
@@ -1254,6 +1335,7 @@
         window.onload = function() {
             applyLocalization();
             setupVibration();
+            updateSoundToggle();
 
             // Faol foydalanuvchini faqat Mini App ko'rinib turganda yuritamiz.
             // Ilova fon rejimiga o'tsa heartbeat to'xtaydi va foydalanuvchi
