@@ -47,6 +47,10 @@ except Exception as e:
     logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
     ADMIN_ID = None
 
+# --- ADMIN SUPPORT ---
+support_waiting_users = set()
+support_reply_targets = {}
+
 raw_keys = os.getenv("GOOGLE_API_KEYS", "")
 GOOGLE_API_KEYS = (
     [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
@@ -112,6 +116,12 @@ def localized_tariff_name(plan_key: str, lang: str) -> str:
 
 # --- MULTILINGUAL (3 TILDAGI BILDIRISHNOMALAR) ---
 MESSAGES = {
+        "support_prompt": "💬 Admin bilan bog'lanish. Savolingiz yoki muammoingizni shu yerga yozing. Xabaringiz administratorga yuboriladi.",
+        "support_sent": "✅ Murojaatingiz administratorga yuborildi. Javob kelishini kuting.",
+        "support_admin_title": "📩 Yangi murojaat",
+        "support_reply_btn": "✉️ Javob berish",
+        "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
+        "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
     "uz": {
         "welcome": (
             "👋 Salom, {name}! Quiz Pilot Super Mini App tizimiga xush kelibsiz.\n\n"
@@ -135,6 +145,12 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
+        "support_prompt": "💬 Связаться с администратором. Напишите ваш вопрос или проблему здесь. Сообщение будет отправлено администратору.",
+        "support_sent": "✅ Ваше обращение отправлено администратору. Ожидайте ответа.",
+        "support_admin_title": "📩 Новое обращение",
+        "support_reply_btn": "✉️ Ответить",
+        "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
+        "support_reply_sent": "✅ Ответ отправлен пользователю.",
     "ru": {
         "welcome": (
             "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
@@ -157,6 +173,12 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
+        "support_prompt": "💬 Contact Admin. Write your question or problem here. Your message will be sent to the administrator.",
+        "support_sent": "✅ Your message has been sent to the administrator. Please wait for a reply.",
+        "support_admin_title": "📩 New support request",
+        "support_reply_btn": "✉️ Reply",
+        "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
+        "support_reply_sent": "✅ Reply sent to the user.",
     "en": {
         "welcome": (
             "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
@@ -463,6 +485,13 @@ def handle_webapp_data(message):
         logging.info(f"WebApp dan kelgan xom ma'lumot: {message.web_app_data.data}")
         data = json.loads(message.web_app_data.data)
 
+        if data.get("action") == "contact_admin":
+            user_id = int(data.get("user_id") or message.from_user.id)
+            user_lang = get_user_lang(user_id)
+            support_waiting_users.add(user_id)
+            bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
+            return
+
         if data.get("action") == "payment_intent":
             user_id = data.get("user_id")
             tariff_key = data.get("tariff_key")
@@ -472,6 +501,51 @@ def handle_webapp_data(message):
     except Exception as e:
         logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
+
+# --- ADMIN SUPPORT: murojaat va javob ---
+@bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
+def handle_support_text(message):
+    user_id = message.from_user.id
+    if ADMIN_ID and user_id == ADMIN_ID and user_id in support_reply_targets:
+        target_user_id = support_reply_targets.pop(user_id)
+        try:
+            bot.send_message(target_user_id, f"💬 Admin javobi:\n\n{message.text}")
+            bot.send_message(user_id, MESSAGES.get(get_user_lang(user_id), MESSAGES["uz"])["support_reply_sent"])
+        except Exception as e:
+            logging.error(f"Admin javobini yuborishda xato: {e}")
+            bot.send_message(user_id, "❌ Javobni yuborishda xatolik yuz berdi.")
+        return
+    if user_id in support_waiting_users:
+        support_waiting_users.discard(user_id)
+        user_lang = get_user_lang(user_id)
+        username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
+        first_name = message.from_user.first_name or "Mavjud emas"
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton(MESSAGES[user_lang]["support_reply_btn"], callback_data=f"support_reply:{user_id}"))
+        text = (f"{MESSAGES[user_lang]['support_admin_title']}\n\n"
+                f"👤 {first_name}\n🔗 Username: {username}\n🆔 Telegram ID: {user_id}\n🌐 Til: {user_lang.upper()}\n\n💬 {message.text}")
+        try:
+            target_admin = ADMIN_ID if ADMIN_ID else user_id
+            bot.send_message(target_admin, text, reply_markup=markup)
+            bot.send_message(user_id, MESSAGES[user_lang]["support_sent"])
+        except Exception as e:
+            logging.error(f"Admin murojaatini yuborishda xato: {e}")
+            bot.send_message(user_id, "❌ Murojaatni yuborishda xatolik yuz berdi.")
+        return
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("support_reply:"))
+def handle_support_reply_callback(call):
+    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
+        return
+    try:
+        target_user_id = int(call.data.split(":", 1)[1])
+        support_reply_targets[call.from_user.id] = target_user_id
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.from_user.id, MESSAGES.get(get_user_lang(call.from_user.id), MESSAGES["uz"])["support_reply_prompt"])
+    except Exception as e:
+        logging.error(f"Admin reply callback xatosi: {e}")
+        bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
 # --- ISHONCHLI TO'LOV CHEKI QABUL QILISH (STABLE PHOTO HANDLER) ---
 @bot.message_handler(content_types=["photo"])
