@@ -1204,20 +1204,64 @@
 
         window.onload = function() {
             applyLocalization();
-            fetch(`${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${Date.now()}`).catch(() => {});
+
+            // Faol foydalanuvchini faqat Mini App ko'rinib turganda yuritamiz.
+            // Ilova fon rejimiga o'tsa heartbeat to'xtaydi va foydalanuvchi
+            // 2 daqiqadan keyin faol foydalanuvchilar sonidan chiqadi.
+            let lastHeartbeatAt = 0;
+
+            function updateActiveUsersBadge(activeUsers) {
+                const badge = document.getElementById('user-count-badge');
+                if (!badge) return;
+                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
+                badge.innerText = `🟢 ${Number(activeUsers) || 0} ${suffix}`;
+            }
+
+            async function sendActivityHeartbeat() {
+                if (document.visibilityState !== 'visible') return;
+                const now = Date.now();
+                if (now - lastHeartbeatAt < 10000) return;
+                lastHeartbeatAt = now;
+
+                try {
+                    const response = await fetch(
+                        `${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${now}`,
+                        { cache: 'no-store' }
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.active_users !== undefined) {
+                            updateActiveUsersBadge(data.active_users);
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            sendActivityHeartbeat();
             loadQuizzes();
             loadPremiumStatus();
             loadTeacherPanel();
             openTeacherSessionFromUrl();
+
+            // Har 30 soniyada yangilanadi, lekin faqat ilova ko'rinib turganda.
             setInterval(() => {
-                fetch(`${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${Date.now()}`).catch(() => {});
+                sendActivityHeartbeat();
+
                 // Avtomatik yangilash faqat "Testlar" bo'limida ishlaydi.
                 // Ommaviy va Kartochkalar bo'limlarini o'z-o'zidan Testlarga almashtirmaydi.
                 const libraryScreen = document.getElementById('library-screen');
                 if (libraryScreen && libraryScreen.classList.contains('active') && currentTab === 'personal') {
                     loadQuizzes();
                 }
-            }, 20000); 
+            }, 30000);
+
+            // Telegram Mini App qayta oldinga chiqqanda darhol faol deb belgilanadi.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    sendActivityHeartbeat();
+                }
+            });
+            window.addEventListener('focus', sendActivityHeartbeat);
         };
     </script>
 </body>
