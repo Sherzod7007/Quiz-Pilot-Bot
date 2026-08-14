@@ -370,7 +370,8 @@ def get_users_count():
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
-        active_since = int(time.time()) - 5 * 60
+        # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
+        active_since = int(time.time()) - 2 * 60
         cursor.execute(
             "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= ?",
             (active_since,),
@@ -973,7 +974,7 @@ CRITICAL RULES:
 def user_heartbeat(user_id: int):
     add_user_to_db(user_id)
     update_user_activity(user_id)
-    return {"status": "ok"}
+    return {"status": "ok", "active_users": get_users_count()}
 
 
 @app.get("/api/quizzes")
