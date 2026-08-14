@@ -215,6 +215,18 @@
             transition: all 0.2s ease;
         }
         .lang-btn.active { border-color: #00d2ff; background: rgba(0, 120, 215, 0.3); color: #fff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.3); }
+        /* Ovoz/Vibratsiya ON holati Til tanlangan tugmasi kabi doimiy ko'rinadi. */
+        #vibration-toggle.active, #sound-toggle.active {
+            border-color: #00d2ff !important;
+            background: rgba(0, 120, 215, 0.3) !important;
+            color: #fff !important;
+            box-shadow: 0 0 10px rgba(0, 210, 255, 0.3) !important;
+        }
+        #vibration-toggle:not(.active), #sound-toggle:not(.active) {
+            background: rgba(0, 0, 0, 0.25) !important;
+            border-color: var(--aero-border) !important;
+            box-shadow: none !important;
+        }
         
         .fc-display { 
             font-size: 18px; font-weight: bold; padding: 25px; text-align: center; 
@@ -733,7 +745,7 @@
             return audioContext;
         }
 
-        function playTone(ctx, frequency, start, duration, type='sine', volume=0.055) {
+        function playTone(ctx, frequency, start, duration, type='sine', volume=0.14) {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.type = type;
@@ -754,21 +766,21 @@
                 if (!ctx) return;
                 const now = ctx.currentTime + 0.01;
                 if (kind === 'correct') {
-                    playTone(ctx, 660, now, 0.12, 'sine', 0.06);
-                    playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.055);
+                    playTone(ctx, 660, now, 0.12, 'sine', 0.15);
+                    playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.14);
                 } else if (kind === 'wrong') {
-                    playTone(ctx, 220, now, 0.16, 'sine', 0.06);
-                    playTone(ctx, 165, now + 0.10, 0.18, 'sine', 0.05);
+                    playTone(ctx, 220, now, 0.16, 'sine', 0.14);
+                    playTone(ctx, 165, now + 0.10, 0.18, 'sine', 0.12);
                 } else if (kind === 'good') {
-                    playTone(ctx, 523.25, now, 0.12, 'sine', 0.055);
-                    playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.055);
-                    playTone(ctx, 783.99, now + 0.20, 0.22, 'sine', 0.06);
+                    playTone(ctx, 523.25, now, 0.12, 'sine', 0.14);
+                    playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.14);
+                    playTone(ctx, 783.99, now + 0.20, 0.22, 'sine', 0.15);
                 } else if (kind === 'bad') {
-                    playTone(ctx, 330, now, 0.14, 'sine', 0.05);
-                    playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.05);
-                    playTone(ctx, 196, now + 0.23, 0.22, 'sine', 0.045);
+                    playTone(ctx, 330, now, 0.14, 'sine', 0.12);
+                    playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.12);
+                    playTone(ctx, 196, now + 0.23, 0.22, 'sine', 0.10);
                 } else {
-                    playTone(ctx, 520, now, 0.045, 'sine', 0.025);
+                    playTone(ctx, 520, now, 0.045, 'sine', 0.07);
                 }
             } catch (_) {}
         }
@@ -848,7 +860,9 @@
                 teachersCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_teacher_desc;
             }
 
-            document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+            // Faqat til tugmalarining active holatini boshqaramiz.
+            // Ovoz va Vibratsiya tugmalarining active holatiga tegilmaydi.
+            document.querySelectorAll('#lang-uz, #lang-ru, #lang-en').forEach(b => b.classList.remove('active'));
             const activeBtn = document.getElementById(`lang-${currentLang}`);
             if(activeBtn) activeBtn.classList.add('active');
         }
