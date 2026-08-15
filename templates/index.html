@@ -797,9 +797,10 @@
                         playTone(ctx, 660, now, 0.12, 'sine', 0.32);
                         playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.30);
                     } else if (kind === 'wrong') {
-                        // Noto'g'ri javob: alohida pastroq ikki-tonli xato signali.
-                        playTone(ctx, 220, now, 0.16, 'sine', 0.30);
-                        playTone(ctx, 165, now + 0.10, 0.18, 'sine', 0.27);
+                        // Noto'g'ri javob: telefon karnayida aniq eshitilishi uchun
+                        // juda past chastotalardan foydalanmaymiz.
+                        playTone(ctx, 330, now, 0.16, 'sine', 0.38);
+                        playTone(ctx, 247, now + 0.11, 0.22, 'sine', 0.34);
                     } else if (kind === 'good') {
                         // Yaxshi yakuniy natija.
                         playTone(ctx, 523.25, now, 0.12, 'sine', 0.34);
