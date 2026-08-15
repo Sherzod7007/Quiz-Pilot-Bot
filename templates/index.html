@@ -797,13 +797,16 @@
                         playTone(ctx, 660, now, 0.12, 'sine', 0.32);
                         playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.30);
                     } else if (kind === 'wrong') {
+                        // Noto'g'ri javob: alohida pastroq ikki-tonli xato signali.
                         playTone(ctx, 220, now, 0.16, 'sine', 0.30);
                         playTone(ctx, 165, now + 0.10, 0.18, 'sine', 0.27);
                     } else if (kind === 'good') {
+                        // Yaxshi yakuniy natija.
                         playTone(ctx, 523.25, now, 0.12, 'sine', 0.34);
                         playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.34);
                         playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.36);
                     } else if (kind === 'bad') {
+                        // Yomon yakuniy natija.
                         playTone(ctx, 330, now, 0.14, 'sine', 0.30);
                         playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.30);
                         playTone(ctx, 196, now + 0.23, 0.24, 'sine', 0.27);
@@ -811,13 +814,30 @@
                         playTone(ctx, 520, now, 0.045, 'sine', 0.16);
                     }
                 };
-                if (ctx.state === 'suspended') {
-                    ctx.resume().then(play).catch(() => {});
+
+                // Telegram Mobile WebView ba'zan AudioContext'ni vaqtincha to'xtatadi.
+                // To'g'ri/noto'g'ri va yakuniy natija ovozlari uchun uni qayta uyg'otamiz.
+                if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+                    ctx.resume().then(() => {
+                        if (ctx.state === 'running') play();
+                    }).catch(() => {});
                 } else {
                     play();
                 }
             } catch (_) {}
         }
+
+        // AudioContext'ni foydalanuvchining birinchi haqiqiy tapida uyg'otib qo'yamiz.
+        // Tugmalar dizayniga va boshqa funksiyalarga ta'sir qilmaydi.
+        document.addEventListener('pointerdown', () => {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
+                    ctx.resume().catch(() => {});
+                }
+            } catch (_) {}
+        }, { passive: true });
 
         // ===== Vibratsiya sozlamasi =====
         const VIBRATION_STORAGE_KEY = `quizpilot_vibration_${userId}`;
@@ -1282,9 +1302,9 @@
             const total = currentQuizQuestions.length;
             const scorePercent = Math.round((correctAnswersCount / total) * 100);
             const resultSound = scorePercent >= 70 ? 'good' : 'bad';
+            // Natija ovozi ham albatta alohida ijro etiladi: good >=70%, bad <70%.
             playQuizSound(resultSound);
-            // Mobile Telegram WebView can suspend the audio context between questions and the result screen.
-            setTimeout(() => playQuizSound(resultSound), 80);
+            setTimeout(() => playQuizSound(resultSound), 120);
             try {
                 if (currentTeacherSessionId) {
                     const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
