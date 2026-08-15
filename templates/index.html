@@ -218,66 +218,38 @@
             transition: all 0.2s ease;
         }
         .lang-btn.active { border-color: #00d2ff; background: rgba(0, 120, 215, 0.3); color: #fff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.3); }
-        /* ===== Aero Glass + Blue Neon Ovoz/Vibratsiya switchlari ===== */
-        .aero-toggle {
-            position: relative;
-            flex: 0 0 auto;
-            width: 92px;
-            height: 46px;
-            min-width: 92px !important;
-            padding: 0 !important;
-            border: 1px solid rgba(0, 174, 255, 0.85) !important;
-            border-radius: 999px !important;
-            background: linear-gradient(145deg, rgba(22, 42, 68, 0.92), rgba(2, 8, 18, 0.88)) !important;
-            box-shadow: inset 0 1px 2px rgba(255,255,255,0.24), inset 0 -2px 5px rgba(0,0,0,0.55), 0 0 7px rgba(0, 150, 255, 0.28) !important;
-            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-            cursor: pointer;
-            overflow: hidden;
-            transition: all 0.28s ease;
-        }
-        .aero-toggle::before {
-            content: "";
-            position: absolute;
-            inset: 2px;
-            border-radius: inherit;
-            border: 1px solid rgba(255,255,255,0.10);
-            pointer-events: none;
-        }
-        .aero-toggle .toggle-knob {
-            position: absolute;
-            top: 5px;
-            left: 5px;
-            width: 34px;
+        /* Ovoz/Vibratsiya ON holati Til tanlangan tugmasi kabi doimiy ko'rinadi. */
+        /* Compact Aero Glass controls — approximately 60% of the previous button width. */
+        #vibration-toggle, #sound-toggle {
+            min-width: 66px !important;
+            width: 66px !important;
             height: 34px;
-            border-radius: 50%;
-            background: linear-gradient(145deg, rgba(245,248,255,0.92), rgba(122,140,165,0.72));
-            border: 1px solid rgba(255,255,255,0.72);
-            box-shadow: inset 0 2px 4px rgba(255,255,255,0.75), inset 0 -3px 6px rgba(20,35,60,0.55), 0 2px 7px rgba(0,0,0,0.5);
-            transition: transform 0.28s cubic-bezier(.2,.8,.2,1), background 0.28s ease, box-shadow 0.28s ease;
-            z-index: 2;
+            padding: 5px 9px !important;
+            border-radius: 17px !important;
+            border: 1px solid rgba(120, 190, 255, 0.28) !important;
+            background: linear-gradient(180deg, rgba(65, 80, 100, 0.48), rgba(10, 15, 24, 0.72)) !important;
+            color: #aeb8c5 !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 8px rgba(0,0,0,0.35) !important;
+            text-align: center !important;
+            justify-content: center !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            line-height: 1 !important;
+            transition: all 0.2s ease;
         }
-        .aero-toggle.active {
-            background: linear-gradient(145deg, rgba(0, 120, 255, 0.88), rgba(0, 35, 95, 0.92)) !important;
-            border-color: #23c7ff !important;
-            box-shadow: inset 0 1px 3px rgba(255,255,255,0.22), inset 0 -3px 8px rgba(0,0,0,0.45), 0 0 9px rgba(0, 160, 255, 0.7), 0 0 22px rgba(0, 100, 255, 0.35) !important;
+        #vibration-toggle.active, #sound-toggle.active {
+            border-color: #00d2ff !important;
+            background: linear-gradient(180deg, rgba(0, 155, 235, 0.72), rgba(0, 75, 145, 0.72)) !important;
+            color: #fff !important;
+            box-shadow: 0 0 7px rgba(0,210,255,0.75), 0 0 15px rgba(0,160,255,0.38), inset 0 1px 0 rgba(255,255,255,0.45) !important;
+            text-shadow: 0 0 5px rgba(255,255,255,0.65);
         }
-        .aero-toggle.active .toggle-knob {
-            transform: translateX(46px);
-            background: linear-gradient(145deg, #ffffff, #dcecff);
-            border-color: #ffffff;
-            box-shadow: inset 0 2px 5px rgba(255,255,255,0.95), inset 0 -3px 7px rgba(60,100,150,0.35), 0 0 7px rgba(126,220,255,0.95), 0 0 15px rgba(0,150,255,0.65);
+        #vibration-toggle:not(.active), #sound-toggle:not(.active) {
+            background: linear-gradient(180deg, rgba(55, 65, 80, 0.42), rgba(8, 12, 18, 0.72)) !important;
+            border-color: rgba(120, 190, 255, 0.20) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.32) !important;
+            color: #8f9aaa !important;
         }
-        .aero-toggle:not(.active) {
-            background: linear-gradient(145deg, rgba(12, 20, 31, 0.92), rgba(1, 4, 10, 0.96)) !important;
-            border-color: rgba(0, 145, 255, 0.62) !important;
-            box-shadow: inset 0 1px 2px rgba(255,255,255,0.12), inset 0 -2px 6px rgba(0,0,0,0.65), 0 0 6px rgba(0, 120, 255, 0.25) !important;
-        }
-        .aero-toggle:not(.active) .toggle-knob {
-            background: linear-gradient(145deg, rgba(155,170,190,0.72), rgba(57,68,84,0.72));
-            border-color: rgba(196,212,235,0.55);
-            box-shadow: inset 0 2px 4px rgba(255,255,255,0.35), inset 0 -3px 7px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.6);
-        }
-        .aero-toggle:active { transform: scale(0.97); }
         
         .fc-display { 
             font-size: 18px; font-weight: bold; padding: 25px; text-align: center; 
@@ -436,14 +408,14 @@
             <div class="settings-box">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                 <span style="font-weight:bold; font-size:16px;" data-lang="vibration_title">📳 Vibratsiya</span>
-                <button id="vibration-toggle" class="aero-toggle" type="button" onclick="toggleVibration()" aria-label="Vibratsiya" aria-pressed="true"><span class="toggle-knob"></span></button>
+                <button id="vibration-toggle" class="lang-btn" type="button" onclick="toggleVibration()" style="min-width:110px;">ON</button>
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="vibration_desc">Tugmalarni bosganda yengil vibratsiya.</div>
         </div>
         <div class="settings-box">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                 <span style="font-weight:bold; font-size:16px;" data-lang="sound_title">🔊 Ovoz</span>
-                <button id="sound-toggle" class="aero-toggle" type="button" onclick="toggleSound()" aria-label="Ovoz" aria-pressed="true"><span class="toggle-knob"></span></button>
+                <button id="sound-toggle" class="lang-btn" type="button" onclick="toggleSound()" style="min-width:110px;">ON</button>
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="sound_desc">Test jarayonida tovushlar ijro etiladi.</div>
         </div>
@@ -777,11 +749,10 @@
         function updateSoundToggle() {
             const btn = document.getElementById('sound-toggle');
             if (!btn) return;
-            btn.classList.toggle('active', soundEnabled);
-            btn.setAttribute('aria-pressed', soundEnabled ? 'true' : 'false');
-            btn.setAttribute('aria-label', soundEnabled
+            btn.innerText = soundEnabled
                 ? (langPack[currentLang].sound_on || 'ON')
-                : (langPack[currentLang].sound_off || 'OFF'));
+                : (langPack[currentLang].sound_off || 'OFF');
+            btn.classList.toggle('active', soundEnabled);
         }
 
         function toggleSound() {
@@ -797,7 +768,6 @@
                 if (!AudioCtx) return null;
                 audioContext = new AudioCtx();
             }
-            if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
             return audioContext;
         }
 
@@ -820,25 +790,31 @@
             try {
                 const ctx = getAudioContext();
                 if (!ctx) return;
-                const now = ctx.currentTime + 0.01;
-                if (kind === 'correct') {
-                    playTone(ctx, 660, now, 0.13, 'sine', 0.36);
-                    playTone(ctx, 880, now + 0.10, 0.18, 'sine', 0.34);
-                } else if (kind === 'wrong') {
-                    // Noto'g'ri javob uchun aniqroq, pastroq va kuchliroq xato signali.
-                    playTone(ctx, 260, now, 0.16, 'sawtooth', 0.34);
-                    playTone(ctx, 185, now + 0.11, 0.20, 'sine', 0.32);
-                    playTone(ctx, 130, now + 0.23, 0.20, 'sine', 0.28);
-                } else if (kind === 'good') {
-                    playTone(ctx, 523.25, now, 0.13, 'sine', 0.34);
-                    playTone(ctx, 659.25, now + 0.10, 0.13, 'sine', 0.34);
-                    playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.36);
-                } else if (kind === 'bad') {
-                    playTone(ctx, 330, now, 0.15, 'sine', 0.30);
-                    playTone(ctx, 247, now + 0.11, 0.17, 'sine', 0.30);
-                    playTone(ctx, 196, now + 0.23, 0.23, 'sine', 0.26);
+                const play = () => {
+                    if (!soundEnabled) return;
+                    const now = ctx.currentTime + 0.02;
+                    if (kind === 'correct') {
+                        playTone(ctx, 660, now, 0.12, 'sine', 0.32);
+                        playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.30);
+                    } else if (kind === 'wrong') {
+                        playTone(ctx, 220, now, 0.16, 'sine', 0.30);
+                        playTone(ctx, 165, now + 0.10, 0.18, 'sine', 0.27);
+                    } else if (kind === 'good') {
+                        playTone(ctx, 523.25, now, 0.12, 'sine', 0.34);
+                        playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.34);
+                        playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.36);
+                    } else if (kind === 'bad') {
+                        playTone(ctx, 330, now, 0.14, 'sine', 0.30);
+                        playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.30);
+                        playTone(ctx, 196, now + 0.23, 0.24, 'sine', 0.27);
+                    } else {
+                        playTone(ctx, 520, now, 0.045, 'sine', 0.16);
+                    }
+                };
+                if (ctx.state === 'suspended') {
+                    ctx.resume().then(play).catch(() => {});
                 } else {
-                    playTone(ctx, 520, now, 0.05, 'sine', 0.17);
+                    play();
                 }
             } catch (_) {}
         }
@@ -850,11 +826,10 @@
         function updateVibrationToggle() {
             const btn = document.getElementById('vibration-toggle');
             if (!btn) return;
-            btn.classList.toggle('active', vibrationEnabled);
-            btn.setAttribute('aria-pressed', vibrationEnabled ? 'true' : 'false');
-            btn.setAttribute('aria-label', vibrationEnabled
+            btn.innerText = vibrationEnabled
                 ? (langPack[currentLang].vibration_on || 'ON')
-                : (langPack[currentLang].vibration_off || 'OFF'));
+                : (langPack[currentLang].vibration_off || 'OFF');
+            btn.classList.toggle('active', vibrationEnabled);
         }
 
         function toggleVibration() {
@@ -868,20 +843,9 @@
             if (!vibrationEnabled) return;
             try {
                 if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.impactOccurred === 'function') {
-                    tg.HapticFeedback.impactOccurred('medium');
+                    tg.HapticFeedback.impactOccurred('light');
                 } else if (navigator.vibrate) {
-                    navigator.vibrate(22);
-                }
-            } catch (_) {}
-        }
-
-        function triggerAnswerVibration(kind) {
-            if (!vibrationEnabled) return;
-            try {
-                if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.notificationOccurred === 'function') {
-                    tg.HapticFeedback.notificationOccurred(kind === 'wrong' ? 'error' : 'success');
-                } else if (navigator.vibrate) {
-                    navigator.vibrate(kind === 'wrong' ? [28, 18, 28] : 32);
+                    navigator.vibrate(10);
                 }
             } catch (_) {}
         }
@@ -1299,9 +1263,9 @@
             const expBox = document.getElementById('explanation-container');
 
             if (idx === correctIdx) {
-                btn.classList.add('correct'); correctAnswersCount++; playQuizSound('correct'); triggerAnswerVibration('correct');
+                btn.classList.add('correct'); correctAnswersCount++; playQuizSound('correct');
             } else {
-                btn.classList.add('wrong'); wrongAnswersCount++; playQuizSound('wrong'); triggerAnswerVibration('wrong');
+                btn.classList.add('wrong'); wrongAnswersCount++; playQuizSound('wrong');
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
                 const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
                 expBox.innerText = `${expLabel} ` + (explanation || "...");
@@ -1317,7 +1281,10 @@
         async function finishQuiz() {
             const total = currentQuizQuestions.length;
             const scorePercent = Math.round((correctAnswersCount / total) * 100);
-            playQuizSound(scorePercent >= 70 ? 'good' : 'bad');
+            const resultSound = scorePercent >= 70 ? 'good' : 'bad';
+            playQuizSound(resultSound);
+            // Mobile Telegram WebView can suspend the audio context between questions and the result screen.
+            setTimeout(() => playQuizSound(resultSound), 80);
             try {
                 if (currentTeacherSessionId) {
                     const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
