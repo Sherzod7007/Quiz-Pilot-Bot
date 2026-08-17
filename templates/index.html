@@ -571,7 +571,7 @@
                 btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
                 select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
-                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
+                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
                 alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
                 card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
@@ -601,7 +601,7 @@
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
                 select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
-                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
+                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
                 alert_del_quiz: "Вы хотите удалить этот тест?", alert_success: "🎉 Тест успешно создан!", 
                 card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
@@ -631,7 +631,7 @@
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
                 select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
-                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
+                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
                 alert_del_quiz: "Do you want to delete this quiz?", alert_success: "🎉 Quiz successfully created!", 
                 card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
@@ -1077,7 +1077,7 @@
                     data.quizzes.forEach(quiz => {
                         const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
                         const displayPercent = hasScore ? quiz.last_percent : 0;
-                        const scoreText = hasScore ? `${langPack[currentLang].score_text}: ${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `${langPack[currentLang].q_count}: ${quiz.total}`;
+                        const scoreText = hasScore ? `${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `0/0 (0%)`;
                         const pubClass = quiz.is_public ? 'is-active' : '';
 
                         const card = document.createElement('div');
@@ -1095,7 +1095,7 @@
                                 <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
                                 <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
                             </div>
-                            <div class="card-footer"><span>${scoreText}</span><span>ID: ${quiz.id.replace('q_', '')}</span></div>
+                            <div class="card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>${langPack[currentLang].score_text}: ${scoreText}</span></div>
                         `;
                         listDiv.appendChild(card);
                     });
