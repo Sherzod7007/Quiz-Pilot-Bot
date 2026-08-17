@@ -1,1545 +1,1486 @@
-# -*- coding: utf-8 -*-
-import docx
-import asyncio
-import re
-from docx import Document
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.templating import Jinja2Templates
-from google import genai
-from google.genai import types as genai_types
-import json
-import logging
-import os
-from pydantic import BaseModel, Field
-from pypdf import PdfReader
-from openpyxl import Workbook
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-import sqlite3
-import telebot
-import threading
-import time
-from typing import List, Optional
-import uvicorn
-import uuid
-from pathlib import Path
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
-templates = Jinja2Templates(directory="templates")
-
-raw_admin_id = os.getenv("ADMIN_ID")
-try:
-    ADMIN_ID = int(raw_admin_id.strip()) if raw_admin_id else None
-except Exception as e:
-    logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
-    ADMIN_ID = None
-
-# --- ADMIN SUPPORT ---
-support_waiting_users = set()
-support_reply_targets = {}
-
-raw_keys = os.getenv("GOOGLE_API_KEYS", "")
-GOOGLE_API_KEYS = (
-    [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
-)
-current_key_index = 0
-key_lock = threading.Lock()
-# Bir vaqtning o'zida Gemini'ga juda ko'p so'rov yuborilib ketmasligi uchun.
-# 7 ta key mavjud bo'lgani sababli 7 ta parallel Gemini requestga ruxsat beriladi.
-gemini_semaphore = threading.Semaphore(max(1, min(7, len(GOOGLE_API_KEYS))))
-
-DOWNLOADS_DIR = "downloads"
-DB_PATH = (
-    "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
-)
-
-# --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
-TARIFFS = {
-    "daily": {
-        "price": "10 000 so'm",
-        "duration": 24 * 3600,
-        "names": {"uz": "Kunlik Cheksiz (24 soat)", "ru": "Суточный Безлимит (24 ч)", "en": "Daily Unlimited (24h)"},
-    },
-    "weekly": {
-        "price": "35 000 so'm",
-        "duration": 7 * 24 * 3600,
-        "names": {"uz": "Haftalik Cheksiz (7 kun)", "ru": "Недельный Безлимит (7 дн)", "en": "Weekly Unlimited (7d)"},
-    },
-    "monthly": {
-        "price": "65 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "Oylik Cheksiz (30 kun)", "ru": "Месячный Безлимит (30 дн)", "en": "Monthly Unlimited (30d)"},
-    },
-    "teachers": {
-        "price": "95 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
-    },
-}
-FREE_QUIZ_LIMIT = 3
-FREE_PUBLIC_LIMIT = 3
-FREE_FLASHCARD_LIMIT = 3
-
-def is_active_paid_status(status: str, premium_until: int) -> bool:
-    return bool(status and "PRO" in status and premium_until and int(time.time()) <= premium_until)
-
-def get_plan_key(status: str, plan_key: str = "") -> str:
-    if plan_key in TARIFFS:
-        return plan_key
-    s = (status or "").lower()
-    if "teacher" in s or "o'qit" in s or "учител" in s:
-        return "teachers"
-    if "weekly" in s or "haftalik" in s or "недель" in s:
-        return "weekly"
-    if "monthly" in s or "oylik" in s or "месяч" in s:
-        return "monthly"
-    if "daily" in s or "kunlik" in s or "суточ" in s:
-        return "daily"
-    return ""
-
-def localized_tariff_name(plan_key: str, lang: str) -> str:
-    lang = lang if lang in ("uz", "ru", "en") else "uz"
-    return TARIFFS.get(plan_key, {}).get("names", {}).get(lang, plan_key)
-
-# --- MULTILINGUAL (3 TILDAGI BILDIRISHNOMALAR) ---
-MESSAGES = {
-        "support_prompt": "💬 Admin bilan bog'lanish. Savolingiz yoki muammoingizni shu yerga yozing. Xabaringiz administratorga yuboriladi.",
-        "support_sent": "✅ Murojaatingiz administratorga yuborildi. Javob kelishini kuting.",
-        "support_admin_title": "📩 Yangi murojaat",
-        "support_reply_btn": "✉️ Javob berish",
-        "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
-        "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
-    "uz": {
-        "welcome": (
-            "👋 Salom, {name}! Quiz Pilot Super Mini App tizimiga xush kelibsiz.\n\n"
-            "🚀 Yangi Yangilanish:\n🔒 Bizning aqlli to'lov tizimimiz ishga tushdi. "
-            "Premium rejalarni faollashtirib, cheksiz testlar yarating!\n\n"
-            "👇 Marhamat, pastdagi tugmani bosib ilovani oching!"
-        ),
-        "open_app": "Ilovani ochish 📱",
-        "payment_prompt": (
-            "🧾 Siz {tariff_name} ({tariff_price}) tarifini tanladingiz.\n\n"
-            "Iltimos, plastik kartaga to'lov qilganingiz haqidagi To'lov Chekini "
-            "(Rasm/Skrinshot ko'rinishida) shu yerga yuboring.\n"
-            "Sizning buyurtma raqamingiz: {tx_id}"
-        ),
-        "receipt_received": "✅ Rahmat! To'lov chekingiz administratorga yuborildi. Tez orada tekshirilib, tarifingiz faollashtiriladi.",
-        "receipt_error": "⚠️ To'lov chekingiz qabul qilindi, biroq adminga bildirishnoma yuborishda muammo bo'ldi. Admin paneldan tekshiriladi.",
-        "payment_approved": "🎉 Tabriklaymiz! Sizning {tariff_name} tarifi uchun qilgan to'lovingiz tasdiqlandi. Ilovada PRO status faollashdi! 👑",
-        "payment_rejected": "❌ Siz yuborgan to'lov cheki qabul qilinmadi yoki rad etildi. Agar xatolik bo'lgan deb o'ylasangiz, administratorga murojaat qiling.",
-        "quiz_limit_reached": "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
-        "public_limit_reached": "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
-        "flashcard_limit_reached": "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
-        "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
-    },
-        "support_prompt": "💬 Связаться с администратором. Напишите ваш вопрос или проблему здесь. Сообщение будет отправлено администратору.",
-        "support_sent": "✅ Ваше обращение отправлено администратору. Ожидайте ответа.",
-        "support_admin_title": "📩 Новое обращение",
-        "support_reply_btn": "✉️ Ответить",
-        "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
-        "support_reply_sent": "✅ Ответ отправлен пользователю.",
-    "ru": {
-        "welcome": (
-            "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
-            "🚀 Новое обновление:\n🔒 Запущена наша умная система оплаты. "
-            "Активируйте Premium тарифы и создавайте неограниченное количество тестов!\n\n"
-            "👇 Нажмите кнопку ниже, чтобы открыть приложение!"
-        ),
-        "open_app": "Открыть приложение 📱",
-        "payment_prompt": (
-            "🧾 Вы выбрали тариф {tariff_name} ({tariff_price}).\n\n"
-            "Пожалуйста, отправьте чек об оплате (в виде фото/скриншота) сюда.\n"
-            "Ваш номер заказа: {tx_id}"
-        ),
-        "receipt_received": "✅ Спасибо! Ваш чек отправлен администратору. В ближайшее время он будет проверен, и ваш тариф активируется.",
-        "receipt_error": "⚠️ Ваш чек принят, но возникла проблема с отправкой уведомления администратору. Он будет проверен через админ-панель.",
-        "payment_approved": "🎉 Поздравляем! Ваш платеж по тарифу {tariff_name} подтвержден. В приложении активирован PRO статус! 👑",
-        "payment_rejected": "❌ Ваш чек об оплате был отклонен. Если вы считаете, что произошла ошибка, свяжитесь с администратором.",
-        "quiz_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать тесты, перейдите на Premium тариф. 👑",
-        "public_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
-        "flashcard_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
-        "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
-    },
-        "support_prompt": "💬 Contact Admin. Write your question or problem here. Your message will be sent to the administrator.",
-        "support_sent": "✅ Your message has been sent to the administrator. Please wait for a reply.",
-        "support_admin_title": "📩 New support request",
-        "support_reply_btn": "✉️ Reply",
-        "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
-        "support_reply_sent": "✅ Reply sent to the user.",
-    "en": {
-        "welcome": (
-            "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
-            "🚀 New Update:\n🔒 Our smart payment system is now live. "
-            "Activate Premium plans to generate unlimited quizzes!\n\n"
-            "👇 Tap the button below to open the app!"
-        ),
-        "open_app": "Open App 📱",
-        "payment_prompt": (
-            "🧾 You have selected the {tariff_name} ({tariff_price}) plan.\n\n"
-            "Please send your payment receipt (as a Photo/Screenshot) here.\n"
-            "Your Order ID is: {tx_id}"
-        ),
-        "receipt_received": "✅ Thank you! Your payment receipt has been sent to the administrator. It will be verified shortly, and your plan will be activated.",
-        "receipt_error": "⚠️ Your receipt was received, but there was an issue notifying the admin. It will be reviewed via the admin panel.",
-        "payment_approved": "🎉 Congratulations! Your payment for the {tariff_name} plan has been confirmed. PRO status is now active! 👑",
-        "payment_rejected": "❌ Your payment receipt was rejected. If you believe this is an error, please contact support.",
-        "quiz_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating quizzes. 👑",
-        "public_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
-        "flashcard_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
-        "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
-    }
-}
-
-def get_user_lang(user_id: int) -> str:
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-        row = cursor.fetchone()
-        conn.close()
-        if row and row[0] in MESSAGES:
-            return row[0]
-    except Exception as e:
-        logging.error(f"Foydalanuvchi tilini olishda xatolik: {e}")
-    return "uz"
-
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS quizzes (
-        id TEXT PRIMARY KEY,
-        user_id INTEGER,
-        title TEXT,
-        total INTEGER,
-        answered INTEGER,
-        quiz_json TEXT,
-        created_at INTEGER,
-        last_score INTEGER DEFAULT -1,
-        last_percent INTEGER DEFAULT -1,
-        is_public INTEGER DEFAULT 0)""")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        created_at INTEGER,
-        language TEXT DEFAULT 'uz',
-        status TEXT DEFAULT 'Oddiy foydalanuvchi',
-        plan_key TEXT DEFAULT '',
-        free_used INTEGER DEFAULT 0,
-        public_free_used INTEGER DEFAULT 0,
-        flashcard_free_used INTEGER DEFAULT 0,
-        premium_until INTEGER DEFAULT 0,
-        last_active INTEGER DEFAULT 0)""")
-
-    cursor.execute("PRAGMA table_info(users);")
-    columns = [col[1] for col in cursor.fetchall()]
-
-    if "status" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Oddiy foydalanuvchi';")
-        except Exception:
-            pass
-    if "free_used" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN free_used INTEGER DEFAULT 0;")
-        except Exception:
-            pass
-    if "premium_until" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
-        except Exception:
-            pass
-    if "public_free_used" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN public_free_used INTEGER DEFAULT 0;")
-        except Exception:
-            pass
-    if "flashcard_free_used" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN flashcard_free_used INTEGER DEFAULT 0;")
-        except Exception:
-            pass
-    if "plan_key" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN plan_key TEXT DEFAULT '';" )
-        except Exception:
-            pass
-
-    if "last_active" not in columns:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN last_active INTEGER DEFAULT 0;")
-        except Exception:
-            pass
-
-    # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
-    cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
-    cursor.execute("UPDATE users SET public_free_used = 0 WHERE public_free_used IS NULL;")
-    cursor.execute("UPDATE users SET flashcard_free_used = 0 WHERE flashcard_free_used IS NULL;")
-    cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi' WHERE status IS NULL;")
-    cursor.execute("UPDATE users SET premium_until = 0 WHERE premium_until IS NULL;")
-    cursor.execute("UPDATE users SET plan_key = '' WHERE plan_key IS NULL;")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS flashcards (
-        id TEXT PRIMARY KEY,
-        user_id INTEGER,
-        front TEXT,
-        back TEXT,
-        created_at INTEGER)""")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS payments (
-        tx_id TEXT PRIMARY KEY,
-        user_id INTEGER,
-        tariff_name TEXT,
-        tariff_price TEXT,
-        status TEXT DEFAULT 'pending',
-        created_at INTEGER)""")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
-        id TEXT PRIMARY KEY,
-        owner_id INTEGER,
-        quiz_id TEXT,
-        code TEXT UNIQUE,
-        duration_minutes INTEGER DEFAULT 30,
-        created_at INTEGER,
-        expires_at INTEGER,
-        active INTEGER DEFAULT 1)""")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_participants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT,
-        user_id INTEGER,
-        first_name TEXT,
-        username TEXT,
-        score INTEGER DEFAULT 0,
-        total INTEGER DEFAULT 0,
-        percent INTEGER DEFAULT 0,
-        started_at INTEGER,
-        finished_at INTEGER,
-        UNIQUE(session_id, user_id))""")
-
-    conn.commit()
-    conn.close()
-
-
-init_db()
-
-
-class QuizItem(BaseModel):
-    question: str = Field(description="Savol matni")
-    options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz)")
-    correct_index: int = Field(description="To'g'ri javob indeks (0 dan 3 gacha)")
-    explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
-
-
-class QuizResponse(BaseModel):
-    quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
-
-
-class ProgressUpdateRequest(BaseModel):
-    quiz_id: str
-    user_id: int
-    correct_count: int
-    percent: int
-
-
-class FlashcardCreateRequest(BaseModel):
-    user_id: int
-    front: str
-    back: str
-
-
-class PaymentIntentRequest(BaseModel):
-    action: str
-    user_id: int
-    tariff_name: Optional[str] = None
-    tariff_price: Optional[str] = None
-    tariff_key: Optional[str] = None
-
-
-def add_user_to_db(user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute(
-            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, last_active) "
-            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0, ?)",
-            (user_id, int(time.time()), int(time.time())),
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
-
-
-def get_users_count():
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
-        active_since = int(time.time()) - 2 * 60
-        cursor.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= ?",
-            (active_since,),
-        )
-        count = cursor.fetchone()[0]
-        conn.close()
-        return count
-    except Exception as e:
-        logging.error(f"Faol foydalanuvchilar sonini olishda xato: {e}")
-        return 0
-
-
-def update_user_activity(user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute(
-            "UPDATE users SET last_active = ? WHERE user_id = ?",
-            (int(time.time()), user_id),
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logging.error(f"Faol foydalanuvchi vaqtini yangilashda xato: {e}")
-
-
-def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_key=None):
-    try:
-        user_lang = get_user_lang(user_id)
-        if tariff_key not in TARIFFS:
-            # Eski klientlardan kelgan tarif nomlarini ham saqlab qolamiz.
-            low = (tariff_name or "").lower()
-            if "o'qit" in low or "учител" in low or "teacher" in low:
-                tariff_key = "teachers"
-            elif "haft" in low or "недель" in low or "weekly" in low or "7" in low:
-                tariff_key = "weekly"
-            elif "oy" in low or "месяч" in low or "monthly" in low or "30" in low:
-                tariff_key = "monthly"
-            else:
-                tariff_key = "daily"
-        tariff_name = localized_tariff_name(tariff_key, user_lang)
-        tariff_price = TARIFFS[tariff_key]["price"]
-        tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
-
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-
-        # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
-        cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
-        cursor.execute(
-            "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
-            (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
-        )
-        conn.commit()
-        conn.close()
-
-        user_lang = get_user_lang(user_id)
-        msg_text = MESSAGES[user_lang]["payment_prompt"].format(
-            tariff_name=tariff_name,
-            tariff_price=tariff_price,
-            tx_id=tx_id
-        )
-
-        bot.send_message(user_id, msg_text, parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"To'lov jarayonini ishga tushirishda xato: {e}")
-
-
-@bot.message_handler(commands=["start"])
-def send_welcome(message):
-    user_id = message.from_user.id
-    add_user_to_db(user_id)
-    user_lang = get_user_lang(user_id)
-
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name)
-
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn_start = telebot.types.KeyboardButton(text="/start")
-
-    markup.row(btn_start)
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
-
-
-@bot.message_handler(content_types=["web_app_data"])
-def handle_webapp_data(message):
-    try:
-        logging.info(f"WebApp dan kelgan xom ma'lumot: {message.web_app_data.data}")
-        data = json.loads(message.web_app_data.data)
-
-        if data.get("action") == "contact_admin":
-            user_id = int(data.get("user_id") or message.from_user.id)
-            user_lang = get_user_lang(user_id)
-            support_waiting_users.add(user_id)
-            bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
-            return
-
-        if data.get("action") == "payment_intent":
-            user_id = data.get("user_id")
-            tariff_key = data.get("tariff_key")
-            tariff_name = data.get("tariff_name")
-            tariff_price = data.get("tariff_price")
-            trigger_payment_flow(user_id, tariff_name, tariff_price, tariff_key)
-    except Exception as e:
-        logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
-
-
-# --- ADMIN SUPPORT: murojaat va javob ---
-@bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
-def handle_support_text(message):
-    user_id = message.from_user.id
-    if ADMIN_ID and user_id == ADMIN_ID and user_id in support_reply_targets:
-        target_user_id = support_reply_targets.pop(user_id)
-        try:
-            bot.send_message(target_user_id, f"💬 Admin javobi:\n\n{message.text}")
-            bot.send_message(user_id, MESSAGES.get(get_user_lang(user_id), MESSAGES["uz"])["support_reply_sent"])
-        except Exception as e:
-            logging.error(f"Admin javobini yuborishda xato: {e}")
-            bot.send_message(user_id, "❌ Javobni yuborishda xatolik yuz berdi.")
-        return
-    if user_id in support_waiting_users:
-        support_waiting_users.discard(user_id)
-        user_lang = get_user_lang(user_id)
-        username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
-        first_name = message.from_user.first_name or "Mavjud emas"
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(telebot.types.InlineKeyboardButton(MESSAGES[user_lang]["support_reply_btn"], callback_data=f"support_reply:{user_id}"))
-        text = (f"{MESSAGES[user_lang]['support_admin_title']}\n\n"
-                f"👤 {first_name}\n🔗 Username: {username}\n🆔 Telegram ID: {user_id}\n🌐 Til: {user_lang.upper()}\n\n💬 {message.text}")
-        try:
-            target_admin = ADMIN_ID if ADMIN_ID else user_id
-            bot.send_message(target_admin, text, reply_markup=markup)
-            bot.send_message(user_id, MESSAGES[user_lang]["support_sent"])
-        except Exception as e:
-            logging.error(f"Admin murojaatini yuborishda xato: {e}")
-            bot.send_message(user_id, "❌ Murojaatni yuborishda xatolik yuz berdi.")
-        return
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("support_reply:"))
-def handle_support_reply_callback(call):
-    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
-        bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
-        return
-    try:
-        target_user_id = int(call.data.split(":", 1)[1])
-        support_reply_targets[call.from_user.id] = target_user_id
-        bot.answer_callback_query(call.id)
-        bot.send_message(call.from_user.id, MESSAGES.get(get_user_lang(call.from_user.id), MESSAGES["uz"])["support_reply_prompt"])
-    except Exception as e:
-        logging.error(f"Admin reply callback xatosi: {e}")
-        bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
-
-# --- ISHONCHLI TO'LOV CHEKI QABUL QILISH (STABLE PHOTO HANDLER) ---
-@bot.message_handler(content_types=["photo"])
-def handle_receipt_photo(message):
-    user_id = message.from_user.id
-    user_lang = get_user_lang(user_id)
-
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
-        (user_id,)
-    )
-    pending_pay = cursor.fetchone()
-    conn.close()
-
-    if not pending_pay:
-        return  # Kutilayotgan to'lov yo'q bo'lsa javob berilmaydi
-
-    tx_id, tariff_name, tariff_price = pending_pay
-
-    username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
-    first_name = message.from_user.first_name
-    file_id = message.photo[-1].file_id
-
-    admin_markup = telebot.types.InlineKeyboardMarkup()
-    btn_approve = telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"p_app_{tx_id}_{user_id}")
-    btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p_rej_{tx_id}_{user_id}")
-    admin_markup.row(btn_approve, btn_reject)
-
-    admin_text = (
-        f"💰 YANGI TO'LOV SO'ROVI!\n\n"
-        f"👤 Foydalanuvchi: {first_name} ({username})\n"
-        f"🆔 Telegram ID: {user_id}\n"
-        f"🌐 Til kodi: {user_lang.upper()}\n"
-        f"📦 Tanlangan Tarif: {tariff_name}\n"
-        f"💵 To'lov Summasi: {tariff_price}\n"
-        f"🧩 Tranzaksiya ID: {tx_id}\n\n"
-        f"Chek to'g'riligini tekshiring va pastdagi tugmalardan birini bosing."
-    )
-
-    target_admin = ADMIN_ID if ADMIN_ID else user_id
-
-    try:
-        bot.send_photo(
-            target_admin,
-            file_id,
-            caption=admin_text,
-            parse_mode="Markdown",
-            reply_markup=admin_markup,
-        )
-        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_received"])
-    except Exception as e:
-        logging.error(f"Admin ga rasm yuborishda xatolik yuz berdi: {e}")
-        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_error"])
-
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
-def handle_admin_decision(call):
-    if ADMIN_ID and call.from_user.id != ADMIN_ID:
-        bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
-        return
-
-    parts = call.data.split("_")
-    action = parts[1]
-    tx_id = parts[2]
-    user_id = int(parts[3])
-    user_lang = get_user_lang(user_id)
-
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = ?", (tx_id,))
-    pay_row = cursor.fetchone()
-
-    if not pay_row or pay_row[0] != "pending":
-        bot.answer_callback_query(call.id, "Bu so'rov allaqachon ko'rib chiqilgan!", show_alert=True)
-        conn.close()
-        return
-
-    tariff_name = pay_row[1]
-
-    if action == "app":
-        current_time = int(time.time())
-        # Eski to'lovlar uchun nomdan, yangi to'lovlar uchun canonical nomdan reja aniqlanadi.
-        plan_key = get_plan_key(tariff_name)
-        if not plan_key:
-            low = tariff_name.lower()
-            if "teacher" in low or "o'qit" in low or "учител" in low:
-                plan_key = "teachers"
-            elif "weekly" in low or "haft" in low or "недель" in low or "7" in low:
-                plan_key = "weekly"
-            elif "monthly" in low or "oy" in low or "месяч" in low or "30" in low:
-                plan_key = "monthly"
-            else:
-                plan_key = "daily"
-        duration = TARIFFS[plan_key]["duration"]
-        premium_until_timestamp = current_time + duration
-        cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
-        display_name = localized_tariff_name(plan_key, user_lang)
-        cursor.execute(
-            "UPDATE users SET status = ?, plan_key = ?, premium_until = ? WHERE user_id = ?",
-            (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, user_id),
-        )
-        conn.commit()
-
-        bot.answer_callback_query(call.id, "To'lov tasdiqlandi!")
-        try:
-            bot.edit_message_caption(
-                f"✅ {call.message.caption}\n\n🟢 TASDIQLANDI!",
-                call.message.chat.id,
-                call.message.message_id,
-            )
-        except Exception:
-            pass
-        try:
-            succ_msg = MESSAGES[user_lang]["payment_approved"].format(tariff_name=display_name)
-            bot.send_message(user_id, succ_msg)
-        except Exception:
-            pass
-
-    elif action == "rej":
-        cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = ?", (tx_id,))
-        conn.commit()
-        bot.answer_callback_query(call.id, "To'lov rad etildi.")
-        try:
-            bot.edit_message_caption(
-                f"❌ {call.message.caption}\n\n🔴 RAD ETILDI!",
-                call.message.chat.id,
-                call.message.message_id,
-            )
-        except Exception:
-            pass
-        try:
-            rej_msg = MESSAGES[user_lang]["payment_rejected"]
-            bot.send_message(user_id, rej_msg)
-        except Exception:
-            pass
-
-    conn.close()
-
-
-# --- FASTAPI ENDPOINTS ---
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.get("/", response_class=HTMLResponse)
-def read_root(request: Request):
-    response = templates.TemplateResponse("index.html", {"request": request})
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return response
-
-
-@app.post("/api/payment-intent")
-def api_payment_intent(req: PaymentIntentRequest):
-    if req.action == "payment_intent":
-        if req.tariff_key not in TARIFFS:
-            raise HTTPException(status_code=400, detail="Noto'g'ri tarif")
-        threading.Thread(
-            target=trigger_payment_flow,
-            args=(req.user_id, req.tariff_name, req.tariff_price, req.tariff_key),
-            daemon=True,
-        ).start()
-        return {
-            "status": "ok",
-            "message": "To'lov so'rovi muvaffaqiyatli qabul qilindi",
-        }
-    raise HTTPException(status_code=400, detail="Noto'g'ri amal")
-
-
-@app.get("/api/premium-status")
-def get_premium_status(user_id: int):
-    add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at "
-        "FROM users WHERE user_id = ?",
-        (user_id,),
-    )
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        return {
-            "status": "ok",
-            "user_status": "Oddiy foydalanuvchi",
-            "free_used": 0,
-            "public_free_used": 0,
-            "flashcard_free_used": 0,
-            "public_remaining": FREE_PUBLIC_LIMIT,
-            "flashcard_remaining": FREE_FLASHCARD_LIMIT,
-            "quiz_remaining": FREE_QUIZ_LIMIT,
-            "plan_key": "",
-            "is_paid": False,
-            "is_teacher": False,
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quiz Pilot - Super TMA</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --aero-bg: linear-gradient(135deg, #1c2b3a 0%, #0d1520 50%, #080c14 100%);
+            --aero-glass: rgba(255, 255, 255, 0.08);
+            --aero-glass-hover: rgba(255, 255, 255, 0.15);
+            --aero-border: rgba(255, 255, 255, 0.2);
+            --aero-border-glow: rgba(0, 162, 255, 0.5);
+            --text-color: #ffffff;
+            --text-hint: #b0c4de;
+            --accent-blue: #0078d7;
+            --accent-green: #28a745;
+            --accent-red: #e81123;
+            --accent-yellow: #ffc107;
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
 
-    user_status = row["status"] or "Oddiy foydalanuvchi"
-    plan_key = row["plan_key"] or get_plan_key(user_status)
-    premium_until = row["premium_until"] or 0
-    free_used = row["free_used"] if row["free_used"] is not None else 0
-    public_free_used = row["public_free_used"] if row["public_free_used"] is not None else 0
-    flashcard_free_used = row["flashcard_free_used"] if row["flashcard_free_used"] is not None else 0
-    created_at = row["created_at"] or int(time.time())
-    now = int(time.time())
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            background: var(--aero-bg);
+            background-attachment: fixed;
+            color: var(--text-color);
+            margin: 0; padding: 15px; padding-bottom: 95px;
+            -webkit-user-select: none; user-select: none;
+            min-height: 100vh;
+            box-sizing: border-border-box;
+        }
 
-    if is_active_paid_status(user_status, premium_until):
-        pass
-    elif "PRO" in user_status and premium_until > 0 and now > premium_until:
-        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0 WHERE user_id = ?", (user_id,))
-        conn.commit()
-        user_status, plan_key, premium_until = "Oddiy foydalanuvchi", "", 0
+        /* Windows Aero Glass Container Pattern */
+        .glass-panel {
+            background: var(--aero-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--aero-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.4);
+            border-left: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+        }
 
-    # 30 kunlik bepul hisob davri pullik davrdan mustaqil ishlaydi.
-    if now - created_at >= 30 * 24 * 3600 and not is_active_paid_status(user_status, premium_until):
-        cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
-            (now, user_id),
-        )
-        conn.commit()
-        free_used = 0
-        public_free_used = 0
-        flashcard_free_used = 0
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+        .header h1 { 
+            font-size: 24px; margin: 0; font-weight: 600; 
+            text-shadow: 0 0 10px rgba(0, 162, 255, 0.6);
+            letter-spacing: 0.5px;
+        }
 
-    is_paid = is_active_paid_status(user_status, premium_until)
-    is_teacher = is_paid and plan_key == "teachers"
-    lang = get_user_lang(user_id)
-    display_status = user_status
-    if is_paid:
-        display_status = f"PRO ✨ ({localized_tariff_name(plan_key, lang)})"
-        uzbek_time = time.gmtime(premium_until + 5 * 3600)
-        readable_date = time.strftime("%d.%m.%Y %H:%M", uzbek_time)
-        if lang == "ru": display_status += f" (До: {readable_date})"
-        elif lang == "en": display_status += f" (Until: {readable_date})"
-        else: display_status += f" (Gacha: {readable_date})"
-    conn.close()
-    return {
-        "status": "ok",
-        "user_status": display_status,
-        "free_used": free_used,
-        "public_free_used": public_free_used,
-        "flashcard_free_used": flashcard_free_used,
-        "public_remaining": max(0, FREE_PUBLIC_LIMIT - public_free_used),
-        "flashcard_remaining": max(0, FREE_FLASHCARD_LIMIT - flashcard_free_used),
-        "quiz_remaining": max(0, FREE_QUIZ_LIMIT - free_used),
-        "plan_key": plan_key,
-        "is_paid": is_paid,
-        "is_teacher": is_teacher,
-    }
+        .user-badge { 
+            font-size: 13px; color: #72f297; 
+            background: rgba(40, 167, 69, 0.2); 
+            padding: 6px 14px; border-radius: 20px; font-weight: 600; 
+            border: 1px solid rgba(114, 242, 151, 0.4);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(8px);
+        }
 
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+        .tab { 
+            background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.2) 100%);
+            border: 1px solid var(--aero-border); 
+            padding: 10px 16px; border-radius: 8px; color: var(--text-hint); 
+            font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center;
+            transition: all 0.2s ease;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .tab:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+        .tab.active { 
+            background: linear-gradient(180deg, #0099ff 0%, #005a9e 100%);
+            color: #fff; border-color: #00d2ff;
+            box-shadow: 0 0 12px rgba(0, 153, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        }
 
-@app.post("/api/create-quiz-web")
-async def create_quiz_web(
-    user_id: int = Form(...),
-    text: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
-    quiz_title: Optional[str] = Form(None),
-):
-    add_user_to_db(user_id)
-    user_lang = get_user_lang(user_id)
+        .quiz-card, .flash-card { 
+            background: var(--aero-glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 12px; padding: 18px; margin-bottom: 14px; 
+            border: 1px solid var(--aero-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.35);
+            box-shadow: var(--glass-shadow);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .quiz-card:hover { border-color: var(--aero-border-glow); transform: translateY(-2px); }
 
-    conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn_check.row_factory = sqlite3.Row
-    cursor_check = conn_check.cursor()
-    cursor_check.execute(
-        "SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = ?",
-        (user_id,),
-    )
-    user_row = cursor_check.fetchone()
+        .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+        .action-group { display: flex; gap: 8px; align-items: center; }
 
-    if user_row:
-        current_status = user_row["status"] or "Oddiy foydalanuvchi"
-        premium_until = user_row["premium_until"] or 0
-        free_used = user_row["free_used"] if user_row["free_used"] is not None else 0
-        created_at = user_row["created_at"] or int(time.time())
-        current_now = int(time.time())
+        /* Aero Glossy Buttons */
+        .btn-circle, .btn-delete, .btn-public {
+            background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, rgba(0,0,0,0.3) 100%);
+            border: 1px solid var(--aero-border); border-radius: 8px; 
+            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; 
+            font-size: 15px; cursor: pointer; color: #fff;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+            transition: all 0.2s ease;
+        }
+        .btn-circle:hover, .btn-delete:hover, .btn-public:hover {
+            background: linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(0,0,0,0.1) 100%);
+            box-shadow: 0 0 10px rgba(255,255,255,0.3);
+        }
+        .btn-delete { color: #ff6b6b; border-color: rgba(232, 17, 35, 0.4); }
+        .btn-delete:hover { background: linear-gradient(180deg, rgba(232, 17, 35, 0.6) 0%, rgba(150, 0, 0, 0.6) 100%); color: #fff; }
+        .btn-public { color: var(--text-hint); }
+        .btn-public.is-active { color: #ffe600; border-color: rgba(255, 230, 0, 0.5); background: rgba(255, 230, 0, 0.15); box-shadow: 0 0 8px rgba(255, 230, 0, 0.4); }
 
-        thirty_days_sec = 30 * 24 * 3600
-        if current_now - created_at >= thirty_days_sec:
-            cursor_check.execute(
-                "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
-                (current_now, user_id),
-            )
-            conn_check.commit()
-            free_used = 0
+        .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+        .progress-line-container { background: rgba(0, 0, 0, 0.4); border-radius: 10px; height: 8px; flex: 1; margin-right: 15px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
+        .progress-line-bar { height: 100%; border-radius: 10px; transition: width 0.4s ease; background: linear-gradient(90deg, #00d2ff 0%, #0078d7 100%); box-shadow: 0 0 8px #00d2ff; }
+        
+        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
+        
+        .support-contact-btn { width:100%; padding:12px 16px; border-radius:10px; cursor:pointer; color:#fff; font-weight:700; font-size:15px; text-align:center; background:linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.28) 100%); border:1px solid var(--aero-border); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(0,0,0,0.2); transition:all .2s ease; }
+        .support-contact-btn:hover, .support-contact-btn:active { background:linear-gradient(180deg,#0099ff 0%,#005a9e 100%); border-color:#00d2ff; box-shadow:0 0 12px rgba(0,153,255,.55), inset 0 1px 0 rgba(255,255,255,.5); }
 
-        if (
-            "PRO" in current_status
-            and premium_until > 0
-            and current_now > premium_until
-        ):
-            cursor_check.execute(
-                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
-                (user_id,),
-            )
-            conn_check.commit()
-            current_status = "Oddiy foydalanuvchi"
+        .screen { display: none; }
+        .screen.active { display: block; }
 
-        # 30 kunlik bepul limit: faqat 1 ta.
-        # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
-        # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
-        # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
-        if "PRO" not in current_status:
-            cursor_check.execute(
-                "UPDATE users "
-                "SET free_used = COALESCE(free_used, 0) + 1 "
-                "WHERE user_id = ? AND COALESCE(free_used, 0) < ?",
-                (user_id, FREE_QUIZ_LIMIT),
-            )
-            if cursor_check.rowcount != 1:
-                conn_check.close()
-                return {
-                    "status": "error",
-                    "error_code": "free_limit",
-                    "message": MESSAGES[user_lang]["quiz_limit_reached"],
+        .upload-box { 
+            border: 2px dashed rgba(255, 255, 255, 0.3); border-radius: 14px; padding: 30px 20px; 
+            text-align: center; cursor: pointer; background: var(--aero-glass); 
+            backdrop-filter: blur(12px); margin-bottom: 15px; color: var(--text-hint); 
+            transition: all 0.2s ease;
+        }
+        .upload-box:hover { border-color: var(--accent-blue); background: rgba(255, 255, 255, 0.12); }
+
+        .input-title, .input-card, .input-text { 
+            width: 100%; box-sizing: border-box; background: rgba(0, 0, 0, 0.35); 
+            border: 1px solid var(--aero-border); border-radius: 8px; padding: 12px; 
+            color: #fff; font-size: 15px; margin-bottom: 15px; outline: none; 
+            transition: all 0.2s ease; backdrop-filter: blur(8px);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .input-title:focus, .input-card:focus, .input-text:focus { 
+            border-color: #00d2ff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.5), inset 0 2px 4px rgba(0,0,0,0.5); 
+        }
+        .input-text { resize: vertical; margin-bottom: 20px; border-radius: 10px; }
+
+        .submit-btn { 
+            background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); 
+            color: #fff; border: 1px solid #00d2ff; width: 100%; padding: 14px; 
+            border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; 
+            box-shadow: 0 4px 15px rgba(0, 164, 239, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6); transition: all 0.2s ease;
+        }
+        .submit-btn:active { transform: scale(0.98); }
+
+        #game-screen { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: var(--aero-bg); z-index: 1000; padding: 20px; display: none; overflow-y: auto; 
+        }
+        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 25px; }
+        .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+        .options-list { display: flex; flex-direction: column; gap: 12px; }
+        
+        .opt-btn { 
+            background: var(--aero-glass); backdrop-filter: blur(10px);
+            border: 1px solid var(--aero-border); padding: 14px; border-radius: 10px; 
+            text-align: left; font-size: 16px; color: #fff; cursor: pointer; 
+            box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+        .opt-btn:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.4); }
+        .opt-btn.correct { background: linear-gradient(180deg, #28a745 0%, #1e7e34 100%) !important; border-color: #72f297 !important; box-shadow: 0 0 12px rgba(40, 167, 69, 0.6); }
+        .opt-btn.wrong { background: linear-gradient(180deg, #dc3545 0%, #bd2130 100%) !important; border-color: #ff8b94 !important; box-shadow: 0 0 12px rgba(220, 53, 69, 0.6); }
+
+        .explanation-box { 
+            background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 14px; margin-top: 20px; 
+            font-size: 14px; border-left: 4px solid var(--accent-red); display: none; 
+            backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .next-btn { 
+            background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: white; 
+            border: 1px solid #00d2ff; padding: 14px; border-radius: 8px; font-size: 16px; 
+            font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; 
+            box-shadow: 0 4px 15px rgba(0, 164, 239, 0.4);
+        }
+
+        /* Bottom Aero Navigation Taskbar */
+        .bottom-nav { 
+            position: fixed; bottom: 0; left: 0; right: 0; height: 70px; 
+            background: rgba(10, 16, 26, 0.75);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            display: flex; justify-content: space-around; 
+            border-top: 1px solid rgba(255, 255, 255, 0.25); 
+            align-items: center; z-index: 99; 
+            box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+        .nav-item { 
+            display: flex; flex-direction: column; align-items: center; background: none; 
+            border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; 
+            transition: all 0.2s ease;
+        }
+        .nav-item.active { color: #00d2ff; text-shadow: 0 0 8px rgba(0, 210, 255, 0.6); }
+        .nav-item.active .nav-icon { transform: translateY(-2px); filter: drop-shadow(0 0 5px #00d2ff); }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); transition: transform 0.2s ease; }
+
+        .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: #00d2ff; font-weight: bold; text-shadow: 0 0 8px rgba(0, 210, 255, 0.5); }
+        
+        .settings-box { 
+            background: var(--aero-glass); backdrop-filter: blur(12px); 
+            border-radius: 12px; padding: 20px; border: 1px solid var(--aero-border); margin-top: 15px; 
+            box-shadow: var(--glass-shadow);
+        }
+        .lang-group { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
+        .lang-btn { 
+            background: rgba(0, 0, 0, 0.25); border: 1px solid var(--aero-border); color: #fff; 
+            padding: 12px 16px; border-radius: 8px; font-size: 15px; font-weight: 600; 
+            text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; 
+            transition: all 0.2s ease;
+        }
+        .lang-btn.active { border-color: #00d2ff; background: rgba(0, 120, 215, 0.3); color: #fff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.3); }
+        /* Ovoz/Vibratsiya ON holati Til tanlangan tugmasi kabi doimiy ko'rinadi. */
+        /* Compact Aero Glass controls — approximately 60% of the previous button width. */
+        #vibration-toggle, #sound-toggle {
+            min-width: 66px !important;
+            width: 66px !important;
+            height: 34px;
+            padding: 5px 9px !important;
+            border-radius: 17px !important;
+            border: 1px solid rgba(120, 190, 255, 0.28) !important;
+            background: linear-gradient(180deg, rgba(65, 80, 100, 0.48), rgba(10, 15, 24, 0.72)) !important;
+            color: #aeb8c5 !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 8px rgba(0,0,0,0.35) !important;
+            text-align: center !important;
+            justify-content: center !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            line-height: 1 !important;
+            transition: all 0.2s ease;
+        }
+        #vibration-toggle.active, #sound-toggle.active {
+            border-color: #00d2ff !important;
+            background: linear-gradient(180deg, rgba(0, 155, 235, 0.72), rgba(0, 75, 145, 0.72)) !important;
+            color: #fff !important;
+            box-shadow: 0 0 7px rgba(0,210,255,0.75), 0 0 15px rgba(0,160,255,0.38), inset 0 1px 0 rgba(255,255,255,0.45) !important;
+            text-shadow: 0 0 5px rgba(255,255,255,0.65);
+        }
+        #vibration-toggle:not(.active), #sound-toggle:not(.active) {
+            background: linear-gradient(180deg, rgba(55, 65, 80, 0.42), rgba(8, 12, 18, 0.72)) !important;
+            border-color: rgba(120, 190, 255, 0.20) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.32) !important;
+            color: #8f9aaa !important;
+        }
+        
+        .fc-display { 
+            font-size: 18px; font-weight: bold; padding: 25px; text-align: center; 
+            background: rgba(0,0,0,0.3); border-radius: 10px; margin: 10px 0; 
+            border: 1px dashed var(--aero-border); cursor: pointer; backdrop-filter: blur(8px);
+            transition: all 0.2s ease;
+        }
+        .fc-display:hover { border-color: #00d2ff; }
+        
+        .premium-layout { display: flex; flex-direction: column; gap: 14px; margin-top: 5px; }
+        
+        .p-status-box { 
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.15) 0%, rgba(0, 0, 0, 0.3) 100%); 
+            border-radius: 12px; padding: 18px; border: 1px solid rgba(255, 215, 0, 0.4); 
+            text-align: center; backdrop-filter: blur(12px);
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.1);
+        }
+        .p-status-box h2 { font-size: 18px; color: #ffd700; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: center; gap: 8px; text-shadow: 0 0 8px rgba(255, 215, 0, 0.5); }
+        .p-status-box p { font-size: 13px; color: var(--text-hint); margin: 0; }
+        
+        .p-pro-header { 
+            background: var(--aero-glass); border-radius: 12px; padding: 16px; 
+            border: 1px solid var(--aero-border); text-align: center; backdrop-filter: blur(12px);
+        }
+        .p-pro-header h3 { font-size: 20px; color: #ffffff; margin: 0 0 8px 0; font-weight: 700; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        .p-pro-header p { font-size: 13px; color: var(--text-hint); margin: 0; line-height: 1.4; }
+        
+        .tariff-card { 
+            background: var(--aero-glass); border-radius: 12px; padding: 18px; 
+            border: 1px solid var(--aero-border); display: flex; justify-content: space-between; 
+            align-items: center; position: relative; backdrop-filter: blur(12px);
+            box-shadow: var(--glass-shadow); transition: all 0.2s ease;
+        }
+        .tariff-card:hover { border-color: rgba(255, 255, 255, 0.4); transform: translateY(-2px); }
+        .tariff-card.popular::before { 
+            content: "⭐"; position: absolute; top: -10px; right: 20px; 
+            background: linear-gradient(180deg, #ffd700 0%, #ff8c00 100%); 
+            color: #000; font-size: 10px; font-weight: bold; padding: 2px 8px; 
+            border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        
+        .tariff-info { display: flex; flex-direction: column; gap: 4px; max-width: 65%; }
+        .tariff-title { font-size: 16px; font-weight: bold; color: #ffffff; display: flex; align-items: center; gap: 6px; }
+        .tariff-desc { font-size: 12px; color: var(--text-hint); line-height: 1.3; }
+        .tariff-action { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+        .tariff-price { font-size: 16px; font-weight: 800; color: #ffffff; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+        
+        .activate-btn { 
+            background: linear-gradient(180deg, #ffd700 0%, #ff8c00 100%); 
+            color: #000; border: 1px solid #ffe600; padding: 8px 14px; 
+            border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; 
+            transition: all 0.2s ease; box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
+        }
+        .activate-btn:active { transform: scale(0.95); opacity: 0.9; }
+        
+        /* Modal Glass Effects */
+        .modal-overlay { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            z-index: 10000; display: none; align-items: center; justify-content: center; padding: 20px; 
+        }
+        .modal-box { 
+            background: linear-gradient(135deg, rgba(30, 45, 65, 0.9) 0%, rgba(15, 20, 30, 0.95) 100%); 
+            border-radius: 14px; border: 1px solid var(--aero-border); 
+            border-top: 1px solid rgba(255,255,255,0.4);
+            width: 100%; max-width: 340px; padding: 22px; text-align: center; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.7); backdrop-filter: blur(20px);
+        }
+        .modal-box h4 { font-size: 18px; margin: 0 0 10px 0; color: #ffd700; text-shadow: 0 0 8px rgba(255,215,0,0.4); }
+        .modal-box p { font-size: 13px; color: var(--text-hint); margin: 0 0 15px 0; line-height: 1.4; }
+        
+        .card-number-box { 
+            background: rgba(0,0,0,0.4); border: 1px dashed #ffd700; padding: 14px; 
+            border-radius: 8px; font-size: 18px; font-weight: bold; color: #ffffff; 
+            letter-spacing: 1px; cursor: pointer; margin-bottom: 8px; position: relative; 
+            transition: background 0.2s; backdrop-filter: blur(5px);
+        }
+        .card-number-box:active { background: rgba(255,215,0,0.1); }
+        
+        .copy-hint { font-size: 11px; color: #ffd700; display: block; margin-bottom: 15px; }
+        .toast-msg { background: #28a745; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 6px; display: inline-block; margin-bottom: 15px; display: none; width: max-content; margin-left: auto; margin-right: auto; box-shadow: 0 0 10px rgba(40, 167, 69, 0.5); }
+        .modal-buttons { display: flex; flex-direction: column; gap: 10px; }
+        
+        .btn-send-receipt { 
+            background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); 
+            color: #fff; border: 1px solid #00d2ff; padding: 12px; border-radius: 8px; 
+            font-size: 14px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 164, 239, 0.3);
+        }
+        .btn-close-modal { 
+            background: rgba(255,255,255,0.1); color: var(--text-hint); 
+            border: 1px solid var(--aero-border); padding: 10px; border-radius: 8px; 
+            font-size: 14px; cursor: pointer; 
+        }
+
+        .app-dialog-overlay { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            z-index: 20000; display: none; align-items: center; justify-content: center; 
+            padding: 24px; animation: fadeIn 0.2s ease; 
+        }
+        .app-dialog-box { 
+            background: linear-gradient(135deg, rgba(30, 45, 65, 0.95) 0%, rgba(15, 20, 30, 0.95) 100%); 
+            border-radius: 14px; border: 1px solid var(--aero-border); 
+            border-top: 1px solid rgba(255,255,255,0.4);
+            width: 100%; max-width: 300px; padding: 20px; text-align: center; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.7); 
+        }
+        .app-dialog-icon { font-size: 38px; margin-bottom: 12px; display: block; }
+        .app-dialog-msg { font-size: 15px; color: #ffffff; line-height: 1.4; margin-bottom: 20px; font-weight: 500; }
+        .app-dialog-footer { display: flex; gap: 10px; justify-content: center; }
+        .app-dialog-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--aero-border); font-size: 14px; font-weight: 600; cursor: pointer; }
+        .app-dialog-btn.primary { background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: #fff; border-color: #00d2ff; }
+        .app-dialog-btn.secondary { background: rgba(255,255,255,0.1); color: var(--text-hint); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <div id="create-screen" class="screen">
+        <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
+        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
+        <div class="upload-box" onclick="document.getElementById('file-input').click()">
+            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
+            <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
+            <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+        </div>
+        <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
+        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
+        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
+        <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
+    </div>
+
+    <div id="library-screen" class="screen active">
+        <div class="header">
+            <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
+            <span id="user-count-badge" class="user-badge">...</span>
+        </div>
+        <div class="tabs">
+            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
+            <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
+            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
+        </div>
+        <div id="lib-content-area"><div id="quiz-list"></div></div>
+    </div>
+
+    <div id="settings-screen" class="screen">
+        <div class="header"><h1 data-lang="nav_settings">Sozlamalar</h1></div>
+        <div class="settings-box">
+            <span style="font-weight: bold; font-size: 16px;" data-lang="select_lang">Tizim tilini tanlang:</span>
+            <div class="lang-group">
+                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha</button>
+                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский</button>
+                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English</button>
+            </div>
+        </div>
+            <div class="settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="vibration_title">📳 Vibratsiya</span>
+                <button id="vibration-toggle" class="lang-btn" type="button" onclick="toggleVibration()" style="min-width:110px;">ON</button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="vibration_desc">Tugmalarni bosganda yengil vibratsiya.</div>
+        </div>
+        <div class="settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="sound_title">🔊 Ovoz</span>
+                <button id="sound-toggle" class="lang-btn" type="button" onclick="toggleSound()" style="min-width:110px;">ON</button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="sound_desc">Test jarayonida tovushlar ijro etiladi.</div>
+        </div>
+        <div class="settings-box">
+            <button class="support-contact-btn" type="button" onclick="contactAdmin()">💬 <span data-lang="contact_admin">Admin bilan bog'lanish</span></button>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="contact_admin_desc">Savol yoki muammo bo'lsa, biz bilan bog'laning.</div>
+        </div>
+    </div>
+
+    <div id="premium-screen" class="screen">
+        <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
+        <div class="premium-layout">
+            <div class="p-status-box">
+                <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
+                <p id="p-status-val">Oddiy foydalanuvchi</p>
+                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> <span data-lang="limit_unit">ta</span></p>
+            </div>
+
+            <div class="p-pro-header">
+                <h3 data-lang="premium_pro_title">Quiz Pilot PRO 👑</h3>
+                <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
+            </div>
+
+            <div id="teacher-panel" class="p-status-box" style="display:none; text-align:left;">
+                <h2 style="justify-content:center;">👨‍🏫 <span data-lang="teacher_panel_title">O'qituvchi rejimi</span></h2>
+                <p data-lang="teacher_panel_desc" style="text-align:center; margin-bottom:12px;">Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.</p>
+                <select id="teacher-quiz-select" class="input-card" style="width:100%; box-sizing:border-box;"></select>
+                <select id="teacher-duration" class="input-card" style="width:100%; box-sizing:border-box;">
+                    <option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option>
+                </select>
+                <button class="submit-btn" onclick="createTeacherSession()" data-lang="teacher_create_btn">🚀 Guruh testini boshlash</button>
+                <div id="teacher-sessions-list" style="margin-top:12px;"></div>
+            </div>
+
+            <div class="tariff-card" id="card-daily">
+                <div class="tariff-info">
+                    <span class="tariff-title">⚡ Kunlik Cheksiz</span>
+                    <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">10 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('daily')">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="tariff-card popular" id="card-weekly">
+                <div class="tariff-info">
+                    <span class="tariff-title">📅 Haftalik Cheksiz</span>
+                    <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">35 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('weekly')">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="tariff-card" id="card-monthly">
+                <div class="tariff-info">
+                    <span class="tariff-title">🌙 Oylik Cheksiz</span>
+                    <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">65 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('monthly')">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="tariff-card" id="card-teachers">
+                <div class="tariff-info">
+                    <span class="tariff-title">🧑‍🏫 O'qituvchilar Uchun</span>
+                    <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">95 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="payment-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h4 id="m-tariff-title">Tarif</h4>
+            <p><span data-lang="modal_payment_text">To'lov summasi:</span> <b id="m-tariff-price" style="color:#fff;">0</b><br><span data-lang="modal_payment_hint">Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:</span></p>
+            <div class="card-number-box" onclick="copyCardNumber()">9860 0601 3135 0575</div>
+            <span class="copy-hint" data-lang="copy_hint">Karta raqamiga bosib nusxa oling 📄</span>
+            <div id="toast-notif" class="toast-msg" data-lang="toast_copied">Karta raqami nusxalandi! ✅</div>
+            <div class="modal-buttons">
+                <button class="btn-send-receipt" onclick="submitPaymentIntent()" data-lang="btn_send_receipt">Chekni yuborish 📑</button>
+                <button class="btn-close-modal" onclick="closePaymentModal()" data-lang="btn_close">Yopish</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-dialog" class="app-dialog-overlay">
+        <div class="app-dialog-box">
+            <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
+            <div id="app-dialog-msg" class="app-dialog-msg">Xabar...</div>
+            <div class="app-dialog-footer" id="app-dialog-footer">
+                <button class="app-dialog-btn primary" id="app-dialog-ok-btn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-screen">
+        <div class="game-header">
+            <span id="game-title">Test</span>
+            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
+        </div>
+        <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
+        <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
+        <div class="options-list" id="options-container"></div>
+        <div class="explanation-box" id="explanation-container"></div>
+        <button class="next-btn" id="next-question-btn" onclick="nextQuestion()"></button>
+    </div>
+
+    <div class="bottom-nav">
+        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕️</span><span data-lang="nav_create">Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
+        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
+        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready(); tg.expand();
+        tg.setHeaderColor('#121214');
+
+        const BASE_URL = window.location.origin;
+        let userId = 99999; 
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+            userId = tg.initDataUnsafe.user.id;
+        }
+
+        let currentLang = 'uz';
+        let currentTab = 'personal'; 
+        let currentQuizQuestions = [];
+        let currentQuestionIdx = 0;
+        let currentQuizId = "";
+        let isAnswered = false;
+        let correctAnswersCount = 0;
+        let wrongAnswersCount = 0;
+        let selectedTariffKey = "";
+        let currentTeacherSessionId = null;
+
+        const langPack = {
+            uz: {
+                nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
+                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
+                placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
+                placeholder_text: "Mavzu yoki konspekt matnini joylang...",
+                upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
+                btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
+                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
+                msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
+                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar",
+                btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
+                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
+                card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
+                premium_status_title: "💎 Sizning Statusingiz", regular_user: "Oddiy foydalanuvchi", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
+                modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
+                copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
+                btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!",
+                tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
+                tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
+                tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
+                explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
+                alert_limit_over: "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+                public_limit_over: "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
+                flashcard_limit_over: "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+                confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
+                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
+                teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️ Ishlash"
+            },
+            ru: {
+                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
+                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
+                placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
+                upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
+                btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
+                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
+                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Вопросов",
+                btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
+                alert_del_quiz: "Вы хотите удалить этот тест?", alert_success: "🎉 Тест успешно создан!", 
+                card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
+                premium_status_title: "💎 Ваш Статус", regular_user: "Обычный пользователь", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
+                modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
+                copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
+                btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту!",
+                tariff_daily_title: "⚡ Суточный Безлимит", tariff_daily_desc: "24 часа абсолютно безлимитного создания тестов",
+                tariff_weekly_title: "📅 Недельный Безлимит", tariff_weekly_desc: "7 дней безлимитного использования системы",
+                tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
+                tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "30 дней группового режима (расширенный)",
+                explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
+                alert_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать тесты, перейдите на Premium тариф. 👑",
+                public_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
+                flashcard_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
+                confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
+                teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест, создайте групповую сессию и отправьте ссылку ученикам.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️ Пройти"
+            },
+            en: {
+                nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
+                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
+                placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
+                upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
+                btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
+                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
+                msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
+                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Questions",
+                btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
+                alert_del_quiz: "Do you want to delete this quiz?", alert_success: "🎉 Quiz successfully created!", 
+                card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
+                premium_status_title: "💎 Your Status", regular_user: "Regular User", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
+                modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
+                copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
+                btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot!",
+                tariff_daily_title: "⚡ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
+                tariff_weekly_title: "📅 Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
+                tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
+                tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
+                explanation_label: "💡 Explanation:", active_users_suffix: "active users",
+                alert_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating quizzes. 👑",
+                public_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
+                flashcard_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
+                confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
+                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
+                teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz, start a group session and send the link to students.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️ Take quiz"
+            }
+        };
+
+        const tariffDetails = {
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "10 000 so'm" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "35 000 so'm" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "65 000 so'm" },
+            teachers: { uz: "O'qituvchilar Uchun (30 kun)", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "95 000 so'm" }
+        };
+
+        function showAppAlert(icon, text, callback = null) {
+            document.getElementById('app-dialog-icon').innerText = icon;
+            document.getElementById('app-dialog-msg').innerText = text;
+            const footer = document.getElementById('app-dialog-footer');
+            footer.innerHTML = `<button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>`;
+            document.getElementById('app-dialog').style.display = 'flex';
+            document.getElementById('app-dialog-ok-btn').onclick = function() {
+                document.getElementById('app-dialog').style.display = 'none';
+                if(callback) callback();
+            };
+        }
+
+        function showAppConfirm(icon, text, onConfirm) {
+            document.getElementById('app-dialog-icon').innerText = icon;
+            document.getElementById('app-dialog-msg').innerText = text;
+            const footer = document.getElementById('app-dialog-footer');
+            footer.innerHTML = `
+                <button class="app-dialog-btn secondary" id="app-dialog-cancel-btn">${langPack[currentLang].btn_cancel || 'Yopish'}</button>
+                <button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>
+            `;
+            document.getElementById('app-dialog').style.display = 'flex';
+            document.getElementById('app-dialog-ok-btn').onclick = function() {
+                document.getElementById('app-dialog').style.display = 'none';
+                onConfirm();
+            };
+            document.getElementById('app-dialog-cancel-btn').onclick = function() {
+                document.getElementById('app-dialog').style.display = 'none';
+            };
+        }
+
+        function openPaymentModal(key) {
+            selectedTariffKey = key;
+            const tariff = tariffDetails[key];
+            document.getElementById('m-tariff-title').innerText = tariff[currentLang] || tariff['uz'];
+            document.getElementById('m-tariff-price').innerText = tariff.price;
+            document.getElementById('payment-modal').style.display = 'flex';
+        }
+
+        function closePaymentModal() {
+            document.getElementById('payment-modal').style.display = 'none';
+        }
+
+        function copyCardNumber() {
+            navigator.clipboard.writeText("9860060131350575").then(() => {
+                const toast = document.getElementById('toast-notif');
+                toast.style.display = 'inline-block';
+                setTimeout(() => { toast.style.display = 'none'; }, 2000);
+            });
+        }
+
+        function submitPaymentIntent() {
+            const tariff = tariffDetails[selectedTariffKey];
+            const paymentData = {
+                action: "payment_intent",
+                user_id: userId,
+                tariff_key: selectedTariffKey,
+                tariff_name: tariff[currentLang] || tariff['uz'],
+                tariff_price: tariff.price
+            };
+            
+            showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
+                closePaymentModal();
+                
+                try {
+                    await fetch(`${BASE_URL}/api/payment-intent`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(paymentData)
+                    });
+                } catch(e) { console.log("API Fetch xatosi:", e); }
+                
+                try {
+                    tg.sendData(JSON.stringify(paymentData));
+                } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
+                
+                setTimeout(() => { tg.close(); }, 200);
+            });
+        }
+
+        // ===== Ovoz sozlamasi =====
+        const SOUND_STORAGE_KEY = `quizpilot_sound_${userId}`;
+        let soundEnabled = localStorage.getItem(SOUND_STORAGE_KEY) !== 'off';
+        let audioContext = null;
+
+        function updateSoundToggle() {
+            const btn = document.getElementById('sound-toggle');
+            if (!btn) return;
+            btn.innerText = soundEnabled
+                ? (langPack[currentLang].sound_on || 'ON')
+                : (langPack[currentLang].sound_off || 'OFF');
+            btn.classList.toggle('active', soundEnabled);
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            localStorage.setItem(SOUND_STORAGE_KEY, soundEnabled ? 'on' : 'off');
+            updateSoundToggle();
+            if (soundEnabled) playQuizSound('tap');
+        }
+
+        function getAudioContext() {
+            if (!audioContext) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return null;
+                audioContext = new AudioCtx();
+            }
+            return audioContext;
+        }
+
+        function playTone(ctx, frequency, start, duration, type='sine', volume=0.14) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(frequency, start);
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + duration + 0.02);
+        }
+
+        function playQuizSound(kind) {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return;
+                const play = () => {
+                    if (!soundEnabled) return;
+                    const now = ctx.currentTime + 0.02;
+                    if (kind === 'correct') {
+                        playTone(ctx, 660, now, 0.12, 'sine', 0.32);
+                        playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.30);
+                    } else if (kind === 'wrong') {
+                        // Noto'g'ri javob: telefon karnayida aniq eshitilishi uchun
+                        // juda past chastotalardan foydalanmaymiz.
+                        playTone(ctx, 330, now, 0.16, 'sine', 0.32);
+                        playTone(ctx, 247, now + 0.11, 0.22, 'sine', 0.32);
+                    } else if (kind === 'good') {
+                        // Yaxshi yakuniy natija.
+                        playTone(ctx, 523.25, now, 0.12, 'sine', 0.32);
+                        playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.32);
+                        playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.32);
+                    } else if (kind === 'bad') {
+                        // Yomon yakuniy natija.
+                        playTone(ctx, 330, now, 0.14, 'sine', 0.32);
+                        playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.32);
+                        playTone(ctx, 196, now + 0.23, 0.24, 'sine', 0.32);
+                    } else {
+                        playTone(ctx, 520, now, 0.045, 'sine', 0.32);
+                    }
+                };
+
+                // Telegram Mobile WebView ba'zan AudioContext'ni vaqtincha to'xtatadi.
+                // To'g'ri/noto'g'ri va yakuniy natija ovozlari uchun uni qayta uyg'otamiz.
+                if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+                    ctx.resume().then(() => {
+                        if (ctx.state === 'running') play();
+                    }).catch(() => {});
+                } else {
+                    play();
                 }
-            conn_check.commit()
-            free_slot_reserved = True
-        else:
-            free_slot_reserved = False
-    else:
-        free_slot_reserved = False
-
-    conn_check.close()
-
-    raw_text = ""
-    auto_title = "Matnli Test"
-
-    if file and file.filename and len(file.filename.strip()) > 0:
-        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-        file_path = os.path.join(DOWNLOADS_DIR, file.filename)
-        try:
-            contents = await file.read()
-            if len(contents) > 0:
-                with open(file_path, "wb") as f:
-                    f.write(contents)
-                if file.filename.endswith(".pdf"):
-                    reader = PdfReader(file_path)
-                    raw_text = "".join(
-                        [p.extract_text() + "\n" for p in reader.pages if p.extract_text()]
-                    )
-                    auto_title = file.filename.replace(".pdf", "")
-                elif file.filename.endswith(".docx"):
-                    doc = docx.Document(file_path)
-                    raw_text = "\n".join([p.text for p in doc.paragraphs])
-                    auto_title = file.filename.replace(".docx", "")
-        except Exception as e:
-            logging.error(f"Foydalanuvchi fayl yuklashda xato: {e}")
-
-    if not raw_text.strip() and text:
-        raw_text = text
-        auto_text_clean = text.replace("\n", " ").strip()
-        auto_title = (
-            auto_text_clean[:18] + "..."
-            if len(auto_text_clean) > 18
-            else auto_text_clean
-        )
-
-    if not raw_text.strip():
-        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
-
-    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
-    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
-    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
-    if not quiz_json_raw:
-        if free_slot_reserved:
-            try:
-                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
-                cur_restore = conn_restore.cursor()
-                cur_restore.execute(
-                    "UPDATE users "
-                    "SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 "
-                    "THEN free_used - 1 ELSE 0 END "
-                    "WHERE user_id = ?",
-                    (user_id,),
-                )
-                conn_restore.commit()
-                conn_restore.close()
-            except Exception as e:
-                logging.error(f"Bepul limitni qaytarishda xato: {e}")
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
-
-    try:
-        quiz_data = json.loads(quiz_json_raw)
-        items = quiz_data.get("quizzes", [])
-        if not items:
-            return {
-                "status": "error",
-                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
-            }
-
-        quiz_id = f"q_{uuid.uuid4().hex}"
-        final_title = (
-            quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
-        )
-
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute(
-            """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
-            (
-                quiz_id,
-                user_id,
-                final_title[:30],
-                len(items),
-                0,
-                quiz_json_raw,
-                int(time.time()),
-                -1,
-                -1,
-            ),
-        )
-        conn.commit()
-        conn.close()
-
-        try:
-            q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
-                title=final_title[:30],
-                count=len(items)
-            )
-            bot.send_message(user_id, q_ready_msg)
-        except Exception as e:
-            logging.error(f"Telegram xabari yuborilmadi: {e}")
-        return {"status": "ok"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-def generate_quiz_from_gemini(extracted_text):
-    global current_key_index
-
-    if not GOOGLE_API_KEYS:
-        logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
-        return None
-
-    system_instruction = """You are an advanced AI quiz generator.
-CRITICAL RULES:
-1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
-
-    total_keys = len(GOOGLE_API_KEYS)
-
-    # Har bir yangi test yaratish jarayoniga navbatdagi key beriladi.
-    # Lock parallel requestlar bir xil start_index olishini oldini oladi.
-    with key_lock:
-        start_index = current_key_index
-        current_key_index = (current_key_index + 1) % total_keys
-
-    # 7 ta key bo'lsa, bir vaqtning o'zida maksimal 7 ta Gemini request.
-    # Qolgan requestlar navbat kutadi va serverni birdaniga bosib yubormaydi.
-    with gemini_semaphore:
-        for i in range(total_keys):
-            key_idx = (start_index + i) % total_keys
-            api_key = GOOGLE_API_KEYS[key_idx].strip()
-
-            if not api_key:
-                continue
-
-            try:
-                client = genai.Client(api_key=api_key)
-                response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=extracted_text[:80000],
-                    config=genai_types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        response_schema=QuizResponse,
-                        temperature=0.2,
-                    ),
-                )
-
-                if response and response.text:
-                    logging.info(
-                        f"Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi: [{key_idx}]"
-                    )
-                    return response.text
-
-            except Exception as e:
-                logging.warning(
-                    f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. "
-                    f"Xatolik: {e}. Keyingi kalitga o'tilmoqda..."
-                )
-
-    logging.error("Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi.")
-    return None
-
-
-@app.get("/api/heartbeat")
-def user_heartbeat(user_id: int):
-    add_user_to_db(user_id)
-    update_user_activity(user_id)
-    return {"status": "ok", "active_users": get_users_count()}
-
-
-@app.get("/api/quizzes")
-def get_user_quizzes(user_id: int):
-    add_user_to_db(user_id)
-    total_users = get_users_count()
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "SELECT id, title, total, answered, created_at, last_score, last_percent,"
-        " is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC",
-        (user_id,),
-    )
-    personal_rows = cursor.fetchall()
-    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
-    lang_row = cursor.fetchone()
-    user_lang = lang_row["language"] if lang_row else "uz"
-    conn.close()
-
-    quizzes = [{
-        "id": r["id"],
-        "title": r["title"],
-        "total": r["total"],
-        "answered": r["answered"],
-        "created_at": r["created_at"],
-        "last_score": r["last_score"],
-        "last_percent": r["last_percent"],
-        "is_public": r["is_public"],
-    } for r in personal_rows]
-    return {
-        "status": "ok",
-        "quizzes": quizzes,
-        "total_users": total_users,
-        "user_lang": user_lang,
-    }
-
-
-@app.get("/api/public-quizzes")
-def get_public_quizzes(user_id: int):
-    add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
-        (user_id,),
-    )
-    u = cursor.fetchone()
-    now = int(time.time())
-    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_active_paid_status(u["status"] or "", u["premium_until"] or 0):
-        cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
-            (now, user_id),
-        )
-        conn.commit()
-        public_free_used = 0
-    else:
-        public_free_used = (u["public_free_used"] or 0) if u else 0
-
-    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
-    public_remaining = max(0, FREE_PUBLIC_LIMIT - public_free_used)
-
-    cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
-    rows = cursor.fetchall()
-    conn.close()
-
-    quizzes = [
-        {
-            "id": r["id"],
-            "title": r["title"],
-            "total": r["total"],
-            "created_at": r["created_at"],
-            "locked": (not is_paid and public_remaining <= 0),
+            } catch (_) {}
         }
-        for r in rows
-    ]
-    return {
-        "status": "ok",
-        "quizzes": quizzes,
-        "is_paid": is_paid,
-        "public_free_used": public_free_used,
-        "public_remaining": public_remaining,
-        "public_limit": FREE_PUBLIC_LIMIT,
-    }
 
+        // AudioContext'ni foydalanuvchining birinchi haqiqiy tapida uyg'otib qo'yamiz.
+        // Tugmalar dizayniga va boshqa funksiyalarga ta'sir qilmaydi.
+        document.addEventListener('pointerdown', () => {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
+                    ctx.resume().catch(() => {});
+                }
+            } catch (_) {}
+        }, { passive: true });
 
-@app.get("/api/public-quiz-detail")
-def get_public_quiz_detail(quiz_id: str, user_id: int):
-    add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+        // ===== Vibratsiya sozlamasi =====
+        const VIBRATION_STORAGE_KEY = `quizpilot_vibration_${userId}`;
+        let vibrationEnabled = localStorage.getItem(VIBRATION_STORAGE_KEY) !== 'off';
 
-    cursor.execute(
-        "SELECT status, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
-        (user_id,),
-    )
-    u = cursor.fetchone()
+        function updateVibrationToggle() {
+            const btn = document.getElementById('vibration-toggle');
+            if (!btn) return;
+            btn.innerText = vibrationEnabled
+                ? (langPack[currentLang].vibration_on || 'ON')
+                : (langPack[currentLang].vibration_off || 'OFF');
+            btn.classList.toggle('active', vibrationEnabled);
+        }
 
-    now = int(time.time())
-    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
+        function toggleVibration() {
+            vibrationEnabled = !vibrationEnabled;
+            localStorage.setItem(VIBRATION_STORAGE_KEY, vibrationEnabled ? 'on' : 'off');
+            updateVibrationToggle();
+            if (vibrationEnabled) triggerSoftVibration();
+        }
 
-    # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
-    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
-        cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
-            (now, user_id),
-        )
-        conn.commit()
-        public_free_used = 0
-    else:
-        public_free_used = (u["public_free_used"] or 0) if u else 0
+        function triggerSoftVibration() {
+            if (!vibrationEnabled) return;
+            try {
+                if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.impactOccurred === 'function') {
+                    tg.HapticFeedback.impactOccurred('light');
+                } else if (navigator.vibrate) {
+                    navigator.vibrate(10);
+                }
+            } catch (_) {}
+        }
 
-    # Premium / Teacher: cheksiz.
-    if not is_paid:
-        cursor.execute(
-            "UPDATE users SET public_free_used = COALESCE(public_free_used, 0) + 1 "
-            "WHERE user_id = ? AND COALESCE(public_free_used, 0) < ?",
-            (user_id, FREE_PUBLIC_LIMIT),
-        )
-        if cursor.rowcount != 1:
-            conn.close()
-            lang = get_user_lang(user_id)
-            messages = {
-                "uz": MESSAGES["uz"]["public_limit_reached"],
-                "ru": MESSAGES["ru"]["public_limit_reached"],
-                "en": MESSAGES["en"]["public_limit_reached"],
+        function setupVibration() {
+            document.addEventListener('pointerdown', (event) => {
+                if (!vibrationEnabled) return;
+                const target = event.target && event.target.closest
+                    ? event.target.closest('button, a, [role="button"], input, select, textarea')
+                    : null;
+                if (target) triggerSoftVibration();
+            }, { passive: true });
+            updateVibrationToggle();
+        }
+
+        function contactAdmin() {
+            const payload = { action: 'contact_admin', user_id: userId };
+            try {
+                if (tg && typeof tg.sendData === 'function') {
+                    tg.sendData(JSON.stringify(payload));
+                    setTimeout(() => { try { tg.close(); } catch (_) {} }, 200);
+                } else {
+                    showAppAlert('💬', langPack[currentLang].contact_admin_desc);
+                }
+            } catch (e) {
+                console.log("Admin bilan bog'lanish xatosi:", e);
             }
-            return {
-                "status": "error",
-                "error_code": "public_limit",
-                "message": messages.get(lang, messages["uz"]),
+        }
+
+        function applyLocalization() {
+            document.querySelectorAll('[data-lang]').forEach(el => {
+                const key = el.getAttribute('data-lang');
+                if (langPack[currentLang][key]) el.innerText = langPack[currentLang][key];
+            });
+            updateVibrationToggle();
+            updateSoundToggle();
+            document.querySelectorAll('[data-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-placeholder');
+                if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
+            });
+            
+            const dailyCard = document.getElementById('card-daily');
+            if(dailyCard) {
+                dailyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_daily_title;
+                dailyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_daily_desc;
             }
-        conn.commit()
-
-    cursor.execute("SELECT quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row or row["is_public"] != 1:
-        raise HTTPException(status_code=404, detail="Test topilmadi")
-
-    return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-
-
-@app.post("/api/toggle-public")
-def toggle_public(quiz_id: str, user_id: int, is_public: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?",
-        (is_public, quiz_id, user_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-
-@app.post("/api/set-language")
-def set_language(user_id: int, lang: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-
-# --- O'QITUVCHI GURUH REJIMI ---
-def require_teacher(user_id: int):
-    add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = ?", (user_id,))
-    row = cur.fetchone()
-    conn.close()
-    if not row or not is_active_paid_status(row["status"] or "", row["premium_until"] or 0) or (row["plan_key"] or get_plan_key(row["status"] or "")) != "teachers":
-        raise HTTPException(status_code=403, detail="Teacher tarif kerak")
-
-
-@app.get("/api/teacher-quizzes")
-def teacher_quizzes(user_id: int):
-    require_teacher(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT id, title, total FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return {"status": "ok", "quizzes": [dict(r) for r in rows]}
-
-
-class TeacherSessionCreateRequest(BaseModel):
-    user_id: int
-    quiz_id: str
-    duration_minutes: int = 30
-
-
-@app.post("/api/teacher/create-session")
-def teacher_create_session(req: TeacherSessionCreateRequest):
-    require_teacher(req.user_id)
-    duration = max(5, min(int(req.duration_minutes), 180))
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cur = conn.cursor()
-    cur.execute("SELECT id, title FROM quizzes WHERE id = ? AND user_id = ?", (req.quiz_id, req.user_id))
-    quiz = cur.fetchone()
-    if not quiz:
-        conn.close(); raise HTTPException(status_code=404, detail="Test topilmadi")
-    sid = f"ts_{uuid.uuid4().hex[:10]}"
-    code = uuid.uuid4().hex[:8].upper()
-    now = int(time.time())
-    expires = now + duration * 60
-    cur.execute("INSERT INTO teacher_sessions (id, owner_id, quiz_id, code, duration_minutes, created_at, expires_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)", (sid, req.user_id, req.quiz_id, code, duration, now, expires))
-    conn.commit(); conn.close()
-    return {"status": "ok", "session_id": sid, "code": code, "expires_at": expires, "quiz_title": quiz[1]}
-
-
-@app.get("/api/teacher-sessions")
-def teacher_sessions(user_id: int):
-    require_teacher(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory = sqlite3.Row
-    cur = conn.cursor(); cur.execute("SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.owner_id=? ORDER BY s.created_at DESC LIMIT 30", (user_id,))
-    rows=cur.fetchall(); conn.close(); now=int(time.time())
-    result=[]
-    for r in rows:
-        active=bool(r["active"] and r["expires_at"]>=now)
-        result.append({**dict(r), "active": active})
-    return {"status":"ok", "sessions":result}
-
-
-@app.get("/api/teacher-session")
-def teacher_session_info(code: str, user_id: int):
-    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=?", (code.upper(),))
-    row=cur.fetchone(); conn.close()
-    if not row: raise HTTPException(status_code=404, detail="Sessiya topilmadi")
-    if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail="Sessiya muddati tugagan")
-    return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"]}
-
-
-@app.get("/api/teacher-session-quiz")
-def teacher_session_quiz(session_id: str, user_id: int):
-    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, s.expires_at, s.active, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=?", (session_id,))
-    row=cur.fetchone(); conn.close()
-    if not row: raise HTTPException(status_code=404, detail="Sessiya topilmadi")
-    if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail="Sessiya muddati tugagan")
-    return {"status":"ok", "quiz_id":row["quiz_id"], "quiz_json":json.loads(row["quiz_json"])}
-
-
-class TeacherSubmitRequest(BaseModel):
-    session_id: str
-    user_id: int
-    first_name: str = ""
-    username: str = ""
-    score: int
-    total: int
-    percent: int
-
-
-@app.post("/api/teacher-submit")
-def teacher_submit(req: TeacherSubmitRequest):
-    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT expires_at, active FROM teacher_sessions WHERE id=?", (req.session_id,)); s=cur.fetchone()
-    if not s: conn.close(); raise HTTPException(status_code=404, detail="Sessiya topilmadi")
-    now=int(time.time())
-    if not s["active"] or now>s["expires_at"]: conn.close(); raise HTTPException(status_code=410, detail="Sessiya muddati tugagan")
-    cur.execute("INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,user_id) DO UPDATE SET first_name=excluded.first_name, username=excluded.username, score=excluded.score, total=excluded.total, percent=excluded.percent, finished_at=excluded.finished_at", (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
-    conn.commit(); conn.close(); return {"status":"ok"}
-
-
-@app.get("/api/teacher-session-results")
-def teacher_session_results(session_id: str, user_id: int):
-    require_teacher(user_id)
-    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=?", (session_id,user_id)); s=cur.fetchone()
-    if not s: conn.close(); raise HTTPException(status_code=404, detail="Sessiya topilmadi")
-    cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall(); conn.close()
-    return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"]}, "participants":[dict(r) for r in rows]}
-
-
-def _teacher_export_rows(session_id, owner_id):
-    require_teacher(owner_id)
-    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=?", (session_id,owner_id)); s=cur.fetchone()
-    cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC", (session_id,)); rows=cur.fetchall(); conn.close()
-    if not s: raise HTTPException(status_code=404, detail="Sessiya topilmadi")
-    return s, rows
-
-
-def _register_pdf_font():
-    candidates=["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
-    bolds=["/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
-    reg=bld=False
-    for path in candidates:
-        if os.path.exists(path):
-            try: pdfmetrics.registerFont(TTFont("QuizPilotFont", path)); reg=True; break
-            except Exception: pass
-    for path in bolds:
-        if os.path.exists(path):
-            try: pdfmetrics.registerFont(TTFont("QuizPilotFontBold", path)); bld=True; break
-            except Exception: pass
-    return reg,bld
-
-
-@app.get("/api/teacher-export")
-def teacher_export(session_id: str, user_id: int, format: str):
-    s, rows = _teacher_export_rows(session_id, user_id)
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    fmt=format.lower(); safe=re.sub(r"[^A-Za-z0-9_-]+", "_", s["title"] or "quiz")[:40]
-    if fmt=="xlsx":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.xlsx")
-        wb=Workbook(); ws=wb.active; ws.title="Natijalar"
-        ws.append(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]);
-        for i,r in enumerate(rows,1): ws.append([i,r["first_name"],r["username"],r["score"],r["total"],r["percent"]])
-        ws.freeze_panes="A2"; wb.save(path)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    if fmt=="docx":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.docx")
-        doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
-        table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
-        for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
-        for i,r in enumerate(rows,1):
-            cells=table.add_row().cells
-            vals=[i,r["first_name"],r["username"],r["score"],r["total"],f"{r['percent']}%"]
-            for j,v in enumerate(vals): cells[j].text=str(v)
-        doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    if fmt=="pdf":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
-        reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
-        doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=28,leftMargin=28,topMargin=28,bottomMargin=28)
-        styles=getSampleStyleSheet(); title_style=ParagraphStyle("qp_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER)
-        body_style=ParagraphStyle("qp_body",parent=styles["BodyText"],fontName=font,fontSize=8)
-        story=[Paragraph(s["title"],title_style),Spacer(1,8),Paragraph(f"Session: {s['code']}",body_style),Spacer(1,8)]
-        data=[["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]]
-        for i,r in enumerate(rows,1): data.append([str(i),str(r["first_name"]),str(r["username"]),str(r["score"]),str(r["total"]),f"{r['percent']}%"] )
-        table=Table(data,repeatRows=1,colWidths=[24,170,100,45,40,45]); table.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("FONTNAME",(0,0),(-1,0),bold),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"MIDDLE")])); story.append(table); doc.build(story)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
-    raise HTTPException(status_code=400, detail="Noto'g'ri format")
-
-
-@app.get("/api/flashcards")
-def get_flashcards(user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY"
-        " created_at DESC",
-        (user_id,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
-    return {"status": "ok", "cards": cards}
-
-
-@app.post("/api/create-flashcard")
-def create_flashcard(req: FlashcardCreateRequest):
-    add_user_to_db(req.user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = ?",
-        (req.user_id,),
-    )
-    u = cursor.fetchone()
-    now = int(time.time())
-    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
-
-    # 30 kunlik bepul davr tugagan bo'lsa, uchala hisoblagichni reset qilamiz.
-    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
-        cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
-            (now, req.user_id),
-        )
-        conn.commit()
-
-    # Premium / Teacher: cheksiz.
-    if not is_paid:
-        cursor.execute(
-            "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
-            "WHERE user_id = ? AND COALESCE(flashcard_free_used, 0) < ?",
-            (req.user_id, FREE_FLASHCARD_LIMIT),
-        )
-        if cursor.rowcount != 1:
-            conn.close()
-            lang = get_user_lang(req.user_id)
-            messages = {
-                "uz": MESSAGES["uz"]["flashcard_limit_reached"],
-                "ru": MESSAGES["ru"]["flashcard_limit_reached"],
-                "en": MESSAGES["en"]["flashcard_limit_reached"],
+            const weeklyCard = document.getElementById('card-weekly');
+            if(weeklyCard) {
+                weeklyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_weekly_title;
+                weeklyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_weekly_desc;
             }
-            return {
-                "status": "error",
-                "error_code": "flashcard_limit",
-                "message": messages.get(lang, messages["uz"]),
+            const monthlyCard = document.getElementById('card-monthly');
+            if(monthlyCard) {
+                monthlyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_monthly_title;
+                monthlyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_monthly_desc;
             }
-        conn.commit()
+            const teachersCard = document.getElementById('card-teachers');
+            if(teachersCard) {
+                teachersCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_teacher_title;
+                teachersCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_teacher_desc;
+            }
 
-    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
-    cursor.execute(
-        "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
-        (card_id, req.user_id, req.front, req.back, int(time.time())),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+            // Faqat til tugmalarining active holatini boshqaramiz.
+            // Ovoz va Vibratsiya tugmalarining active holatiga tegilmaydi.
+            document.querySelectorAll('#lang-uz, #lang-ru, #lang-en').forEach(b => b.classList.remove('active'));
+            const activeBtn = document.getElementById(`lang-${currentLang}`);
+            if(activeBtn) activeBtn.classList.add('active');
+        }
 
+        function switchScreen(screenName) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(`${screenName}-screen`).classList.add('active');
+            document.getElementById(`nav-${screenName}`).classList.add('active');
+            applyLocalization();
+            if(screenName === 'library') {
+                if(currentTab === 'personal') loadQuizzes();
+                else if(currentTab === 'public') loadPublicQuizzes();
+                else if(currentTab === 'cards') loadFlashcards();
+            }
+            if(screenName === 'premium') { loadPremiumStatus(); loadTeacherPanel(); }
+        }
 
-@app.delete("/api/delete-flashcard")
-def delete_flashcard(card_id: str, user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id)
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+        async function loadPremiumStatus() {
+            try {
+                const res = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
+                const data = await res.json();
+                if(data && data.status === 'ok') {
+                    const localizedRegularUser = (langPack[currentLang] && langPack[currentLang].regular_user)
+                        ? langPack[currentLang].regular_user
+                        : (data.user_status || "Regular User");
+                    document.getElementById('p-status-val').innerText =
+                        data.is_paid ? (data.user_status || "PRO") : localizedRegularUser;
 
+                    // Premium oynasida foydalanuvchiga TEST yaratish bo'yicha qolgan
+                    // 30 kunlik bepul limit ko'rsatiladi: 3 → 2 → 1 → 0.
+                    document.getElementById('p-limit-val').innerText =
+                        data.quiz_remaining !== undefined ? data.quiz_remaining : "0";
 
-@app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
-    raise HTTPException(status_code=404, detail="Test topilmadi")
+                    const tp=document.getElementById('teacher-panel');
+                    if(tp) tp.style.display=data.is_teacher ? 'block' : 'none';
+                }
+            } catch(e){}
+        }
 
+        async function changeLanguage(lang) {
+            currentLang = lang;
+            applyLocalization();
+            try {
+                await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
+            } catch(e){}
+            loadPremiumStatus();
+            if(currentTab === 'personal' || currentTab === 'public') switchLibTab(currentTab);
+        }
 
-@app.post("/api/update-progress")
-def update_progress(data: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
-        " WHERE id = ? AND user_id = ?",
-        (data.correct_count, data.percent, data.quiz_id, data.user_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+        function switchLibTab(tabName) {
+            currentTab = tabName;
+            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+            if(tabName === 'personal') {
+                document.getElementById('tab-personal').classList.add('active');
+                loadQuizzes();
+            } else if(tabName === 'public') {
+                document.getElementById('tab-public').classList.add('active');
+                loadPublicQuizzes();
+            } else if(tabName === 'cards') {
+                document.getElementById('tab-cards').classList.add('active');
+                loadFlashcards();
+            }
+        }
 
+        function fileSelected(input) {
+            if(input.files && input.files.length > 0) {
+                document.getElementById('upload-text').innerText = "Selected: " + input.files[0].name;
+            }
+        }
 
-@app.delete("/api/delete-quiz")
-def delete_quiz(quiz_id: str, user_id: int):
-    try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        cursor.execute(
-            "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
-        )
-        conn.commit()
-        conn.close()
-        return {"status": "ok", "message": "Test o'chirildi."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Xatolik.")
+        async function startGeneration() {
+            const textInput = document.getElementById('text-input').value.trim();
+            const quizTitleInput = document.getElementById('quiz-title-input').value.trim();
+            const fileInput = document.getElementById('file-input');
+            const genBtn = document.getElementById('generate-btn');
+            const loader = document.getElementById('loading-status');
 
+            if (!textInput && fileInput.files.length === 0) {
+                showAppAlert("✍️", "Iltimos, matn kiriting yoki fayl yuklang!");
+                return;
+            }
 
-def start_bot_polling():
-    while True:
-        try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=10)
-        except Exception:
-            time.sleep(5)
+            genBtn.style.display = "none";
+            loader.style.display = "block";
 
+            const formData = new FormData();
+            formData.append('user_id', userId);
+            if (textInput) formData.append('text', textInput);
+            if (fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
+            if (quizTitleInput) formData.append('quiz_title', quizTitleInput);
 
-@app.on_event("startup")
-async def startup_event():
-    threading.Thread(target=start_bot_polling, daemon=True).start()
+            try {
+                const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data && data.status === "ok") {
+                    showAppAlert("🚀", langPack[currentLang].alert_success, () => {
+                        document.getElementById('text-input').value = "";
+                        document.getElementById('quiz-title-input').value = "";
+                        fileInput.value = "";
+                        document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
+                        switchScreen('library');
+                    });
+                } else {
+                    if (data.error_code === "free_limit" || data.message && (data.message.includes("limit") || data.message.includes("лимит") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
+                        showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
+                    } else {
+                        showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik"));
+                    }
+                }
+            } catch (error) { showAppAlert("❌", langPack[currentLang].alert_system_err); }
+            finally {
+                genBtn.style.display = "block";
+                loader.style.display = "none";
+            }
+        }
 
+        async function loadQuizzes() {
+            try {
+                const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
+                const data = await response.json();
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+                // Faqat hozir ham "Testlar" bo'limi tanlangan bo'lsa natijani ekranga chiqaramiz.
+                // Eski/asynchronous so'rov Ommaviy yoki Kartochkalar bo'limini ustidan yozib yubormaydi.
+                const libraryScreen = document.getElementById('library-screen');
+                if (currentTab !== 'personal' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
+                
+                let liveUsers = 0;
+                if (data && data.total_users !== undefined) liveUsers = data.total_users;
+                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
+                document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
+
+                if (data && data.user_lang) {
+                    currentLang = data.user_lang;
+                    applyLocalization();
+                }
+
+                const container = document.getElementById('lib-content-area');
+                container.innerHTML = `<div id="quiz-list"></div>`;
+                const listDiv = document.getElementById('quiz-list');
+                
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
+                        const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
+                        const displayPercent = hasScore ? quiz.last_percent : 0;
+                        const scoreText = hasScore ? `${langPack[currentLang].score_text}: ${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `${langPack[currentLang].q_count}: ${quiz.total}`;
+                        const pubClass = quiz.is_public ? 'is-active' : '';
+
+                        const card = document.createElement('div');
+                        card.className = 'quiz-card';
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div class="card-title">${quiz.title}</div>
+                                <div class="action-group">
+                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})">🌐</button>
+                                    <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">🗑️</button>
+                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
+                                </div>
+                            </div>
+                            <div class="progress-row">
+                                <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
+                                <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
+                            </div>
+                            <div class="card-footer"><span>${scoreText}</span><span>ID: ${quiz.id.replace('q_', '')}</span></div>
+                        `;
+                        listDiv.appendChild(card);
+                    });
+                } else {
+                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_tests}</div>`;
+                }
+            } catch (error) { console.error(error); }
+        }
+
+        async function loadPublicQuizzes() {
+            const container = document.getElementById('lib-content-area');
+            container.innerHTML = `<div style="text-align: center; color: #00d2ff; padding: 20px;">⏳ Loading...</div>`;
+            try {
+                const response = await fetch(`${BASE_URL}/api/public-quizzes?user_id=${userId}&_t=${Date.now()}`);
+                const data = await response.json();
+                const libraryScreen = document.getElementById('library-screen');
+                if (currentTab !== 'public' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
+                container.innerHTML = "";
+                if(data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
+                        const card = document.createElement('div');
+                        card.className = 'quiz-card';
+                        const canOpenPublic = data.is_paid || (data.public_remaining !== undefined && data.public_remaining > 0);
+                        const action = canOpenPublic
+                            ? `<button class="btn-circle" onclick="playQuiz('${quiz.id}', true)">${langPack[currentLang].public_open}</button>`
+                            : `<button class="btn-circle" onclick="showPublicLimitLocked()">🔒</button>`;
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div class="card-title">${quiz.title}</div>
+                                <div class="action-group">${action}</div>
+                            </div>
+                            <div class="card-footer"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>🌍 Global</span></div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_public}</div>`;
+                }
+            } catch(e) { container.innerHTML = "Error."; }
+        }
+
+        async function togglePublic(quizId, newState) {
+            try {
+                const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
+                if((await response.json()).status === 'ok') loadQuizzes();
+            } catch(e){}
+        }
+
+        function deleteQuiz(quizId) {
+            showAppConfirm("🗑️", langPack[currentLang].alert_del_quiz, async () => {
+                try {
+                    const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
+                    if ((await response.json()).status === "ok") loadQuizzes();
+                } catch (error) { console.log(error); }
+            });
+        }
+
+        async function loadFlashcards() {
+            const container = document.getElementById('lib-content-area');
+            container.innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="fc-front" class="input-card" placeholder="${langPack[currentLang].card_front}">
+                    <input type="text" id="fc-back" class="input-card" placeholder="${langPack[currentLang].card_back}">
+                    <button class="submit-btn" onclick="addFlashcard()">${langPack[currentLang].btn_add_card} 🗂️</button>
+                </div>
+                <div id="cards-list-div"></div>
+            `;
+            const listDiv = document.getElementById('cards-list-div');
+            try {
+                const res = await fetch(`${BASE_URL}/api/flashcards?user_id=${userId}&_t=${Date.now()}`);
+                const data = await res.json();
+                const libraryScreen = document.getElementById('library-screen');
+                if (currentTab !== 'cards' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
+                if(data && data.cards && data.cards.length > 0) {
+                    data.cards.forEach(c => {
+                        const card = document.createElement('div');
+                        card.className = 'flash-card';
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div id="body-${c.id}" class="fc-display" onclick="flipCard('${c.id}', '${c.front}', '${c.back}')">${c.front}</div>
+                                <button class="btn-delete" onclick="deleteCard('${c.id}')">🗑️</button>
+                            </div>
+                        `;
+                        listDiv.appendChild(card);
+                    });
+                } else {
+                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 30px;">${langPack[currentLang].msg_no_cards}</div>`;
+                }
+            } catch(e){}
+        }
+
+        async function addFlashcard() {
+            const front = document.getElementById('fc-front').value.trim();
+            const back = document.getElementById('fc-back').value.trim();
+            if(!front || !back) return;
+            try {
+                const response = await fetch(`${BASE_URL}/api/create-flashcard`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, front: front, back: back })
+                });
+                const data = await response.json();
+                if(data && data.status === 'ok') {
+                    document.getElementById('fc-front').value = "";
+                    document.getElementById('fc-back').value = "";
+                    loadFlashcards();
+                } else if(data && data.error_code === 'flashcard_limit') {
+                    showAppAlert("🔒", langPack[currentLang].flashcard_limit_over, () => switchScreen('premium'));
+                }
+            } catch(e){}
+        }
+
+        function flipCard(id, front, back) {
+            const el = document.getElementById(`body-${id}`);
+            if(el.innerText === front) {
+                el.innerText = back; el.style.color = '#ffd700';
+            } else {
+                el.innerText = front; el.style.color = '#fff';
+            }
+        }
+
+        function deleteCard(id) {
+            showAppConfirm("🗑️", langPack[currentLang].alert_del_card, async () => {
+                try {
+                    await fetch(`${BASE_URL}/api/delete-flashcard?card_id=${id}&user_id=${userId}`, { method: 'DELETE' });
+                    loadFlashcards();
+                } catch(e){}
+            });
+        }
+
+        async function playQuiz(quizId, isPublic=false, sessionId=null) {
+            try {
+                let url;
+                if (sessionId) url = `${BASE_URL}/api/quiz-detail?quiz_id=${quizId}&_t=${Date.now()}`;
+                else if (isPublic) url = `${BASE_URL}/api/public-quiz-detail?quiz_id=${quizId}&user_id=${userId}&_t=${Date.now()}`;
+                else url = BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now();
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data && data.error_code === "public_limit") {
+                    showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
+                    return;
+                }
+                if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
+                    currentQuizId = quizId;
+                    currentQuizQuestions = data.quiz_json.quizzes;
+                    currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
+                    document.getElementById('game-screen').style.display = 'block';
+                    showQuestion();
+                }
+            } catch (error) { showAppAlert("❌", "Yuklashda xatolik."); }
+        }
+
+        function showQuestion() {
+            if (currentQuestionIdx >= currentQuizQuestions.length) {
+                finishQuiz(); return;
+            }
+            isAnswered = false;
+            const q = currentQuizQuestions[currentQuestionIdx];
+            document.getElementById('game-progress').innerText = `${currentLang === 'ru' ? 'Вопрос' : currentLang === 'en' ? 'Question' : 'Savol'}: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
+            document.getElementById('question-text').innerText = q.question;
+            
+            const container = document.getElementById('options-container');
+            container.innerHTML = "";
+            document.getElementById('explanation-container').style.display = 'none';
+            
+            const nextBtn = document.getElementById('next-question-btn');
+            nextBtn.style.display = 'none';
+            nextBtn.innerText = (currentQuestionIdx === currentQuizQuestions.length - 1) ? langPack[currentLang].btn_finish : langPack[currentLang].btn_next;
+
+            const prefixes = ["A) ", "B) ", "C) ", "D) "];
+            q.options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'opt-btn';
+                const hasPrefix = /^[A-D][)|.]/i.test(opt.trim());
+                btn.innerText = hasPrefix ? opt : (prefixes[idx] || "") + opt;
+                btn.onclick = () => selectOption(btn, idx, q.correct_index, q.explanation);
+                container.appendChild(btn);
+            });
+        }
+
+        function selectOption(btn, idx, correctIdx, explanation) {
+            if (isAnswered) return;
+            isAnswered = true;
+            const container = document.getElementById('options-container');
+            const buttons = container.getElementsByClassName('opt-btn');
+            const expBox = document.getElementById('explanation-container');
+
+            if (idx === correctIdx) {
+                btn.classList.add('correct'); correctAnswersCount++; playQuizSound('correct');
+            } else {
+                btn.classList.add('wrong'); wrongAnswersCount++; playQuizSound('wrong');
+                if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
+                const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
+                expBox.innerText = `${expLabel} ` + (explanation || "...");
+                expBox.style.display = 'block';
+            }
+            document.getElementById('next-question-btn').style.display = 'block';
+        }
+
+        function nextQuestion() {
+            currentQuestionIdx++; showQuestion();
+        }
+
+        async function finishQuiz() {
+            const total = currentQuizQuestions.length;
+            const scorePercent = Math.round((correctAnswersCount / total) * 100);
+            const resultSound = scorePercent >= 70 ? 'good' : 'bad';
+            // Natija ovozi ham albatta alohida ijro etiladi: good >=70%, bad <70%.
+            playQuizSound(resultSound);
+            setTimeout(() => playQuizSound(resultSound), 120);
+            try {
+                if (currentTeacherSessionId) {
+                    const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
+                    await fetch(BASE_URL + '/api/teacher-submit', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: currentTeacherSessionId, user_id: userId, first_name: u.first_name || 'Telegram User', username: u.username || '', score: correctAnswersCount, total: total, percent: scorePercent })
+                    });
+                } else {
+                    await fetch(BASE_URL + '/api/update-progress', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
+                    });
+                }
+            } catch (e) {}
+            currentTeacherSessionId = null;
+            showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
+        }
+
+        function closeGame() {
+            document.getElementById('game-screen').style.display = 'none';
+            loadQuizzes();
+        }
+
+        function showPublicLocked() {
+            showAppAlert("🔒", langPack[currentLang].public_locked, () => switchScreen('premium'));
+        }
+
+        function showPublicLimitLocked() {
+            showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
+        }
+
+        async function loadTeacherPanel() {
+            try {
+                const statusRes = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
+                const status = await statusRes.json();
+                const panel = document.getElementById('teacher-panel');
+                if (!panel) return;
+                panel.style.display = status.is_teacher ? 'block' : 'none';
+                if (!status.is_teacher) return;
+                const qRes = await fetch(`${BASE_URL}/api/teacher-quizzes?user_id=${userId}`);
+                const qData = await qRes.json();
+                const select = document.getElementById('teacher-quiz-select');
+                select.innerHTML = '';
+                if (!qData.quizzes || !qData.quizzes.length) {
+                    select.innerHTML = `<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
+                } else {
+                    qData.quizzes.forEach(q => { const o=document.createElement('option'); o.value=q.id; o.textContent=`${q.title} (${q.total})`; select.appendChild(o); });
+                }
+                loadTeacherSessions();
+            } catch(e) {}
+        }
+
+        async function createTeacherSession() {
+            const quizId=document.getElementById('teacher-quiz-select').value;
+            const duration=Number(document.getElementById('teacher-duration').value);
+            if(!quizId) { showAppAlert('⚠️', langPack[currentLang].teacher_no_quizzes); return; }
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher/create-session`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quizId,duration_minutes:duration})});
+                const data=await res.json();
+                if(data.status==='ok') {
+                    const link=`${BASE_URL}/?session=${data.code}`;
+                    try { await navigator.clipboard.writeText(link); } catch(e) {}
+                    showAppAlert('🚀', `${langPack[currentLang].teacher_created}\n\n${link}`);
+                    loadTeacherSessions();
+                } else showAppAlert('❌', data.detail || data.message || 'Error');
+            } catch(e){ showAppAlert('❌', langPack[currentLang].alert_system_err); }
+        }
+
+        async function loadTeacherSessions() {
+            const box=document.getElementById('teacher-sessions-list'); if(!box) return;
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`); const data=await res.json();
+                box.innerHTML='';
+                (data.sessions||[]).slice(0,8).forEach(s=>{
+                    const link=`${BASE_URL}/?session=${s.code}`;
+                    const div=document.createElement('div'); div.className='quiz-card'; div.style.padding='12px';
+                    div.innerHTML=`<div style="font-weight:bold;">${s.title}</div><div style="font-size:12px;color:var(--text-hint);margin:6px 0;">${s.code} · ${s.active?'🟢':'🔴'}</div><div class="action-group" style="flex-wrap:wrap;justify-content:flex-end;"><button class="activate-btn" onclick="copyTeacherLink('${link}')">${langPack[currentLang].teacher_copy}</button><button class="activate-btn" onclick="showTeacherResults('${s.id}')">${langPack[currentLang].teacher_results}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','xlsx')">${langPack[currentLang].teacher_excel}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','docx')">${langPack[currentLang].teacher_word}</button></div>`; box.appendChild(div);
+                });
+            } catch(e) {}
+        }
+
+        async function copyTeacherLink(link){ try{await navigator.clipboard.writeText(link);showAppAlert('🔗',link);}catch(e){showAppAlert('🔗',link);} }
+
+        function downloadTeacherExport(sessionId, format) {
+            const url=`${BASE_URL}/api/teacher-export?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&format=${format}`;
+            window.open(url, '_blank');
+        }
+
+        async function showTeacherResults(sessionId) {
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-session-results?session_id=${sessionId}&user_id=${userId}`); const data=await res.json();
+                if(data.status!=='ok'){showAppAlert('❌',data.detail||'Error');return;}
+                let text=`${data.session.quiz_title}\n\n`;
+                if(!data.participants.length) text+=langPack[currentLang].teacher_no_results;
+                data.participants.forEach((p,i)=>{text+=`${i+1}. ${p.first_name||'-'} — ${p.score}/${p.total} (${p.percent}%)\n`;});
+                text+=`\nExcel: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=xlsx\nPDF: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=pdf\nWord: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=docx`;
+                showAppAlert('📊',text);
+            }catch(e){showAppAlert('❌',langPack[currentLang].alert_system_err);}
+        }
+
+        async function openTeacherSessionFromUrl() {
+            const code=new URLSearchParams(window.location.search).get('session');
+            if(!code) return;
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-session?code=${encodeURIComponent(code)}&user_id=${userId}`); const data=await res.json();
+                if(data.status==='ok'){
+                    const go=confirm(`${data.title}\n\n${data.total} questions\n${langPack[currentLang].teacher_panel_title}`);
+                    if(go){ currentTeacherSessionId=data.session_id; await playQuiz(data.quiz_id,false,data.session_id); }
+                } else showAppAlert('🔒',data.detail||'Session error');
+            }catch(e){}
+        }
+
+        window.onload = function() {
+            applyLocalization();
+            setupVibration();
+            updateSoundToggle();
+
+            // Faol foydalanuvchini faqat Mini App ko'rinib turganda yuritamiz.
+            // Ilova fon rejimiga o'tsa heartbeat to'xtaydi va foydalanuvchi
+            // 2 daqiqadan keyin faol foydalanuvchilar sonidan chiqadi.
+            let lastHeartbeatAt = 0;
+
+            function updateActiveUsersBadge(activeUsers) {
+                const badge = document.getElementById('user-count-badge');
+                if (!badge) return;
+                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
+                badge.innerText = `🟢 ${Number(activeUsers) || 0} ${suffix}`;
+            }
+
+            async function sendActivityHeartbeat() {
+                if (document.visibilityState !== 'visible') return;
+                const now = Date.now();
+                if (now - lastHeartbeatAt < 10000) return;
+                lastHeartbeatAt = now;
+
+                try {
+                    const response = await fetch(
+                        `${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${now}`,
+                        { cache: 'no-store' }
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.active_users !== undefined) {
+                            updateActiveUsersBadge(data.active_users);
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            sendActivityHeartbeat();
+            loadQuizzes();
+            loadPremiumStatus();
+            loadTeacherPanel();
+            openTeacherSessionFromUrl();
+
+            // Har 30 soniyada yangilanadi, lekin faqat ilova ko'rinib turganda.
+            setInterval(() => {
+                sendActivityHeartbeat();
+
+                // Avtomatik yangilash faqat "Testlar" bo'limida ishlaydi.
+                // Ommaviy va Kartochkalar bo'limlarini o'z-o'zidan Testlarga almashtirmaydi.
+                const libraryScreen = document.getElementById('library-screen');
+                if (libraryScreen && libraryScreen.classList.contains('active') && currentTab === 'personal') {
+                    loadQuizzes();
+                }
+            }, 30000);
+
+            // Telegram Mini App qayta oldinga chiqqanda darhol faol deb belgilanadi.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    sendActivityHeartbeat();
+                }
+            });
+            window.addEventListener('focus', sendActivityHeartbeat);
+        };
+    </script>
+</body>
+</html>
