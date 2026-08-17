@@ -115,13 +115,7 @@
         .progress-line-container { background: rgba(0, 0, 0, 0.4); border-radius: 10px; height: 8px; flex: 1; margin-right: 15px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
         .progress-line-bar { height: 100%; border-radius: 10px; transition: width 0.4s ease; background: linear-gradient(90deg, #00d2ff 0%, #0078d7 100%); box-shadow: 0 0 8px #00d2ff; }
         
-        .card-footer { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
-        .card-footer .stat-separator { color: var(--text-hint); opacity: 0.8; }
-        .card-footer .stat-number, .card-footer .stat-score, .progress-row .progress-percent {
-            color: #00bfff;
-            text-shadow: 0 0 6px rgba(0, 191, 255, 0.75), 0 0 12px rgba(0, 191, 255, 0.45);
-            font-weight: 800;
-        }
+        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
         
         .support-contact-btn { width:100%; padding:12px 16px; border-radius:10px; cursor:pointer; color:#fff; font-weight:700; font-size:15px; text-align:center; background:linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.28) 100%); border:1px solid var(--aero-border); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(0,0,0,0.2); transition:all .2s ease; }
         .support-contact-btn:hover, .support-contact-btn:active { background:linear-gradient(180deg,#0099ff 0%,#005a9e 100%); border-color:#00d2ff; box-shadow:0 0 12px rgba(0,153,255,.55), inset 0 1px 0 rgba(255,255,255,.5); }
@@ -596,8 +590,8 @@
                 public_limit_over: "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
                 flashcard_limit_over: "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
                 confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
-                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_missing_input: "✍️ Iltimos, matn kiriting yoki fayl yuklang!", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
-                teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️"
+                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
+                teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️ Ishlash"
             },
             ru: {
                 nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
@@ -626,8 +620,8 @@
                 public_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
                 flashcard_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
                 confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
-                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_missing_input: "✍️ Пожалуйста, введите текст или загрузите файл!", alert_del_card: "🗑️ Удалить эту карточку?",
-                teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест, создайте групповую сессию и отправьте ссылку ученикам.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️"
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
+                teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест, создайте групповую сессию и отправьте ссылку ученикам.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️ Пройти"
             },
             en: {
                 nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
@@ -656,8 +650,8 @@
                 public_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
                 flashcard_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
                 confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
-                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_missing_input: "✍️ Please enter text or upload a file!", alert_del_card: "🗑️ Delete this flashcard?",
-                teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz, start a group session and send the link to students.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️"
+                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
+                teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz, start a group session and send the link to students.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️ Take quiz"
             }
         };
 
@@ -1017,7 +1011,7 @@
             const loader = document.getElementById('loading-status');
 
             if (!textInput && fileInput.files.length === 0) {
-                showAppAlert("✍️", langPack[currentLang].alert_missing_input);
+                showAppAlert("✍️", "Iltimos, matn kiriting yoki fayl yuklang!");
                 return;
             }
 
@@ -1083,9 +1077,7 @@
                     data.quizzes.forEach(quiz => {
                         const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
                         const displayPercent = hasScore ? quiz.last_percent : 0;
-                        const scoreText = hasScore
-                            ? `<span>${langPack[currentLang].q_count}: <span class="stat-number">${quiz.total}</span></span><span class="stat-separator">|</span><span>${langPack[currentLang].score_text}: <span class="stat-score">${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)</span></span>`
-                            : `<span>${langPack[currentLang].q_count}: <span class="stat-number">${quiz.total}</span></span><span class="stat-separator">|</span><span>${langPack[currentLang].score_text}: <span class="stat-score">—</span></span>`;
+                        const scoreText = hasScore ? `${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `0/0 (0%)`;
                         const pubClass = quiz.is_public ? 'is-active' : '';
 
                         const card = document.createElement('div');
@@ -1101,9 +1093,9 @@
                             </div>
                             <div class="progress-row">
                                 <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
-                                <span class="progress-percent" style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
+                                <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
                             </div>
-                            <div class="card-footer">${scoreText}<span style="display:none">ID: ${quiz.id.replace('q_', '')}</span></div>
+                            <div class="card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>${langPack[currentLang].score_text}: ${scoreText}</span></div>
                         `;
                         listDiv.appendChild(card);
                     });
