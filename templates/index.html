@@ -115,7 +115,13 @@
         .progress-line-container { background: rgba(0, 0, 0, 0.4); border-radius: 10px; height: 8px; flex: 1; margin-right: 15px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
         .progress-line-bar { height: 100%; border-radius: 10px; transition: width 0.4s ease; background: linear-gradient(90deg, #00d2ff 0%, #0078d7 100%); box-shadow: 0 0 8px #00d2ff; }
         
-        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
+        .card-footer { display: flex; align-items: center; justify-content: flex-start; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
+        .card-footer .stat-separator { color: var(--text-hint); opacity: 0.8; }
+        .card-footer .stat-number, .card-footer .stat-score, .progress-row .progress-percent {
+            color: #00bfff;
+            text-shadow: 0 0 6px rgba(0, 191, 255, 0.75), 0 0 12px rgba(0, 191, 255, 0.45);
+            font-weight: 800;
+        }
         
         .support-contact-btn { width:100%; padding:12px 16px; border-radius:10px; cursor:pointer; color:#fff; font-weight:700; font-size:15px; text-align:center; background:linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.28) 100%); border:1px solid var(--aero-border); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(0,0,0,0.2); transition:all .2s ease; }
         .support-contact-btn:hover, .support-contact-btn:active { background:linear-gradient(180deg,#0099ff 0%,#005a9e 100%); border-color:#00d2ff; box-shadow:0 0 12px rgba(0,153,255,.55), inset 0 1px 0 rgba(255,255,255,.5); }
@@ -1077,7 +1083,9 @@
                     data.quizzes.forEach(quiz => {
                         const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
                         const displayPercent = hasScore ? quiz.last_percent : 0;
-                        const scoreText = hasScore ? `${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `0/0 (0%)`;
+                        const scoreText = hasScore
+                            ? `<span>${langPack[currentLang].q_count}: <span class="stat-number">${quiz.total}</span></span><span class="stat-separator">|</span><span>${langPack[currentLang].score_text}: <span class="stat-score">${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)</span></span>`
+                            : `<span>${langPack[currentLang].q_count}: <span class="stat-number">${quiz.total}</span></span><span class="stat-separator">|</span><span>${langPack[currentLang].score_text}: <span class="stat-score">—</span></span>`;
                         const pubClass = quiz.is_public ? 'is-active' : '';
 
                         const card = document.createElement('div');
@@ -1093,9 +1101,9 @@
                             </div>
                             <div class="progress-row">
                                 <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
-                                <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
+                                <span class="progress-percent" style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
                             </div>
-                            <div class="card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>${langPack[currentLang].score_text}: ${scoreText}</span></div>
+                            <div class="card-footer">${scoreText}<span style="display:none">ID: ${quiz.id.replace('q_', '')}</span></div>
                         `;
                         listDiv.appendChild(card);
                     });
