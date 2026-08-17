@@ -794,25 +794,25 @@
                     if (!soundEnabled) return;
                     const now = ctx.currentTime + 0.02;
                     if (kind === 'correct') {
-                        playTone(ctx, 660, now, 0.12, 'sine', 0.32);
-                        playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.30);
+                        playTone(ctx, 660, now, 0.12, 'sine', 0.65);
+                        playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.65);
                     } else if (kind === 'wrong') {
                         // Noto'g'ri javob: telefon karnayida aniq eshitilishi uchun
                         // juda past chastotalardan foydalanmaymiz.
-                        playTone(ctx, 330, now, 0.16, 'sine', 0.38);
-                        playTone(ctx, 247, now + 0.11, 0.22, 'sine', 0.34);
+                        playTone(ctx, 330, now, 0.16, 'sine', 0.65);
+                        playTone(ctx, 247, now + 0.11, 0.22, 'sine', 0.65);
                     } else if (kind === 'good') {
                         // Yaxshi yakuniy natija.
-                        playTone(ctx, 523.25, now, 0.12, 'sine', 0.34);
-                        playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.34);
-                        playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.36);
+                        playTone(ctx, 523.25, now, 0.12, 'sine', 0.65);
+                        playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.65);
+                        playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.65);
                     } else if (kind === 'bad') {
                         // Yomon yakuniy natija.
-                        playTone(ctx, 330, now, 0.14, 'sine', 0.30);
-                        playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.30);
-                        playTone(ctx, 196, now + 0.23, 0.24, 'sine', 0.27);
+                        playTone(ctx, 330, now, 0.14, 'sine', 0.65);
+                        playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.65);
+                        playTone(ctx, 196, now + 0.23, 0.24, 'sine', 0.65);
                     } else {
-                        playTone(ctx, 520, now, 0.045, 'sine', 0.16);
+                        playTone(ctx, 520, now, 0.045, 'sine', 0.65);
                     }
                 };
 
