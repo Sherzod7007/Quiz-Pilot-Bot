@@ -116,13 +116,13 @@ def localized_tariff_name(plan_key: str, lang: str) -> str:
 
 # --- MULTILINGUAL (3 TILDAGI BILDIRISHNOMALAR) ---
 MESSAGES = {
+    "uz": {
         "support_prompt": "💬 Admin bilan bog'lanish. Savolingiz yoki muammoingizni shu yerga yozing. Xabaringiz administratorga yuboriladi.",
         "support_sent": "✅ Murojaatingiz administratorga yuborildi. Javob kelishini kuting.",
         "support_admin_title": "📩 Yangi murojaat",
         "support_reply_btn": "✉️ Javob berish",
         "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
         "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
-    "uz": {
         "welcome": (
             "👋 Salom, {name}! Quiz Pilot Super Mini App tizimiga xush kelibsiz.\n\n"
             "🚀 Yangi Yangilanish:\n🔒 Bizning aqlli to'lov tizimimiz ishga tushdi. "
@@ -145,13 +145,13 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
+    "ru": {
         "support_prompt": "💬 Связаться с администратором. Напишите ваш вопрос или проблему здесь. Сообщение будет отправлено администратору.",
         "support_sent": "✅ Ваше обращение отправлено администратору. Ожидайте ответа.",
         "support_admin_title": "📩 Новое обращение",
         "support_reply_btn": "✉️ Ответить",
         "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
         "support_reply_sent": "✅ Ответ отправлен пользователю.",
-    "ru": {
         "welcome": (
             "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
             "🚀 Новое обновление:\n🔒 Запущена наша умная система оплаты. "
@@ -173,13 +173,13 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
+    "en": {
         "support_prompt": "💬 Contact Admin. Write your question or problem here. Your message will be sent to the administrator.",
         "support_sent": "✅ Your message has been sent to the administrator. Please wait for a reply.",
         "support_admin_title": "📩 New support request",
         "support_reply_btn": "✉️ Reply",
         "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
         "support_reply_sent": "✅ Reply sent to the user.",
-    "en": {
         "welcome": (
             "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
             "🚀 New Update:\n🔒 Our smart payment system is now live. "
@@ -452,7 +452,6 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         conn.commit()
         conn.close()
 
-        user_lang = get_user_lang(user_id)
         msg_text = MESSAGES[user_lang]["payment_prompt"].format(
             tariff_name=tariff_name,
             tariff_price=tariff_price,
@@ -853,10 +852,6 @@ async def create_quiz_web(
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
-        # 30 kunlik bepul limit: faqat 1 ta.
-        # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
-        # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
-        # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
         if "PRO" not in current_status:
             cursor_check.execute(
                 "UPDATE users "
@@ -916,8 +911,6 @@ async def create_quiz_web(
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
-    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
-    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
     quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
@@ -999,14 +992,10 @@ CRITICAL RULES:
 
     total_keys = len(GOOGLE_API_KEYS)
 
-    # Har bir yangi test yaratish jarayoniga navbatdagi key beriladi.
-    # Lock parallel requestlar bir xil start_index olishini oldini oladi.
     with key_lock:
         start_index = current_key_index
         current_key_index = (current_key_index + 1) % total_keys
 
-    # 7 ta key bo'lsa, bir vaqtning o'zida maksimal 7 ta Gemini request.
-    # Qolgan requestlar navbat kutadi va serverni birdaniga bosib yubormaydi.
     with gemini_semaphore:
         for i in range(total_keys):
             key_idx = (start_index + i) % total_keys
@@ -1153,7 +1142,6 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
     now = int(time.time())
     is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
 
-    # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
     if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
         cursor.execute(
             "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
@@ -1164,7 +1152,6 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
     else:
         public_free_used = (u["public_free_used"] or 0) if u else 0
 
-    # Premium / Teacher: cheksiz.
     if not is_paid:
         cursor.execute(
             "UPDATE users SET public_free_used = COALESCE(public_free_used, 0) + 1 "
@@ -1429,7 +1416,6 @@ def create_flashcard(req: FlashcardCreateRequest):
     now = int(time.time())
     is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
 
-    # 30 kunlik bepul davr tugagan bo'lsa, uchala hisoblagichni reset qilamiz.
     if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
         cursor.execute(
             "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
@@ -1437,7 +1423,6 @@ def create_flashcard(req: FlashcardCreateRequest):
         )
         conn.commit()
 
-    # Premium / Teacher: cheksiz.
     if not is_paid:
         cursor.execute(
             "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
