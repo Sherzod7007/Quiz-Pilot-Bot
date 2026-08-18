@@ -3,239 +3,1484 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Quiz Pilot Super Mini App</title>
+    <title>Quiz Pilot - Super TMA</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
-            --accent-color: #38bdf8;
-            --accent-hover: #0284c7;
-            --text-main: #f8fafc;
-            --text-sub: #94a3b8;
-            --border-color: #334155;
-            --success-color: #22c55e;
-            --danger-color: #ef4444;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            -webkit-tap-highlight-color: transparent;
+            --aero-bg: linear-gradient(135deg, #1c2b3a 0%, #0d1520 50%, #080c14 100%);
+            --aero-glass: rgba(255, 255, 255, 0.08);
+            --aero-glass-hover: rgba(255, 255, 255, 0.15);
+            --aero-border: rgba(255, 255, 255, 0.2);
+            --aero-border-glow: rgba(0, 162, 255, 0.5);
+            --text-color: #ffffff;
+            --text-hint: #b0c4de;
+            --accent-blue: #0078d7;
+            --accent-green: #28a745;
+            --accent-red: #e81123;
+            --accent-yellow: #ffc107;
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
 
         body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            padding: 16px;
-            padding-bottom: 80px;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+            background: var(--aero-bg);
+            background-attachment: fixed;
+            color: var(--text-color);
+            margin: 0; padding: 15px; padding-bottom: 95px;
+            -webkit-user-select: none; user-select: none;
+            min-height: 100vh;
+            box-sizing: border-border-box;
         }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .title {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--accent-color);
-        }
-
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
+        /* Windows Aero Glass Container Pattern */
+        .glass-panel {
+            background: var(--aero-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--aero-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.4);
+            border-left: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
             border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
         }
 
-        .btn {
-            width: 100%;
-            background-color: var(--accent-color);
-            color: #0f172a;
-            border: none;
-            border-radius: 8px;
-            padding: 12px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 8px;
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+        .header h1 { 
+            font-size: 24px; margin: 0; font-weight: 600; 
+            text-shadow: 0 0 10px rgba(0, 162, 255, 0.6);
+            letter-spacing: 0.5px;
         }
 
-        .btn:active {
-            background-color: var(--accent-hover);
+        .user-badge { 
+            font-size: 13px; color: #72f297; 
+            background: rgba(40, 167, 69, 0.2); 
+            padding: 6px 14px; border-radius: 20px; font-weight: 600; 
+            border: 1px solid rgba(114, 242, 151, 0.4);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(8px);
         }
 
-        .btn-outline {
-            background-color: transparent;
-            color: var(--text-main);
-            border: 1px solid var(--border-color);
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+        .tab { 
+            background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(0,0,0,0.2) 100%);
+            border: 1px solid var(--aero-border); 
+            padding: 10px 16px; border-radius: 8px; color: var(--text-hint); 
+            font-weight: 600; font-size: 14px; cursor: pointer; flex: 1; text-align: center;
+            transition: all 0.2s ease;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .tab:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+        .tab.active { 
+            background: linear-gradient(180deg, #0099ff 0%, #005a9e 100%);
+            color: #fff; border-color: #00d2ff;
+            box-shadow: 0 0 12px rgba(0, 153, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
 
-        .btn-outline:active {
-            background-color: var(--border-color);
+        .quiz-card, .flash-card { 
+            background: var(--aero-glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 12px; padding: 18px; margin-bottom: 14px; 
+            border: 1px solid var(--aero-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.35);
+            box-shadow: var(--glass-shadow);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .quiz-card:hover { border-color: var(--aero-border-glow); transform: translateY(-2px); }
+
+        .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+        .card-title { font-size: 18px; font-weight: 700; margin: 0 0 6px 0; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+        .action-group { display: flex; gap: 8px; align-items: center; }
+
+        /* Aero Glossy Buttons */
+        .btn-circle, .btn-delete, .btn-public {
+            background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, rgba(0,0,0,0.3) 100%);
+            border: 1px solid var(--aero-border); border-radius: 8px; 
+            width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; 
+            font-size: 15px; cursor: pointer; color: #fff;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
+            transition: all 0.2s ease;
+        }
+        .btn-circle:hover, .btn-delete:hover, .btn-public:hover {
+            background: linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(0,0,0,0.1) 100%);
+            box-shadow: 0 0 10px rgba(255,255,255,0.3);
+        }
+        .btn-delete { color: #ff6b6b; border-color: rgba(232, 17, 35, 0.4); }
+        .btn-delete:hover { background: linear-gradient(180deg, rgba(232, 17, 35, 0.6) 0%, rgba(150, 0, 0, 0.6) 100%); color: #fff; }
+        .btn-public { color: var(--text-hint); }
+        .btn-public.is-active { color: #ffe600; border-color: rgba(255, 230, 0, 0.5); background: rgba(255, 230, 0, 0.15); box-shadow: 0 0 8px rgba(255, 230, 0, 0.4); }
+
+        .progress-row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+        .progress-line-container { background: rgba(0, 0, 0, 0.4); border-radius: 10px; height: 8px; flex: 1; margin-right: 15px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); }
+        .progress-line-bar { height: 100%; border-radius: 10px; transition: width 0.4s ease; background: linear-gradient(90deg, #00d2ff 0%, #0078d7 100%); box-shadow: 0 0 8px #00d2ff; }
+        
+        .card-footer { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-hint); margin-top: 10px; }
+        
+        .support-contact-btn { width:100%; padding:12px 16px; border-radius:10px; cursor:pointer; color:#fff; font-weight:700; font-size:15px; text-align:center; background:linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.28) 100%); border:1px solid var(--aero-border); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(0,0,0,0.2); transition:all .2s ease; }
+        .support-contact-btn:hover, .support-contact-btn:active { background:linear-gradient(180deg,#0099ff 0%,#005a9e 100%); border-color:#00d2ff; box-shadow:0 0 12px rgba(0,153,255,.55), inset 0 1px 0 rgba(255,255,255,.5); }
+
+        .screen { display: none; }
+        .screen.active { display: block; }
+
+        .upload-box { 
+            border: 2px dashed rgba(255, 255, 255, 0.3); border-radius: 14px; padding: 30px 20px; 
+            text-align: center; cursor: pointer; background: var(--aero-glass); 
+            backdrop-filter: blur(12px); margin-bottom: 15px; color: var(--text-hint); 
+            transition: all 0.2s ease;
+        }
+        .upload-box:hover { border-color: var(--accent-blue); background: rgba(255, 255, 255, 0.12); }
+
+        .input-title, .input-card, .input-text { 
+            width: 100%; box-sizing: border-box; background: rgba(0, 0, 0, 0.35); 
+            border: 1px solid var(--aero-border); border-radius: 8px; padding: 12px; 
+            color: #fff; font-size: 15px; margin-bottom: 15px; outline: none; 
+            transition: all 0.2s ease; backdrop-filter: blur(8px);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .input-title:focus, .input-card:focus, .input-text:focus { 
+            border-color: #00d2ff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.5), inset 0 2px 4px rgba(0,0,0,0.5); 
+        }
+        .input-text { resize: vertical; margin-bottom: 20px; border-radius: 10px; }
+
+        .submit-btn { 
+            background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); 
+            color: #fff; border: 1px solid #00d2ff; width: 100%; padding: 14px; 
+            border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; 
+            box-shadow: 0 4px 15px rgba(0, 164, 239, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6); transition: all 0.2s ease;
+        }
+        .submit-btn:active { transform: scale(0.98); }
+
+        #game-screen { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: var(--aero-bg); z-index: 1000; padding: 20px; display: none; overflow-y: auto; 
+        }
+        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 25px; }
+        .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+        .options-list { display: flex; flex-direction: column; gap: 12px; }
+        
+        .opt-btn { 
+            background: var(--aero-glass); backdrop-filter: blur(10px);
+            border: 1px solid var(--aero-border); padding: 14px; border-radius: 10px; 
+            text-align: left; font-size: 16px; color: #fff; cursor: pointer; 
+            box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+        .opt-btn:hover { background: rgba(255, 255, 255, 0.15); border-color: rgba(255, 255, 255, 0.4); }
+        .opt-btn.correct { background: linear-gradient(180deg, #28a745 0%, #1e7e34 100%) !important; border-color: #72f297 !important; box-shadow: 0 0 12px rgba(40, 167, 69, 0.6); }
+        .opt-btn.wrong { background: linear-gradient(180deg, #dc3545 0%, #bd2130 100%) !important; border-color: #ff8b94 !important; box-shadow: 0 0 12px rgba(220, 53, 69, 0.6); }
+
+        .explanation-box { 
+            background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 14px; margin-top: 20px; 
+            font-size: 14px; border-left: 4px solid var(--accent-red); display: none; 
+            backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .next-btn { 
+            background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: white; 
+            border: 1px solid #00d2ff; padding: 14px; border-radius: 8px; font-size: 16px; 
+            font-weight: bold; width: 100%; margin-top: 25px; cursor: pointer; display: none; 
+            box-shadow: 0 4px 15px rgba(0, 164, 239, 0.4);
         }
 
-        .support-card {
-            text-align: center;
-            margin-top: 24px;
+        /* Bottom Aero Navigation Taskbar */
+        .bottom-nav { 
+            position: fixed; bottom: 0; left: 0; right: 0; height: 70px; 
+            background: rgba(10, 16, 26, 0.75);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            display: flex; justify-content: space-around; 
+            border-top: 1px solid rgba(255, 255, 255, 0.25); 
+            align-items: center; z-index: 99; 
+            box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+        .nav-item { 
+            display: flex; flex-direction: column; align-items: center; background: none; 
+            border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; 
+            transition: all 0.2s ease;
+        }
+        .nav-item.active { color: #00d2ff; text-shadow: 0 0 8px rgba(0, 210, 255, 0.6); }
+        .nav-item.active .nav-icon { transform: translateY(-2px); filter: drop-shadow(0 0 5px #00d2ff); }
+        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); transition: transform 0.2s ease; }
+
+        .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: #00d2ff; font-weight: bold; text-shadow: 0 0 8px rgba(0, 210, 255, 0.5); }
+        
+        .settings-box { 
+            background: var(--aero-glass); backdrop-filter: blur(12px); 
+            border-radius: 12px; padding: 20px; border: 1px solid var(--aero-border); margin-top: 15px; 
+            box-shadow: var(--glass-shadow);
+        }
+        .lang-group { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
+        .lang-btn { 
+            background: rgba(0, 0, 0, 0.25); border: 1px solid var(--aero-border); color: #fff; 
+            padding: 12px 16px; border-radius: 8px; font-size: 15px; font-weight: 600; 
+            text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; 
+            transition: all 0.2s ease;
+        }
+        .lang-btn.active { border-color: #00d2ff; background: rgba(0, 120, 215, 0.3); color: #fff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.3); }
+        /* Ovoz/Vibratsiya ON holati Til tanlangan tugmasi kabi doimiy ko'rinadi. */
+        /* Compact Aero Glass controls — approximately 60% of the previous button width. */
+        #vibration-toggle, #sound-toggle {
+            min-width: 66px !important;
+            width: 66px !important;
+            height: 34px;
+            padding: 5px 9px !important;
+            border-radius: 17px !important;
+            border: 1px solid rgba(120, 190, 255, 0.28) !important;
+            background: linear-gradient(180deg, rgba(65, 80, 100, 0.48), rgba(10, 15, 24, 0.72)) !important;
+            color: #aeb8c5 !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 8px rgba(0,0,0,0.35) !important;
+            text-align: center !important;
+            justify-content: center !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            line-height: 1 !important;
+            transition: all 0.2s ease;
+        }
+        #vibration-toggle.active, #sound-toggle.active {
+            border-color: #00d2ff !important;
+            background: linear-gradient(180deg, rgba(0, 155, 235, 0.72), rgba(0, 75, 145, 0.72)) !important;
+            color: #fff !important;
+            box-shadow: 0 0 7px rgba(0,210,255,0.75), 0 0 15px rgba(0,160,255,0.38), inset 0 1px 0 rgba(255,255,255,0.45) !important;
+            text-shadow: 0 0 5px rgba(255,255,255,0.65);
+        }
+        #vibration-toggle:not(.active), #sound-toggle:not(.active) {
+            background: linear-gradient(180deg, rgba(55, 65, 80, 0.42), rgba(8, 12, 18, 0.72)) !important;
+            border-color: rgba(120, 190, 255, 0.20) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.32) !important;
+            color: #8f9aaa !important;
+        }
+        
+        .fc-display { 
+            font-size: 18px; font-weight: bold; padding: 25px; text-align: center; 
+            background: rgba(0,0,0,0.3); border-radius: 10px; margin: 10px 0; 
+            border: 1px dashed var(--aero-border); cursor: pointer; backdrop-filter: blur(8px);
+            transition: all 0.2s ease;
+        }
+        .fc-display:hover { border-color: #00d2ff; }
+        
+        .premium-layout { display: flex; flex-direction: column; gap: 14px; margin-top: 5px; }
+        
+        .p-status-box { 
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.15) 0%, rgba(0, 0, 0, 0.3) 100%); 
+            border-radius: 12px; padding: 18px; border: 1px solid rgba(255, 215, 0, 0.4); 
+            text-align: center; backdrop-filter: blur(12px);
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.1);
+        }
+        .p-status-box h2 { font-size: 18px; color: #ffd700; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: center; gap: 8px; text-shadow: 0 0 8px rgba(255, 215, 0, 0.5); }
+        .p-status-box p { font-size: 13px; color: var(--text-hint); margin: 0; }
+        
+        .p-pro-header { 
+            background: var(--aero-glass); border-radius: 12px; padding: 16px; 
+            border: 1px solid var(--aero-border); text-align: center; backdrop-filter: blur(12px);
+        }
+        .p-pro-header h3 { font-size: 20px; color: #ffffff; margin: 0 0 8px 0; font-weight: 700; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
+        .p-pro-header p { font-size: 13px; color: var(--text-hint); margin: 0; line-height: 1.4; }
+        
+        .tariff-card { 
+            background: var(--aero-glass); border-radius: 12px; padding: 18px; 
+            border: 1px solid var(--aero-border); display: flex; justify-content: space-between; 
+            align-items: center; position: relative; backdrop-filter: blur(12px);
+            box-shadow: var(--glass-shadow); transition: all 0.2s ease;
+        }
+        .tariff-card:hover { border-color: rgba(255, 255, 255, 0.4); transform: translateY(-2px); }
+        .tariff-card.popular::before { 
+            content: "⭐"; position: absolute; top: -10px; right: 20px; 
+            background: linear-gradient(180deg, #ffd700 0%, #ff8c00 100%); 
+            color: #000; font-size: 10px; font-weight: bold; padding: 2px 8px; 
+            border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        
+        .tariff-info { display: flex; flex-direction: column; gap: 4px; max-width: 65%; }
+        .tariff-title { font-size: 16px; font-weight: bold; color: #ffffff; display: flex; align-items: center; gap: 6px; }
+        .tariff-desc { font-size: 12px; color: var(--text-hint); line-height: 1.3; }
+        .tariff-action { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+        .tariff-price { font-size: 16px; font-weight: 800; color: #ffffff; white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+        
+        .activate-btn { 
+            background: linear-gradient(180deg, #ffd700 0%, #ff8c00 100%); 
+            color: #000; border: 1px solid #ffe600; padding: 8px 14px; 
+            border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; 
+            transition: all 0.2s ease; box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
+        }
+        .activate-btn:active { transform: scale(0.95); opacity: 0.9; }
+        
+        /* Modal Glass Effects */
+        .modal-overlay { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            z-index: 10000; display: none; align-items: center; justify-content: center; padding: 20px; 
+        }
+        .modal-box { 
+            background: linear-gradient(135deg, rgba(30, 45, 65, 0.9) 0%, rgba(15, 20, 30, 0.95) 100%); 
+            border-radius: 14px; border: 1px solid var(--aero-border); 
+            border-top: 1px solid rgba(255,255,255,0.4);
+            width: 100%; max-width: 340px; padding: 22px; text-align: center; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.7); backdrop-filter: blur(20px);
+        }
+        .modal-box h4 { font-size: 18px; margin: 0 0 10px 0; color: #ffd700; text-shadow: 0 0 8px rgba(255,215,0,0.4); }
+        .modal-box p { font-size: 13px; color: var(--text-hint); margin: 0 0 15px 0; line-height: 1.4; }
+        
+        .card-number-box { 
+            background: rgba(0,0,0,0.4); border: 1px dashed #ffd700; padding: 14px; 
+            border-radius: 8px; font-size: 18px; font-weight: bold; color: #ffffff; 
+            letter-spacing: 1px; cursor: pointer; margin-bottom: 8px; position: relative; 
+            transition: background 0.2s; backdrop-filter: blur(5px);
+        }
+        .card-number-box:active { background: rgba(255,215,0,0.1); }
+        
+        .copy-hint { font-size: 11px; color: #ffd700; display: block; margin-bottom: 15px; }
+        .toast-msg { background: #28a745; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 6px; display: inline-block; margin-bottom: 15px; display: none; width: max-content; margin-left: auto; margin-right: auto; box-shadow: 0 0 10px rgba(40, 167, 69, 0.5); }
+        .modal-buttons { display: flex; flex-direction: column; gap: 10px; }
+        
+        .btn-send-receipt { 
+            background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); 
+            color: #fff; border: 1px solid #00d2ff; padding: 12px; border-radius: 8px; 
+            font-size: 14px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0, 164, 239, 0.3);
+        }
+        .btn-close-modal { 
+            background: rgba(255,255,255,0.1); color: var(--text-hint); 
+            border: 1px solid var(--aero-border); padding: 10px; border-radius: 8px; 
+            font-size: 14px; cursor: pointer; 
         }
 
-        .support-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 6px;
+        .app-dialog-overlay { 
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+            z-index: 20000; display: none; align-items: center; justify-content: center; 
+            padding: 24px; animation: fadeIn 0.2s ease; 
         }
-
-        .support-desc {
-            font-size: 13px;
-            color: var(--text-sub);
-            margin-bottom: 14px;
+        .app-dialog-box { 
+            background: linear-gradient(135deg, rgba(30, 45, 65, 0.95) 0%, rgba(15, 20, 30, 0.95) 100%); 
+            border-radius: 14px; border: 1px solid var(--aero-border); 
+            border-top: 1px solid rgba(255,255,255,0.4);
+            width: 100%; max-width: 300px; padding: 20px; text-align: center; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.7); 
         }
-
-        .footer-nav {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background-color: var(--card-bg);
-            border-top: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-around;
-            padding: 10px 0;
-        }
-
-        .nav-item {
-            color: var(--text-sub);
-            text-decoration: none;
-            font-size: 12px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .nav-item.active {
-            color: var(--accent-color);
-        }
+        .app-dialog-icon { font-size: 38px; margin-bottom: 12px; display: block; }
+        .app-dialog-msg { font-size: 15px; color: #ffffff; line-height: 1.4; margin-bottom: 20px; font-weight: 500; }
+        .app-dialog-footer { display: flex; gap: 10px; justify-content: center; }
+        .app-dialog-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--aero-border); font-size: 14px; font-weight: 600; cursor: pointer; }
+        .app-dialog-btn.primary { background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: #fff; border-color: #00d2ff; }
+        .app-dialog-btn.secondary { background: rgba(255,255,255,0.1); color: var(--text-hint); }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body>
 
-    <div class="header">
-        <div class="title">🚀 Quiz Pilot</div>
-        <div id="userStatus" style="font-size: 12px; color: var(--accent-color);">PRO ✨</div>
+    <div id="create-screen" class="screen">
+        <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
+        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
+        <div class="upload-box" onclick="document.getElementById('file-input').click()">
+            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
+            <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
+            <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+        </div>
+        <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
+        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
+        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
+        <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
     </div>
 
-    <!-- Asosiy Ilm/Test Yaratish Bolimi -->
-    <div class="card">
-        <h3 style="margin-bottom: 12px;" id="lblCreateQuiz">Yangi test yaratish</h3>
-        <button class="btn" onclick="openCreateModal()" id="btnStartCreate">
-            ➕ Test yaratish
-        </button>
+    <div id="library-screen" class="screen active">
+        <div class="header">
+            <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
+            <span id="user-count-badge" class="user-badge">...</span>
+        </div>
+        <div class="tabs">
+            <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
+            <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
+            <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
+        </div>
+        <div id="lib-content-area"><div id="quiz-list"></div></div>
     </div>
 
-    <!-- Admin Bilan Bog'lanish Bolimi -->
-    <div class="card support-card">
-        <div class="support-title" id="lblSupportTitle">💬 Yordam va Qo'llab-quvvatlash</div>
-        <div class="support-desc" id="lblSupportDesc">Savollaringiz yoki muammo bormi? Administrator bilan to'g'ridan-to'g'ri bog'laning.</div>
-        <button class="btn btn-outline" onclick="contactAdmin()" id="btnContactAdmin">
-            ✉️ Admin bilan bog'lanish
-        </button>
+    <div id="settings-screen" class="screen">
+        <div class="header"><h1 data-lang="nav_settings">Sozlamalar</h1></div>
+        <div class="settings-box">
+            <span style="font-weight: bold; font-size: 16px;" data-lang="select_lang">Tizim tilini tanlang:</span>
+            <div class="lang-group">
+                <button class="lang-btn" id="lang-uz" onclick="changeLanguage('uz')">🇺🇿 O'zbekcha</button>
+                <button class="lang-btn" id="lang-ru" onclick="changeLanguage('ru')">🇷🇺 Русский</button>
+                <button class="lang-btn" id="lang-en" onclick="changeLanguage('en')">🇺🇸 English</button>
+            </div>
+        </div>
+            <div class="settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="vibration_title">📳 Vibratsiya</span>
+                <button id="vibration-toggle" class="lang-btn" type="button" onclick="toggleVibration()" style="min-width:110px;">ON</button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="vibration_desc">Tugmalarni bosganda yengil vibratsiya.</div>
+        </div>
+        <div class="settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="sound_title">🔊 Ovoz</span>
+                <button id="sound-toggle" class="lang-btn" type="button" onclick="toggleSound()" style="min-width:110px;">ON</button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="sound_desc">Test jarayonida tovushlar ijro etiladi.</div>
+        </div>
+        <div class="settings-box">
+            <button class="support-contact-btn" type="button" onclick="contactAdmin()">💬 <span data-lang="contact_admin">Admin bilan bog'lanish</span></button>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="contact_admin_desc">Savol yoki muammo bo'lsa, biz bilan bog'laning.</div>
+        </div>
     </div>
 
-    <!-- Pastki Navigatsiya Bar -->
-    <div class="footer-nav">
-        <a href="#" class="nav-item active" id="navHome">🏠 Bosh sahifa</a>
-        <a href="#" class="nav-item" id="navPublic">🌐 Ommaviy</a>
-        <a href="#" class="nav-item" id="navTariffs">👑 Tariflar</a>
+    <div id="premium-screen" class="screen">
+        <div class="header"><h1 data-lang="nav_premium">Premium</h1></div>
+        <div class="premium-layout">
+            <div class="p-status-box">
+                <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
+                <p id="p-status-val">Oddiy foydalanuvchi</p>
+                <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> <span data-lang="limit_unit">ta</span></p>
+            </div>
+
+            <div class="p-pro-header">
+                <h3 data-lang="premium_pro_title">Quiz Pilot PRO 👑</h3>
+                <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
+            </div>
+
+            <div id="teacher-panel" class="p-status-box" style="display:none; text-align:left;">
+                <h2 style="justify-content:center;">👨‍🏫 <span data-lang="teacher_panel_title">O'qituvchi rejimi</span></h2>
+                <p data-lang="teacher_panel_desc" style="text-align:center; margin-bottom:12px;">Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.</p>
+                <select id="teacher-quiz-select" class="input-card" style="width:100%; box-sizing:border-box;"></select>
+                <select id="teacher-duration" class="input-card" style="width:100%; box-sizing:border-box;">
+                    <option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option>
+                </select>
+                <button class="submit-btn" onclick="createTeacherSession()" data-lang="teacher_create_btn">🚀 Guruh testini boshlash</button>
+                <div id="teacher-sessions-list" style="margin-top:12px;"></div>
+            </div>
+
+            <div class="tariff-card" id="card-daily">
+                <div class="tariff-info">
+                    <span class="tariff-title">⚡ Kunlik Cheksiz</span>
+                    <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">10 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('daily')">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="tariff-card popular" id="card-weekly">
+                <div class="tariff-info">
+                    <span class="tariff-title">📅 Haftalik Cheksiz</span>
+                    <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">35 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('weekly')">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="tariff-card" id="card-monthly">
+                <div class="tariff-info">
+                    <span class="tariff-title">🌙 Oylik Cheksiz</span>
+                    <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">65 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('monthly')">Faollashtirish</button>
+                </div>
+            </div>
+
+            <div class="tariff-card" id="card-teachers">
+                <div class="tariff-info">
+                    <span class="tariff-title">🧑‍🏫 O'qituvchilar Uchun</span>
+                    <span class="tariff-desc">30 kunlik guruh rejimi (kengaytirilgan)</span>
+                </div>
+                <div class="tariff-action">
+                    <span class="tariff-price">95 000 so'm</span>
+                    <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="payment-modal" class="modal-overlay">
+        <div class="modal-box">
+            <h4 id="m-tariff-title">Tarif</h4>
+            <p><span data-lang="modal_payment_text">To'lov summasi:</span> <b id="m-tariff-price" style="color:#fff;">0</b><br><span data-lang="modal_payment_hint">Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:</span></p>
+            <div class="card-number-box" onclick="copyCardNumber()">9860 0601 3135 0575</div>
+            <span class="copy-hint" data-lang="copy_hint">Karta raqamiga bosib nusxa oling 📄</span>
+            <div id="toast-notif" class="toast-msg" data-lang="toast_copied">Karta raqami nusxalandi! ✅</div>
+            <div class="modal-buttons">
+                <button class="btn-send-receipt" onclick="submitPaymentIntent()" data-lang="btn_send_receipt">Chekni yuborish 📑</button>
+                <button class="btn-close-modal" onclick="closePaymentModal()" data-lang="btn_close">Yopish</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-dialog" class="app-dialog-overlay">
+        <div class="app-dialog-box">
+            <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
+            <div id="app-dialog-msg" class="app-dialog-msg">Xabar...</div>
+            <div class="app-dialog-footer" id="app-dialog-footer">
+                <button class="app-dialog-btn primary" id="app-dialog-ok-btn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-screen">
+        <div class="game-header">
+            <span id="game-title">Test</span>
+            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
+        </div>
+        <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
+        <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
+        <div class="options-list" id="options-container"></div>
+        <div class="explanation-box" id="explanation-container"></div>
+        <button class="next-btn" id="next-question-btn" onclick="nextQuestion()"></button>
+    </div>
+
+    <div class="bottom-nav">
+        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕️</span><span data-lang="nav_create">Yaratish</span></button>
+        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
+        <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
+        <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Mini App ni to'liq ekranda ochish
+        tg.ready(); tg.expand();
+        tg.setHeaderColor('#121214');
 
-        const userId = tg.initDataUnsafe?.user?.id || 0;
-        const userLang = tg.initDataUnsafe?.user?.language_code || 'uz';
+        const BASE_URL = window.location.origin;
+        let userId = 99999; 
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+            userId = tg.initDataUnsafe.user.id;
+        }
 
-        // Tillar lug'ati UI uchun
-        const i18n = {
+        let currentLang = 'uz';
+        let currentTab = 'personal'; 
+        let currentQuizQuestions = [];
+        let currentQuestionIdx = 0;
+        let currentQuizId = "";
+        let isAnswered = false;
+        let correctAnswersCount = 0;
+        let wrongAnswersCount = 0;
+        let selectedTariffKey = "";
+        let currentTeacherSessionId = null;
+
+        const langPack = {
             uz: {
-                createQuiz: "Yangi test yaratish",
-                startCreate: "➕ Test yaratish",
-                supportTitle: "💬 Yordam va Qo'llab-quvvatlash",
-                supportDesc: "Savollaringiz yoki muammo bormi? Administrator bilan to'g'ridan-to'g'ri bog'laning.",
-                contactAdmin: "✉️ Admin bilan bog'lanish",
-                home: "🏠 Bosh sahifa",
-                public: "🌐 Ommaviy",
-                tariffs: "👑 Tariflar",
-                alertSent: "Admin bilan muloqot oynasi ochildi. Telegram orqali xabaringizni yozib qoldiring!"
+                nav_create: "Yaratish", nav_library: "Kutubxona", nav_settings: "Sozlamalar", nav_premium: "Premium",
+                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar",
+                placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
+                placeholder_text: "Mavzu yoki konspekt matnini joylang...",
+                upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
+                btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
+                select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
+                msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
+                msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
+                btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
+                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", missing_input: "✍️ Iltimos, matn kiriting yoki fayl yuklang!", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
+                card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
+                premium_status_title: "💎 Sizning Statusingiz", regular_user: "Oddiy foydalanuvchi", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
+                modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
+                copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
+                btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!",
+                tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
+                tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
+                tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kunlik guruh rejimi (kengaytirilgan)",
+                explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
+                alert_limit_over: "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+                public_limit_over: "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
+                flashcard_limit_over: "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+                confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
+                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
+                teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️"
             },
             ru: {
-                createQuiz: "Создать новый тест",
-                startCreate: "➕ Создать тест",
-                supportTitle: "💬 Помощь и Поддержка",
-                supportDesc: "Есть вопросы или проблемы? Свяжитесь с администратором напрямую.",
-                contactAdmin: "✉️ Связаться с админом",
-                home: "🏠 Главная",
-                public: "🌐 Общие",
-                tariffs: "👑 Тарифы",
-                alertSent: "Диалог с админом открыт. Напишите ваше сообщение в чате Telegram!"
+                nav_create: "Создать", nav_library: "Библиотека", nav_settings: "Настройки", nav_premium: "Премиум",
+                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки",
+                placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
+                upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
+                btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
+                select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
+                msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
+                btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
+                alert_del_quiz: "Вы хотите удалить этот тест?", missing_input: "✍️ Пожалуйста, введите текст или загрузите файл!", alert_success: "🎉 Тест успешно создан!", 
+                card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
+                premium_status_title: "💎 Ваш Статус", regular_user: "Обычный пользователь", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
+                modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
+                copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
+                btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту!",
+                tariff_daily_title: "⚡ Суточный Безлимит", tariff_daily_desc: "24 часа абсолютно безлимитного создания тестов",
+                tariff_weekly_title: "📅 Недельный Безлимит", tariff_weekly_desc: "7 дней безлимитного использования системы",
+                tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
+                tariff_teacher_title: "🧑‍🏫 Для Учителей", tariff_teacher_desc: "30 дней группового режима (расширенный)",
+                explanation_label: "💡 Пояснение:", active_users_suffix: "активных пользователей",
+                alert_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать тесты, перейдите на Premium тариф. 👑",
+                public_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
+                flashcard_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
+                confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
+                teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест, создайте групповую сессию и отправьте ссылку ученикам.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️"
             },
             en: {
-                createQuiz: "Create New Quiz",
-                startCreate: "➕ Create Quiz",
-                supportTitle: "💬 Help & Support",
-                supportDesc: "Have questions or issues? Contact the administrator directly.",
-                contactAdmin: "✉️ Contact Admin",
-                home: "🏠 Home",
-                public: "🌐 Public",
-                tariffs: "👑 Pricing",
-                alertSent: "Support chat initiated. Please type your message in the Telegram chat!"
+                nav_create: "Create", nav_library: "Library", nav_settings: "Settings", nav_premium: "Premium",
+                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards",
+                placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
+                upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
+                btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
+                select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
+                msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
+                msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
+                btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
+                alert_del_quiz: "Do you want to delete this quiz?", missing_input: "✍️ Please enter text or upload a file!", alert_success: "🎉 Quiz successfully created!", 
+                card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
+                premium_status_title: "💎 Your Status", regular_user: "Regular User", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
+                modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
+                copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
+                btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
+                premium_pro_title: "Quiz Pilot PRO 👑",
+                premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot!",
+                tariff_daily_title: "⚡ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
+                tariff_weekly_title: "📅 Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
+                tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
+                tariff_teacher_title: "🧑‍🏫 For Teachers", tariff_teacher_desc: "30 days group mode (extended layout)",
+                explanation_label: "💡 Explanation:", active_users_suffix: "active users",
+                alert_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating quizzes. 👑",
+                public_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
+                flashcard_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
+                confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
+                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
+                teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz, start a group session and send the link to students.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️"
             }
         };
 
-        const lang = i18n[userLang] ? userLang : 'uz';
+        const tariffDetails = {
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "10 000 so'm" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "35 000 so'm" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "65 000 so'm" },
+            teachers: { uz: "O'qituvchilar Uchun (30 kun)", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "95 000 so'm" }
+        };
 
-        // Til bo'yicha UI larni o'rnatish
-        document.getElementById('lblCreateQuiz').innerText = i18n[lang].createQuiz;
-        document.getElementById('btnStartCreate').innerText = i18n[lang].startCreate;
-        document.getElementById('lblSupportTitle').innerText = i18n[lang].supportTitle;
-        document.getElementById('lblSupportDesc').innerText = i18n[lang].supportDesc;
-        document.getElementById('btnContactAdmin').innerText = i18n[lang].contactAdmin;
-        document.getElementById('navHome').innerText = i18n[lang].home;
-        document.getElementById('navPublic').innerText = i18n[lang].public;
-        document.getElementById('navTariffs').innerText = i18n[lang].tariffs;
-
-        // ADMIN BILAN BOG'LANISH FUNKSIYASI
-        function contactAdmin() {
-            const data = {
-                action: "contact_admin",
-                user_id: userId
+        function showAppAlert(icon, text, callback = null) {
+            document.getElementById('app-dialog-icon').innerText = icon;
+            document.getElementById('app-dialog-msg').innerText = text;
+            const footer = document.getElementById('app-dialog-footer');
+            footer.innerHTML = `<button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>`;
+            document.getElementById('app-dialog').style.display = 'flex';
+            document.getElementById('app-dialog-ok-btn').onclick = function() {
+                document.getElementById('app-dialog').style.display = 'none';
+                if(callback) callback();
             };
+        }
 
-            // Telegram WebApp ga ma'lumot uzatish
-            tg.sendData(JSON.stringify(data));
-            
-            // Foydalanuvchiga bildirishnoma ko'rsatib Mini App ni yopish
-            tg.showAlert(i18n[lang].alertSent, function() {
-                tg.close();
+        function showAppConfirm(icon, text, onConfirm) {
+            document.getElementById('app-dialog-icon').innerText = icon;
+            document.getElementById('app-dialog-msg').innerText = text;
+            const footer = document.getElementById('app-dialog-footer');
+            footer.innerHTML = `
+                <button class="app-dialog-btn secondary" id="app-dialog-cancel-btn">${langPack[currentLang].btn_cancel || 'Yopish'}</button>
+                <button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>
+            `;
+            document.getElementById('app-dialog').style.display = 'flex';
+            document.getElementById('app-dialog-ok-btn').onclick = function() {
+                document.getElementById('app-dialog').style.display = 'none';
+                onConfirm();
+            };
+            document.getElementById('app-dialog-cancel-btn').onclick = function() {
+                document.getElementById('app-dialog').style.display = 'none';
+            };
+        }
+
+        function openPaymentModal(key) {
+            selectedTariffKey = key;
+            const tariff = tariffDetails[key];
+            document.getElementById('m-tariff-title').innerText = tariff[currentLang] || tariff['uz'];
+            document.getElementById('m-tariff-price').innerText = tariff.price;
+            document.getElementById('payment-modal').style.display = 'flex';
+        }
+
+        function closePaymentModal() {
+            document.getElementById('payment-modal').style.display = 'none';
+        }
+
+        function copyCardNumber() {
+            navigator.clipboard.writeText("9860060131350575").then(() => {
+                const toast = document.getElementById('toast-notif');
+                toast.style.display = 'inline-block';
+                setTimeout(() => { toast.style.display = 'none'; }, 2000);
             });
         }
 
-        function openCreateModal() {
-            // Test yaratish funksiyasi
-            console.log("Test yaratish bosildi");
+        function submitPaymentIntent() {
+            const tariff = tariffDetails[selectedTariffKey];
+            const paymentData = {
+                action: "payment_intent",
+                user_id: userId,
+                tariff_key: selectedTariffKey,
+                tariff_name: tariff[currentLang] || tariff['uz'],
+                tariff_price: tariff.price
+            };
+            
+            showAppConfirm("📑", langPack[currentLang].confirm_payment, async function() {
+                closePaymentModal();
+                
+                try {
+                    await fetch(`${BASE_URL}/api/payment-intent`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(paymentData)
+                    });
+                } catch(e) { console.log("API Fetch xatosi:", e); }
+                
+                try {
+                    tg.sendData(JSON.stringify(paymentData));
+                } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
+                
+                setTimeout(() => { tg.close(); }, 200);
+            });
         }
+
+        // ===== Ovoz sozlamasi =====
+        const SOUND_STORAGE_KEY = `quizpilot_sound_${userId}`;
+        let soundEnabled = localStorage.getItem(SOUND_STORAGE_KEY) !== 'off';
+        let audioContext = null;
+
+        function updateSoundToggle() {
+            const btn = document.getElementById('sound-toggle');
+            if (!btn) return;
+            btn.innerText = soundEnabled
+                ? (langPack[currentLang].sound_on || 'ON')
+                : (langPack[currentLang].sound_off || 'OFF');
+            btn.classList.toggle('active', soundEnabled);
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            localStorage.setItem(SOUND_STORAGE_KEY, soundEnabled ? 'on' : 'off');
+            updateSoundToggle();
+            if (soundEnabled) playQuizSound('tap');
+        }
+
+        function getAudioContext() {
+            if (!audioContext) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return null;
+                audioContext = new AudioCtx();
+            }
+            return audioContext;
+        }
+
+        function playTone(ctx, frequency, start, duration, type='sine', volume=0.14) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(frequency, start);
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + duration + 0.02);
+        }
+
+        function playQuizSound(kind) {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return;
+                const play = () => {
+                    if (!soundEnabled) return;
+                    const now = ctx.currentTime + 0.02;
+                    if (kind === 'correct') {
+                        playTone(ctx, 660, now, 0.12, 'sine', 0.32);
+                        playTone(ctx, 880, now + 0.10, 0.16, 'sine', 0.30);
+                    } else if (kind === 'wrong') {
+                        // Noto'g'ri javob: telefon karnayida aniq eshitilishi uchun
+                        // juda past chastotalardan foydalanmaymiz.
+                        playTone(ctx, 330, now, 0.16, 'sine', 0.38);
+                        playTone(ctx, 247, now + 0.11, 0.22, 'sine', 0.34);
+                    } else if (kind === 'good') {
+                        // Yaxshi yakuniy natija.
+                        playTone(ctx, 523.25, now, 0.12, 'sine', 0.34);
+                        playTone(ctx, 659.25, now + 0.10, 0.12, 'sine', 0.34);
+                        playTone(ctx, 783.99, now + 0.20, 0.24, 'sine', 0.36);
+                    } else if (kind === 'bad') {
+                        // Yomon yakuniy natija.
+                        playTone(ctx, 330, now, 0.14, 'sine', 0.30);
+                        playTone(ctx, 247, now + 0.11, 0.16, 'sine', 0.30);
+                        playTone(ctx, 196, now + 0.23, 0.24, 'sine', 0.27);
+                    } else {
+                        playTone(ctx, 520, now, 0.045, 'sine', 0.16);
+                    }
+                };
+
+                // Telegram Mobile WebView ba'zan AudioContext'ni vaqtincha to'xtatadi.
+                // To'g'ri/noto'g'ri va yakuniy natija ovozlari uchun uni qayta uyg'otamiz.
+                if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+                    ctx.resume().then(() => {
+                        if (ctx.state === 'running') play();
+                    }).catch(() => {});
+                } else {
+                    play();
+                }
+            } catch (_) {}
+        }
+
+        // AudioContext'ni foydalanuvchining birinchi haqiqiy tapida uyg'otib qo'yamiz.
+        // Tugmalar dizayniga va boshqa funksiyalarga ta'sir qilmaydi.
+        document.addEventListener('pointerdown', () => {
+            if (!soundEnabled) return;
+            try {
+                const ctx = getAudioContext();
+                if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
+                    ctx.resume().catch(() => {});
+                }
+            } catch (_) {}
+        }, { passive: true });
+
+        // ===== Vibratsiya sozlamasi =====
+        const VIBRATION_STORAGE_KEY = `quizpilot_vibration_${userId}`;
+        let vibrationEnabled = localStorage.getItem(VIBRATION_STORAGE_KEY) !== 'off';
+
+        function updateVibrationToggle() {
+            const btn = document.getElementById('vibration-toggle');
+            if (!btn) return;
+            btn.innerText = vibrationEnabled
+                ? (langPack[currentLang].vibration_on || 'ON')
+                : (langPack[currentLang].vibration_off || 'OFF');
+            btn.classList.toggle('active', vibrationEnabled);
+        }
+
+        function toggleVibration() {
+            vibrationEnabled = !vibrationEnabled;
+            localStorage.setItem(VIBRATION_STORAGE_KEY, vibrationEnabled ? 'on' : 'off');
+            updateVibrationToggle();
+            if (vibrationEnabled) triggerSoftVibration();
+        }
+
+        function triggerSoftVibration() {
+            if (!vibrationEnabled) return;
+            try {
+                if (tg && tg.HapticFeedback && typeof tg.HapticFeedback.impactOccurred === 'function') {
+                    tg.HapticFeedback.impactOccurred('light');
+                } else if (navigator.vibrate) {
+                    navigator.vibrate(10);
+                }
+            } catch (_) {}
+        }
+
+        function setupVibration() {
+            document.addEventListener('pointerdown', (event) => {
+                if (!vibrationEnabled) return;
+                const target = event.target && event.target.closest
+                    ? event.target.closest('button, a, [role="button"], input, select, textarea')
+                    : null;
+                if (target) triggerSoftVibration();
+            }, { passive: true });
+            updateVibrationToggle();
+        }
+
+        function contactAdmin() {
+            const payload = { action: 'contact_admin', user_id: userId };
+            try {
+                if (tg && typeof tg.sendData === 'function') {
+                    tg.sendData(JSON.stringify(payload));
+                    setTimeout(() => { try { tg.close(); } catch (_) {} }, 200);
+                } else {
+                    showAppAlert('💬', langPack[currentLang].contact_admin_desc);
+                }
+            } catch (e) {
+                console.log("Admin bilan bog'lanish xatosi:", e);
+            }
+        }
+
+        function applyLocalization() {
+            document.querySelectorAll('[data-lang]').forEach(el => {
+                const key = el.getAttribute('data-lang');
+                if (langPack[currentLang][key]) el.innerText = langPack[currentLang][key];
+            });
+            updateVibrationToggle();
+            updateSoundToggle();
+            document.querySelectorAll('[data-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-placeholder');
+                if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
+            });
+            
+            const dailyCard = document.getElementById('card-daily');
+            if(dailyCard) {
+                dailyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_daily_title;
+                dailyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_daily_desc;
+            }
+            const weeklyCard = document.getElementById('card-weekly');
+            if(weeklyCard) {
+                weeklyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_weekly_title;
+                weeklyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_weekly_desc;
+            }
+            const monthlyCard = document.getElementById('card-monthly');
+            if(monthlyCard) {
+                monthlyCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_monthly_title;
+                monthlyCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_monthly_desc;
+            }
+            const teachersCard = document.getElementById('card-teachers');
+            if(teachersCard) {
+                teachersCard.querySelector('.tariff-title').innerText = langPack[currentLang].tariff_teacher_title;
+                teachersCard.querySelector('.tariff-desc').innerText = langPack[currentLang].tariff_teacher_desc;
+            }
+
+            // Faqat til tugmalarining active holatini boshqaramiz.
+            // Ovoz va Vibratsiya tugmalarining active holatiga tegilmaydi.
+            document.querySelectorAll('#lang-uz, #lang-ru, #lang-en').forEach(b => b.classList.remove('active'));
+            const activeBtn = document.getElementById(`lang-${currentLang}`);
+            if(activeBtn) activeBtn.classList.add('active');
+        }
+
+        function switchScreen(screenName) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(`${screenName}-screen`).classList.add('active');
+            document.getElementById(`nav-${screenName}`).classList.add('active');
+            applyLocalization();
+            if(screenName === 'library') {
+                if(currentTab === 'personal') loadQuizzes();
+                else if(currentTab === 'public') loadPublicQuizzes();
+                else if(currentTab === 'cards') loadFlashcards();
+            }
+            if(screenName === 'premium') { loadPremiumStatus(); loadTeacherPanel(); }
+        }
+
+        async function loadPremiumStatus() {
+            try {
+                const res = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
+                const data = await res.json();
+                if(data && data.status === 'ok') {
+                    const localizedRegularUser = (langPack[currentLang] && langPack[currentLang].regular_user)
+                        ? langPack[currentLang].regular_user
+                        : (data.user_status || "Regular User");
+                    document.getElementById('p-status-val').innerText =
+                        data.is_paid ? (data.user_status || "PRO") : localizedRegularUser;
+
+                    // Premium oynasida foydalanuvchiga TEST yaratish bo'yicha qolgan
+                    // 30 kunlik bepul limit ko'rsatiladi: 3 → 2 → 1 → 0.
+                    document.getElementById('p-limit-val').innerText =
+                        data.quiz_remaining !== undefined ? data.quiz_remaining : "0";
+
+                    const tp=document.getElementById('teacher-panel');
+                    if(tp) tp.style.display=data.is_teacher ? 'block' : 'none';
+                }
+            } catch(e){}
+        }
+
+        async function changeLanguage(lang) {
+            currentLang = lang;
+            applyLocalization();
+            try {
+                await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
+            } catch(e){}
+            loadPremiumStatus();
+            if(currentTab === 'personal' || currentTab === 'public') switchLibTab(currentTab);
+        }
+
+        function switchLibTab(tabName) {
+            currentTab = tabName;
+            document.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
+            if(tabName === 'personal') {
+                document.getElementById('tab-personal').classList.add('active');
+                loadQuizzes();
+            } else if(tabName === 'public') {
+                document.getElementById('tab-public').classList.add('active');
+                loadPublicQuizzes();
+            } else if(tabName === 'cards') {
+                document.getElementById('tab-cards').classList.add('active');
+                loadFlashcards();
+            }
+        }
+
+        function fileSelected(input) {
+            if(input.files && input.files.length > 0) {
+                document.getElementById('upload-text').innerText = "Selected: " + input.files[0].name;
+            }
+        }
+
+        async function startGeneration() {
+            const textInput = document.getElementById('text-input').value.trim();
+            const quizTitleInput = document.getElementById('quiz-title-input').value.trim();
+            const fileInput = document.getElementById('file-input');
+            const genBtn = document.getElementById('generate-btn');
+            const loader = document.getElementById('loading-status');
+
+            if (!textInput && fileInput.files.length === 0) {
+                showAppAlert("✍️", langPack[currentLang].missing_input);
+                return;
+            }
+
+            genBtn.style.display = "none";
+            loader.style.display = "block";
+
+            const formData = new FormData();
+            formData.append('user_id', userId);
+            if (textInput) formData.append('text', textInput);
+            if (fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
+            if (quizTitleInput) formData.append('quiz_title', quizTitleInput);
+
+            try {
+                const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data && data.status === "ok") {
+                    showAppAlert("🚀", langPack[currentLang].alert_success, () => {
+                        document.getElementById('text-input').value = "";
+                        document.getElementById('quiz-title-input').value = "";
+                        fileInput.value = "";
+                        document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
+                        switchScreen('library');
+                    });
+                } else {
+                    if (data.error_code === "free_limit" || data.message && (data.message.includes("limit") || data.message.includes("лимит") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
+                        showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
+                    } else {
+                        showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik"));
+                    }
+                }
+            } catch (error) { showAppAlert("❌", langPack[currentLang].alert_system_err); }
+            finally {
+                genBtn.style.display = "block";
+                loader.style.display = "none";
+            }
+        }
+
+        async function loadQuizzes() {
+            try {
+                const response = await fetch(`${BASE_URL}/api/quizzes?user_id=${userId}&_t=${Date.now()}`);
+                const data = await response.json();
+
+                // Faqat hozir ham "Testlar" bo'limi tanlangan bo'lsa natijani ekranga chiqaramiz.
+                // Eski/asynchronous so'rov Ommaviy yoki Kartochkalar bo'limini ustidan yozib yubormaydi.
+                const libraryScreen = document.getElementById('library-screen');
+                if (currentTab !== 'personal' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
+                
+                let liveUsers = 0;
+                if (data && data.total_users !== undefined) liveUsers = data.total_users;
+                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
+                document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
+
+                if (data && data.user_lang) {
+                    currentLang = data.user_lang;
+                    applyLocalization();
+                }
+
+                const container = document.getElementById('lib-content-area');
+                container.innerHTML = `<div id="quiz-list"></div>`;
+                const listDiv = document.getElementById('quiz-list');
+                
+                if (data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
+                        const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
+                        const displayPercent = hasScore ? quiz.last_percent : 0;
+                        const scoreText = hasScore ? `${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `0/0 (0%)`;
+                        const pubClass = quiz.is_public ? 'is-active' : '';
+
+                        const card = document.createElement('div');
+                        card.className = 'quiz-card';
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div class="card-title">${quiz.title}</div>
+                                <div class="action-group">
+                                    <button class="btn-public ${pubClass}" onclick="togglePublic('${quiz.id}', ${quiz.is_public ? 0 : 1})">🌐</button>
+                                    <button class="btn-delete" onclick="deleteQuiz('${quiz.id}')">🗑️</button>
+                                    <button class="btn-circle" onclick="playQuiz('${quiz.id}')">▶️</button>
+                                </div>
+                            </div>
+                            <div class="progress-row">
+                                <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
+                                <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
+                            </div>
+                            <div class="card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>${langPack[currentLang].score_text}: ${scoreText}</span></div>
+                        `;
+                        listDiv.appendChild(card);
+                    });
+                } else {
+                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_tests}</div>`;
+                }
+            } catch (error) { console.error(error); }
+        }
+
+        async function loadPublicQuizzes() {
+            const container = document.getElementById('lib-content-area');
+            container.innerHTML = `<div style="text-align: center; color: #00d2ff; padding: 20px;">⏳ Loading...</div>`;
+            try {
+                const response = await fetch(`${BASE_URL}/api/public-quizzes?user_id=${userId}&_t=${Date.now()}`);
+                const data = await response.json();
+                const libraryScreen = document.getElementById('library-screen');
+                if (currentTab !== 'public' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
+                container.innerHTML = "";
+                if(data && data.status === "ok" && data.quizzes && data.quizzes.length > 0) {
+                    data.quizzes.forEach(quiz => {
+                        const card = document.createElement('div');
+                        card.className = 'quiz-card';
+                        const canOpenPublic = data.is_paid || (data.public_remaining !== undefined && data.public_remaining > 0);
+                        const action = canOpenPublic
+                            ? `<button class="btn-circle" onclick="playQuiz('${quiz.id}', true)">${langPack[currentLang].public_open}</button>`
+                            : `<button class="btn-circle" onclick="showPublicLimitLocked()">🔒</button>`;
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div class="card-title">${quiz.title}</div>
+                                <div class="action-group">${action}</div>
+                            </div>
+                            <div class="card-footer"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>🌍 Global</span></div>
+                        `;
+                        container.appendChild(card);
+                    });
+                } else {
+                    container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_public}</div>`;
+                }
+            } catch(e) { container.innerHTML = "Error."; }
+        }
+
+        async function togglePublic(quizId, newState) {
+            try {
+                const response = await fetch(`${BASE_URL}/api/toggle-public?quiz_id=${quizId}&user_id=${userId}&is_public=${newState}`, { method: 'POST' });
+                if((await response.json()).status === 'ok') loadQuizzes();
+            } catch(e){}
+        }
+
+        function deleteQuiz(quizId) {
+            showAppConfirm("🗑️", langPack[currentLang].alert_del_quiz, async () => {
+                try {
+                    const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
+                    if ((await response.json()).status === "ok") loadQuizzes();
+                } catch (error) { console.log(error); }
+            });
+        }
+
+        async function loadFlashcards() {
+            const container = document.getElementById('lib-content-area');
+            container.innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <input type="text" id="fc-front" class="input-card" placeholder="${langPack[currentLang].card_front}">
+                    <input type="text" id="fc-back" class="input-card" placeholder="${langPack[currentLang].card_back}">
+                    <button class="submit-btn" onclick="addFlashcard()">${langPack[currentLang].btn_add_card} 🗂️</button>
+                </div>
+                <div id="cards-list-div"></div>
+            `;
+            const listDiv = document.getElementById('cards-list-div');
+            try {
+                const res = await fetch(`${BASE_URL}/api/flashcards?user_id=${userId}&_t=${Date.now()}`);
+                const data = await res.json();
+                const libraryScreen = document.getElementById('library-screen');
+                if (currentTab !== 'cards' || !libraryScreen || !libraryScreen.classList.contains('active')) return;
+                if(data && data.cards && data.cards.length > 0) {
+                    data.cards.forEach(c => {
+                        const card = document.createElement('div');
+                        card.className = 'flash-card';
+                        card.innerHTML = `
+                            <div class="card-top">
+                                <div id="body-${c.id}" class="fc-display" onclick="flipCard('${c.id}', '${c.front}', '${c.back}')">${c.front}</div>
+                                <button class="btn-delete" onclick="deleteCard('${c.id}')">🗑️</button>
+                            </div>
+                        `;
+                        listDiv.appendChild(card);
+                    });
+                } else {
+                    listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 30px;">${langPack[currentLang].msg_no_cards}</div>`;
+                }
+            } catch(e){}
+        }
+
+        async function addFlashcard() {
+            const front = document.getElementById('fc-front').value.trim();
+            const back = document.getElementById('fc-back').value.trim();
+            if(!front || !back) return;
+            try {
+                const response = await fetch(`${BASE_URL}/api/create-flashcard`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, front: front, back: back })
+                });
+                const data = await response.json();
+                if(data && data.status === 'ok') {
+                    document.getElementById('fc-front').value = "";
+                    document.getElementById('fc-back').value = "";
+                    loadFlashcards();
+                } else if(data && data.error_code === 'flashcard_limit') {
+                    showAppAlert("🔒", langPack[currentLang].flashcard_limit_over, () => switchScreen('premium'));
+                }
+            } catch(e){}
+        }
+
+        function flipCard(id, front, back) {
+            const el = document.getElementById(`body-${id}`);
+            if(el.innerText === front) {
+                el.innerText = back; el.style.color = '#ffd700';
+            } else {
+                el.innerText = front; el.style.color = '#fff';
+            }
+        }
+
+        function deleteCard(id) {
+            showAppConfirm("🗑️", langPack[currentLang].alert_del_card, async () => {
+                try {
+                    await fetch(`${BASE_URL}/api/delete-flashcard?card_id=${id}&user_id=${userId}`, { method: 'DELETE' });
+                    loadFlashcards();
+                } catch(e){}
+            });
+        }
+
+        async function playQuiz(quizId, isPublic=false, sessionId=null) {
+            try {
+                let url;
+                if (sessionId) url = `${BASE_URL}/api/quiz-detail?quiz_id=${quizId}&_t=${Date.now()}`;
+                else if (isPublic) url = `${BASE_URL}/api/public-quiz-detail?quiz_id=${quizId}&user_id=${userId}&_t=${Date.now()}`;
+                else url = BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now();
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data && data.error_code === "public_limit") {
+                    showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
+                    return;
+                }
+                if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
+                    currentQuizId = quizId;
+                    currentQuizQuestions = data.quiz_json.quizzes;
+                    currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
+                    document.getElementById('game-screen').style.display = 'block';
+                    showQuestion();
+                }
+            } catch (error) { showAppAlert("❌", "Yuklashda xatolik."); }
+        }
+
+        function showQuestion() {
+            if (currentQuestionIdx >= currentQuizQuestions.length) {
+                finishQuiz(); return;
+            }
+            isAnswered = false;
+            const q = currentQuizQuestions[currentQuestionIdx];
+            document.getElementById('game-progress').innerText = `${currentLang === 'ru' ? 'Вопрос' : currentLang === 'en' ? 'Question' : 'Savol'}: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
+            document.getElementById('question-text').innerText = q.question;
+            
+            const container = document.getElementById('options-container');
+            container.innerHTML = "";
+            document.getElementById('explanation-container').style.display = 'none';
+            
+            const nextBtn = document.getElementById('next-question-btn');
+            nextBtn.style.display = 'none';
+            nextBtn.innerText = (currentQuestionIdx === currentQuizQuestions.length - 1) ? langPack[currentLang].btn_finish : langPack[currentLang].btn_next;
+
+            const prefixes = ["A) ", "B) ", "C) ", "D) "];
+            q.options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'opt-btn';
+                const hasPrefix = /^[A-D][)|.]/i.test(opt.trim());
+                btn.innerText = hasPrefix ? opt : (prefixes[idx] || "") + opt;
+                btn.onclick = () => selectOption(btn, idx, q.correct_index, q.explanation);
+                container.appendChild(btn);
+            });
+        }
+
+        function selectOption(btn, idx, correctIdx, explanation) {
+            if (isAnswered) return;
+            isAnswered = true;
+            const container = document.getElementById('options-container');
+            const buttons = container.getElementsByClassName('opt-btn');
+            const expBox = document.getElementById('explanation-container');
+
+            if (idx === correctIdx) {
+                btn.classList.add('correct'); correctAnswersCount++; playQuizSound('correct');
+            } else {
+                btn.classList.add('wrong'); wrongAnswersCount++; playQuizSound('wrong');
+                if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
+                const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
+                expBox.innerText = `${expLabel} ` + (explanation || "...");
+                expBox.style.display = 'block';
+            }
+            document.getElementById('next-question-btn').style.display = 'block';
+        }
+
+        function nextQuestion() {
+            currentQuestionIdx++; showQuestion();
+        }
+
+        async function finishQuiz() {
+            const total = currentQuizQuestions.length;
+            const scorePercent = Math.round((correctAnswersCount / total) * 100);
+            const resultSound = scorePercent >= 70 ? 'good' : 'bad';
+            // Natija ovozi ham albatta alohida ijro etiladi: good >=70%, bad <70%.
+            playQuizSound(resultSound);
+            setTimeout(() => playQuizSound(resultSound), 120);
+            try {
+                if (currentTeacherSessionId) {
+                    const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
+                    await fetch(BASE_URL + '/api/teacher-submit', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ session_id: currentTeacherSessionId, user_id: userId, first_name: u.first_name || 'Telegram User', username: u.username || '', score: correctAnswersCount, total: total, percent: scorePercent })
+                    });
+                } else {
+                    await fetch(BASE_URL + '/api/update-progress', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quiz_id: currentQuizId, user_id: userId, correct_count: correctAnswersCount, percent: scorePercent })
+                    });
+                }
+            } catch (e) {}
+            currentTeacherSessionId = null;
+            showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
+        }
+
+        function closeGame() {
+            document.getElementById('game-screen').style.display = 'none';
+            loadQuizzes();
+        }
+
+        function showPublicLocked() {
+            showAppAlert("🔒", langPack[currentLang].public_locked, () => switchScreen('premium'));
+        }
+
+        function showPublicLimitLocked() {
+            showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
+        }
+
+        async function loadTeacherPanel() {
+            try {
+                const statusRes = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
+                const status = await statusRes.json();
+                const panel = document.getElementById('teacher-panel');
+                if (!panel) return;
+                panel.style.display = status.is_teacher ? 'block' : 'none';
+                if (!status.is_teacher) return;
+                const qRes = await fetch(`${BASE_URL}/api/teacher-quizzes?user_id=${userId}`);
+                const qData = await qRes.json();
+                const select = document.getElementById('teacher-quiz-select');
+                select.innerHTML = '';
+                if (!qData.quizzes || !qData.quizzes.length) {
+                    select.innerHTML = `<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
+                } else {
+                    qData.quizzes.forEach(q => { const o=document.createElement('option'); o.value=q.id; o.textContent=`${q.title} (${q.total})`; select.appendChild(o); });
+                }
+                loadTeacherSessions();
+            } catch(e) {}
+        }
+
+        async function createTeacherSession() {
+            const quizId=document.getElementById('teacher-quiz-select').value;
+            const duration=Number(document.getElementById('teacher-duration').value);
+            if(!quizId) { showAppAlert('⚠️', langPack[currentLang].teacher_no_quizzes); return; }
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher/create-session`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quizId,duration_minutes:duration})});
+                const data=await res.json();
+                if(data.status==='ok') {
+                    const link=`${BASE_URL}/?session=${data.code}`;
+                    try { await navigator.clipboard.writeText(link); } catch(e) {}
+                    showAppAlert('🚀', `${langPack[currentLang].teacher_created}\n\n${link}`);
+                    loadTeacherSessions();
+                } else showAppAlert('❌', data.detail || data.message || 'Error');
+            } catch(e){ showAppAlert('❌', langPack[currentLang].alert_system_err); }
+        }
+
+        async function loadTeacherSessions() {
+            const box=document.getElementById('teacher-sessions-list'); if(!box) return;
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`); const data=await res.json();
+                box.innerHTML='';
+                (data.sessions||[]).slice(0,8).forEach(s=>{
+                    const link=`${BASE_URL}/?session=${s.code}`;
+                    const div=document.createElement('div'); div.className='quiz-card'; div.style.padding='12px';
+                    div.innerHTML=`<div style="font-weight:bold;">${s.title}</div><div style="font-size:12px;color:var(--text-hint);margin:6px 0;">${s.code} · ${s.active?'🟢':'🔴'}</div><div class="action-group" style="flex-wrap:wrap;justify-content:flex-end;"><button class="activate-btn" onclick="copyTeacherLink('${link}')">${langPack[currentLang].teacher_copy}</button><button class="activate-btn" onclick="showTeacherResults('${s.id}')">${langPack[currentLang].teacher_results}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','xlsx')">${langPack[currentLang].teacher_excel}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="activate-btn" onclick="downloadTeacherExport('${s.id}','docx')">${langPack[currentLang].teacher_word}</button></div>`; box.appendChild(div);
+                });
+            } catch(e) {}
+        }
+
+        async function copyTeacherLink(link){ try{await navigator.clipboard.writeText(link);showAppAlert('🔗',link);}catch(e){showAppAlert('🔗',link);} }
+
+        function downloadTeacherExport(sessionId, format) {
+            const url=`${BASE_URL}/api/teacher-export?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&format=${format}`;
+            window.open(url, '_blank');
+        }
+
+        async function showTeacherResults(sessionId) {
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-session-results?session_id=${sessionId}&user_id=${userId}`); const data=await res.json();
+                if(data.status!=='ok'){showAppAlert('❌',data.detail||'Error');return;}
+                let text=`${data.session.quiz_title}\n\n`;
+                if(!data.participants.length) text+=langPack[currentLang].teacher_no_results;
+                data.participants.forEach((p,i)=>{text+=`${i+1}. ${p.first_name||'-'} — ${p.score}/${p.total} (${p.percent}%)\n`;});
+                text+=`\nExcel: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=xlsx\nPDF: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=pdf\nWord: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=docx`;
+                showAppAlert('📊',text);
+            }catch(e){showAppAlert('❌',langPack[currentLang].alert_system_err);}
+        }
+
+        async function openTeacherSessionFromUrl() {
+            const code=new URLSearchParams(window.location.search).get('session');
+            if(!code) return;
+            try {
+                const res=await fetch(`${BASE_URL}/api/teacher-session?code=${encodeURIComponent(code)}&user_id=${userId}`); const data=await res.json();
+                if(data.status==='ok'){
+                    const go=confirm(`${data.title}\n\n${data.total} questions\n${langPack[currentLang].teacher_panel_title}`);
+                    if(go){ currentTeacherSessionId=data.session_id; await playQuiz(data.quiz_id,false,data.session_id); }
+                } else showAppAlert('🔒',data.detail||'Session error');
+            }catch(e){}
+        }
+
+        window.onload = function() {
+            applyLocalization();
+            setupVibration();
+            updateSoundToggle();
+
+            // Faol foydalanuvchini faqat Mini App ko'rinib turganda yuritamiz.
+            // Ilova fon rejimiga o'tsa heartbeat to'xtaydi va foydalanuvchi
+            // 2 daqiqadan keyin faol foydalanuvchilar sonidan chiqadi.
+            let lastHeartbeatAt = 0;
+
+            function updateActiveUsersBadge(activeUsers) {
+                const badge = document.getElementById('user-count-badge');
+                if (!badge) return;
+                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
+                badge.innerText = `🟢 ${Number(activeUsers) || 0} ${suffix}`;
+            }
+
+            async function sendActivityHeartbeat() {
+                if (document.visibilityState !== 'visible') return;
+                const now = Date.now();
+                if (now - lastHeartbeatAt < 10000) return;
+                lastHeartbeatAt = now;
+
+                try {
+                    const response = await fetch(
+                        `${BASE_URL}/api/heartbeat?user_id=${userId}&_t=${now}`,
+                        { cache: 'no-store' }
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.active_users !== undefined) {
+                            updateActiveUsersBadge(data.active_users);
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            sendActivityHeartbeat();
+            loadQuizzes();
+            loadPremiumStatus();
+            loadTeacherPanel();
+            openTeacherSessionFromUrl();
+
+            // Har 30 soniyada yangilanadi, lekin faqat ilova ko'rinib turganda.
+            setInterval(() => {
+                sendActivityHeartbeat();
+
+                // Avtomatik yangilash faqat "Testlar" bo'limida ishlaydi.
+                // Ommaviy va Kartochkalar bo'limlarini o'z-o'zidan Testlarga almashtirmaydi.
+                const libraryScreen = document.getElementById('library-screen');
+                if (libraryScreen && libraryScreen.classList.contains('active') && currentTab === 'personal') {
+                    loadQuizzes();
+                }
+            }, 30000);
+
+            // Telegram Mini App qayta oldinga chiqqanda darhol faol deb belgilanadi.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    sendActivityHeartbeat();
+                }
+            });
+            window.addEventListener('focus', sendActivityHeartbeat);
+        };
     </script>
 </body>
 </html>
