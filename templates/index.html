@@ -1,273 +1,241 @@
-isAnswered = false;
-        const q = currentQuizQuestions[currentQuestionIdx];
-        document.getElementById('game-title').innerText = q.title || ("Question " + (currentQuestionIdx + 1));
-        document.getElementById('game-progress').innerText = `Savol: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
-        document.getElementById('question-text').innerText = q.question;
-
-        const optionsContainer = document.getElementById('options-container');
-        optionsContainer.innerHTML = '';
-        const explanationContainer = document.getElementById('explanation-container');
-        explanationContainer.style.display = 'none';
-        explanationContainer.innerText = '';
-
-        const nextBtn = document.getElementById('next-question-btn');
-        nextBtn.style.display = 'none';
-
-        if (q.options) {
-            Object.keys(q.options).forEach(key => {
-                const btn = document.createElement('button');
-                btn.className = 'opt-btn';
-                btn.innerText = `${key}) ${q.options[key]}`;
-                btn.onclick = () => selectOption(key, q.correct, btn, q.explanation);
-                optionsContainer.appendChild(btn);
-            });
-        }
-    }
-
-    function selectOption(selectedKey, correctKey, selectedBtn, explanation) {
-        if (isAnswered) return;
-        isAnswered = true;
-
-        const optionsContainer = document.getElementById('options-container');
-        const buttons = optionsContainer.getElementsByClassName('opt-btn');
-
-        if (selectedKey === correctKey) {
-            selectedBtn.classList.add('correct');
-            correctAnswersCount++;
-            playQuizSound('correct');
-        } else {
-            selectedBtn.classList.add('wrong');
-            wrongAnswersCount++;
-            playQuizSound('wrong');
-
-            // To'g'ri javob tugmasini yashil rangda ko'rsatish
-            Array.from(buttons).forEach(btn => {
-                if (btn.innerText.startsWith(`${correctKey})`)) {
-                    btn.classList.add('correct');
-                }
-            });
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quiz Pilot Super Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent-color: #38bdf8;
+            --accent-hover: #0284c7;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --border-color: #334155;
+            --success-color: #22c55e;
+            --danger-color: #ef4444;
         }
 
-        if (explanation) {
-            const expContainer = document.getElementById('explanation-container');
-            expContainer.innerText = `${langPack[currentLang].explanation_label || '💡 Izoh:'} ${explanation}`;
-            expContainer.style.display = 'block';
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
         }
 
-        const nextBtn = document.getElementById('next-question-btn');
-        if (currentQuestionIdx + 1 < currentQuizQuestions.length) {
-            nextBtn.innerText = langPack[currentLang].btn_next || 'Keyingi savol ➡️';
-        } else {
-            nextBtn.innerText = langPack[currentLang].btn_finish || 'Natijani saqlash 🏁';
-        }
-        nextBtn.style.display = 'block';
-    }
-
-    function nextQuestion() {
-        currentQuestionIdx++;
-        showQuestion();
-    }
-
-    async function finishQuiz() {
-        const total = currentQuizQuestions.length;
-        const percent = Math.round((correctAnswersCount / total) * 100);
-
-        if (percent >= 70) {
-            playQuizSound('good');
-        } else {
-            playQuizSound('bad');
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 16px;
+            padding-bottom: 80px;
         }
 
-        try {
-            await fetch(`${BASE_URL}/api/save-score`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: userId,
-                    quiz_id: currentQuizId,
-                    score: correctAnswersCount,
-                    total: total,
-                    percent: percent
-                })
-            });
-        } catch (e) {
-            console.log("Score save error:", e);
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
         }
 
-        const resultMsg = `🏁 Test yakunlandi!\n\nTo'g'ri javoblar: ${correctAnswersCount}/${total}\nNatija: ${percent}%`;
-        showAppAlert("🏆", resultMsg, () => {
-            closeGame();
-            loadQuizzes();
-        });
-    }
+        .title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
 
-    function closeGame() {
-        document.getElementById('game-screen').style.display = 'none';
-        currentQuizQuestions = [];
-        currentQuestionIdx = 0;
-    }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
 
-    async function loadTeacherPanel() {
-        try {
-            const res = await fetch(`${BASE_URL}/api/teacher-quizzes?user_id=${userId}&_t=${Date.now()}`);
-            const data = await res.json();
-            const select = document.getElementById('teacher-quiz-select');
-            if (!select) return;
-            select.innerHTML = '';
+        .btn {
+            width: 100%;
+            background-color: var(--accent-color);
+            color: #0f172a;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+        }
 
-            if (data && data.quizzes && data.quizzes.length > 0) {
-                data.quizzes.forEach(q => {
-                    const opt = document.createElement('option');
-                    opt.value = q.id;
-                    opt.innerText = q.title;
-                    select.appendChild(opt);
-                });
-            } else {
-                const opt = document.createElement('option');
-                opt.value = "";
-                opt.innerText = langPack[currentLang].teacher_no_quizzes || "Avval test yarating.";
-                select.appendChild(opt);
+        .btn:active {
+            background-color: var(--accent-hover);
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-outline:active {
+            background-color: var(--border-color);
+        }
+
+        .support-card {
+            text-align: center;
+            margin-top: 24px;
+        }
+
+        .support-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .support-desc {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-bottom: 14px;
+        }
+
+        .footer-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: var(--card-bg);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+        }
+
+        .nav-item {
+            color: var(--text-sub);
+            text-decoration: none;
+            font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .nav-item.active {
+            color: var(--accent-color);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="title">🚀 Quiz Pilot</div>
+        <div id="userStatus" style="font-size: 12px; color: var(--accent-color);">PRO ✨</div>
+    </div>
+
+    <!-- Asosiy Ilm/Test Yaratish Bolimi -->
+    <div class="card">
+        <h3 style="margin-bottom: 12px;" id="lblCreateQuiz">Yangi test yaratish</h3>
+        <button class="btn" onclick="openCreateModal()" id="btnStartCreate">
+            ➕ Test yaratish
+        </button>
+    </div>
+
+    <!-- Admin Bilan Bog'lanish Bolimi -->
+    <div class="card support-card">
+        <div class="support-title" id="lblSupportTitle">💬 Yordam va Qo'llab-quvvatlash</div>
+        <div class="support-desc" id="lblSupportDesc">Savollaringiz yoki muammo bormi? Administrator bilan to'g'ridan-to'g'ri bog'laning.</div>
+        <button class="btn btn-outline" onclick="contactAdmin()" id="btnContactAdmin">
+            ✉️ Admin bilan bog'lanish
+        </button>
+    </div>
+
+    <!-- Pastki Navigatsiya Bar -->
+    <div class="footer-nav">
+        <a href="#" class="nav-item active" id="navHome">🏠 Bosh sahifa</a>
+        <a href="#" class="nav-item" id="navPublic">🌐 Ommaviy</a>
+        <a href="#" class="nav-item" id="navTariffs">👑 Tariflar</a>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // Mini App ni to'liq ekranda ochish
+
+        const userId = tg.initDataUnsafe?.user?.id || 0;
+        const userLang = tg.initDataUnsafe?.user?.language_code || 'uz';
+
+        // Tillar lug'ati UI uchun
+        const i18n = {
+            uz: {
+                createQuiz: "Yangi test yaratish",
+                startCreate: "➕ Test yaratish",
+                supportTitle: "💬 Yordam va Qo'llab-quvvatlash",
+                supportDesc: "Savollaringiz yoki muammo bormi? Administrator bilan to'g'ridan-to'g'ri bog'laning.",
+                contactAdmin: "✉️ Admin bilan bog'lanish",
+                home: "🏠 Bosh sahifa",
+                public: "🌐 Ommaviy",
+                tariffs: "👑 Tariflar",
+                alertSent: "Admin bilan muloqot oynasi ochildi. Telegram orqali xabaringizni yozib qoldiring!"
+            },
+            ru: {
+                createQuiz: "Создать новый тест",
+                startCreate: "➕ Создать тест",
+                supportTitle: "💬 Помощь и Поддержка",
+                supportDesc: "Есть вопросы или проблемы? Свяжитесь с администратором напрямую.",
+                contactAdmin: "✉️ Связаться с админом",
+                home: "🏠 Главная",
+                public: "🌐 Общие",
+                tariffs: "👑 Тарифы",
+                alertSent: "Диалог с админом открыт. Напишите ваше сообщение в чате Telegram!"
+            },
+            en: {
+                createQuiz: "Create New Quiz",
+                startCreate: "➕ Create Quiz",
+                supportTitle: "💬 Help & Support",
+                supportDesc: "Have questions or issues? Contact the administrator directly.",
+                contactAdmin: "✉️ Contact Admin",
+                home: "🏠 Home",
+                public: "🌐 Public",
+                tariffs: "👑 Pricing",
+                alertSent: "Support chat initiated. Please type your message in the Telegram chat!"
             }
-            loadTeacherSessions();
-        } catch (e) {}
-    }
+        };
 
-    async function createTeacherSession() {
-        const quizId = document.getElementById('teacher-quiz-select').value;
-        const duration = document.getElementById('teacher-duration').value;
-        if (!quizId) return;
+        const lang = i18n[userLang] ? userLang : 'uz';
 
-        try {
-            const res = await fetch(`${BASE_URL}/api/create-teacher-session`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userId, quiz_id: quizId, duration: parseInt(duration) })
+        // Til bo'yicha UI larni o'rnatish
+        document.getElementById('lblCreateQuiz').innerText = i18n[lang].createQuiz;
+        document.getElementById('btnStartCreate').innerText = i18n[lang].startCreate;
+        document.getElementById('lblSupportTitle').innerText = i18n[lang].supportTitle;
+        document.getElementById('lblSupportDesc').innerText = i18n[lang].supportDesc;
+        document.getElementById('btnContactAdmin').innerText = i18n[lang].contactAdmin;
+        document.getElementById('navHome').innerText = i18n[lang].home;
+        document.getElementById('navPublic').innerText = i18n[lang].public;
+        document.getElementById('navTariffs').innerText = i18n[lang].tariffs;
+
+        // ADMIN BILAN BOG'LANISH FUNKSIYASI
+        function contactAdmin() {
+            const data = {
+                action: "contact_admin",
+                user_id: userId
+            };
+
+            // Telegram WebApp ga ma'lumot uzatish
+            tg.sendData(JSON.stringify(data));
+            
+            // Foydalanuvchiga bildirishnoma ko'rsatib Mini App ni yopish
+            tg.showAlert(i18n[lang].alertSent, function() {
+                tg.close();
             });
-            const data = await res.json();
-            if (data && data.status === 'ok') {
-                showAppAlert("🚀", langPack[currentLang].teacher_created || "Sessiya yaratildi.");
-                loadTeacherSessions();
-            }
-        } catch (e) {}
-    }
-
-    async function loadTeacherSessions() {
-        try {
-            const res = await fetch(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`);
-            const data = await res.json();
-            const container = document.getElementById('teacher-sessions-list');
-            if (!container) return;
-            container.innerHTML = '';
-
-            if (data && data.sessions && data.sessions.length > 0) {
-                data.sessions.forEach(s => {
-                    const box = document.createElement('div');
-                    box.style.cssText = "background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; margin-top: 8px; font-size: 13px;";
-                    const link = `https://t.me/QuizPilotBot?start=session_${s.id}`;
-                    box.innerHTML = `
-                        <div><b>${s.quiz_title}</b> (${s.duration} min)</div>
-                        <div style="margin-top: 5px; display: flex; gap: 6px; flex-wrap: wrap;">
-                            <button class="activate-btn" style="padding: 4px 8px; font-size: 11px;" onclick="copySessionLink('${link}')">${langPack[currentLang].teacher_copy || '🔗 Havolani nusxalash'}</button>
-                            <button class="activate-btn" style="padding: 4px 8px; font-size: 11px; background: #28a745;" onclick="downloadExport('${s.id}', 'excel')">Excel</button>
-                            <button class="activate-btn" style="padding: 4px 8px; font-size: 11px; background: #dc3545;" onclick="downloadExport('${s.id}', 'pdf')">PDF</button>
-                            <button class="activate-btn" style="padding: 4px 8px; font-size: 11px; background: #0078d7;" onclick="downloadExport('${s.id}', 'word')">Word</button>
-                        </div>
-                    `;
-                    container.appendChild(box);
-                });
-            }
-        } catch (e) {}
-    }
-
-    function copySessionLink(link) {
-        navigator.clipboard.writeText(link).then(() => {
-            showAppAlert("✅", "Havola nusxalandi!");
-        });
-    }
-
-    function downloadExport(sessionId, format) {
-        window.open(`${BASE_URL}/api/export-results?session_id=${sessionId}&format=${format}&user_id=${userId}`, '_blank');
-    }
-
-    function showPublicLimitLocked() {
-        showAppAlert("🔒", langPack[currentLang].public_locked || "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", () => switchScreen('premium'));
-    }
-
-    /* --- ADMIN BILAN BOG'LANISH FUNKSIYALARI --- */
-    function openAdminModal() {
-        document.getElementById('contact-admin-modal').style.display = 'flex';
-    }
-
-    function closeAdminModal() {
-        document.getElementById('contact-admin-modal').style.display = 'none';
-        document.getElementById('admin-message-input').value = '';
-    }
-
-    function openDirectAdminChat() {
-        // Bu yerga adminning shaxsiy Telegram username'ini kiriting
-        const adminUsername = 'QuizPilotSupportBot'; // O'zingizning username'ingizni qo'ying
-        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
-            Telegram.WebApp.openTelegramLink(`https://t.me/${adminUsername}`);
-        } else {
-            window.open(`https://t.me/${adminUsername}`, '_blank');
-        }
-    }
-
-    async function sendAdminMessage() {
-        const msg = document.getElementById('admin-message-input').value.trim();
-        if (!msg) {
-            showAppAlert("⚠️", "Iltimos, xabaringizni matnini kiriting!");
-            return;
         }
 
-        try {
-            const res = await fetch(`${BASE_URL}/api/contact-admin`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: userId,
-                    message: msg
-                })
-            });
-            const data = await res.json();
-            if (data && data.status === 'ok') {
-                showAppAlert("✅", "Xabaringiz Adminga yuborildi! Tez orada javob beramiz.");
-                closeAdminModal();
-            } else {
-                showAppAlert("❌", "Xabar yuborishda xatolik yuz berdi.");
-            }
-        } catch (e) {
-            showAppAlert("❌", "Server bilan bog'lanishda xatolik!");
+        function openCreateModal() {
+            // Test yaratish funksiyasi
+            console.log("Test yaratish bosildi");
         }
-    }
-
-    // Boshlang'ich yuklash
-    setupVibration();
-    loadPremiumStatus();
-    loadQuizzes();
     </script>
-
-    <!-- ADMIN BILAN BOG'LANISH TUGMALARI VA MODAL OYNASI -->
-    <div style="padding: 15px; margin-top: 15px;">
-        <button class="activate-btn" style="background: #0088cc; color: white; width: 100%; padding: 12px; border-radius: 10px; font-weight: bold; margin-bottom: 8px;" onclick="openAdminModal()">
-            ✉️ Admin panelga xabar yuborish
-        </button>
-        <button class="activate-btn" style="background: rgba(255,255,255,0.1); color: #fff; width: 100%; padding: 10px; border-radius: 10px; font-size: 12px;" onclick="openDirectAdminChat()">
-            💬 Telegram orqali adminga yozish
-        </button>
-    </div>
-
-    <!-- Admin Murojaat Modal Oynasi -->
-    <div id="contact-admin-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;">
-        <div style="background: #1c1c1e; padding: 20px; border-radius: 14px; width: 88%; max-width: 380px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); text-align: center; color: #fff;">
-            <h3 style="margin-top: 0;">👨‍💻 Admin bilan bog'lanish</h3>
-            <p style="font-size: 13px; color: #aaa; margin-bottom: 12px;">Savolingiz, muammo yoki taklifingizni kiriting:</p>
-            <textarea id="admin-message-input" rows="4" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #111; color: #fff; resize: none; box-sizing: border-box; font-size: 14px;" placeholder="Xabaringizni shu yerga yozing..."></textarea>
-            <div style="margin-top: 15px; display: flex; gap: 10px;">
-                <button onclick="sendAdminMessage()" style="flex: 1; padding: 10px; background: #28a745; color: white; border: none; border-radius: 8px; font-weight: bold;">Yuborish 🚀</button>
-                <button onclick="closeAdminModal()" style="flex: 1; padding: 10px; background: #dc3545; color: white; border: none; border-radius: 8px;">Yopish ✖️</button>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
