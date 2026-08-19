@@ -29,6 +29,8 @@ import time
 from typing import List, Optional
 import uvicorn
 import uuid
+import random
+from copy import deepcopy
 from pathlib import Path
 
 logging.basicConfig(
@@ -331,6 +333,47 @@ def init_db():
         started_at INTEGER,
         finished_at INTEGER,
         UNIQUE(session_id, user_id))""")
+
+    # O'qituvchilar uchun professional variantlar/guruhlar. Eski DB bilan mos:
+    # IF NOT EXISTS + ehtiyotkor migration mavjud funksiyalarni o'zgartirmaydi.
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quiz_id TEXT NOT NULL,
+        variant_code TEXT NOT NULL,
+        variant_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(quiz_id, variant_code))""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_groups (
+        id TEXT PRIMARY KEY,
+        owner_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        created_at INTEGER NOT NULL,
+        active INTEGER DEFAULT 1)""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_group_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        first_name TEXT DEFAULT '',
+        username TEXT DEFAULT '',
+        joined_at INTEGER NOT NULL,
+        UNIQUE(group_id, user_id))""")
+
+    # Existing teacher_sessions jadvaliga yangi ustunlarni qo'shish.
+    cursor.execute("PRAGMA table_info(teacher_sessions);")
+    teacher_session_columns = [col[1] for col in cursor.fetchall()]
+    if "group_id" not in teacher_session_columns:
+        try:
+            cursor.execute("ALTER TABLE teacher_sessions ADD COLUMN group_id TEXT DEFAULT '';")
+        except Exception:
+            pass
+    if "variant_code" not in teacher_session_columns:
+        try:
+            cursor.execute("ALTER TABLE teacher_sessions ADD COLUMN variant_code TEXT DEFAULT '';")
+        except Exception:
+            pass
 
     conn.commit()
     conn.close()
@@ -1223,6 +1266,260 @@ def set_language(user_id: int, lang: str):
     return {"status": "ok"}
 
 
+# --- O'QITUVCHI PROFESSIONAL VOSITALARI ---
+TEACHER_VARIANT_CODES = ("A", "B", "C", "D")
+
+
+def _load_quiz_items(quiz_id: str, owner_id: int):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, owner_id))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+    try:
+        data = json.loads(row["quiz_json"])
+        items = data.get("quizzes", [])
+    except Exception:
+        raise HTTPException(status_code=500, detail="Test ma'lumotlari buzilgan")
+    if not items:
+        raise HTTPException(status_code=400, detail="Test savollari mavjud emas")
+    return row, items
+
+
+def _make_variant(items, variant_code: str):
+    """Variantlar bir-biridan farqli bo'lishi uchun savollar va variantlar deterministik aralashtiriladi."""
+    code_index = TEACHER_VARIANT_CODES.index(variant_code)
+    result = deepcopy(items)
+    # Har bir variant uchun turlicha, lekin takrorlanadigan seed.
+    rng = random.Random(f"QuizPilot:{variant_code}:{len(items)}:{json.dumps(items, ensure_ascii=False, sort_keys=True)}")
+    # Variant B/C/D savollar tartibini ham o'zgartiradi; A ham originaldan ko'chirma emas.
+    if code_index:
+        rng.shuffle(result)
+    elif len(result) > 1:
+        # A variantda ham testni biroz qayta tartiblaymiz, ammo keyin javob kaliti aniq saqlanadi.
+        rng.shuffle(result)
+    for item in result:
+        options = list(item.get("options") or [])[:4]
+        correct = int(item.get("correct_index", 0))
+        pairs = list(enumerate(options))
+        # Har variantda variantlar tartibi ham aralashadi.
+        rng.shuffle(pairs)
+        new_options = [p[1] for p in pairs]
+        new_correct = next((i for i, p in enumerate(pairs) if p[0] == correct), 0)
+        item["options"] = new_options
+        item["correct_index"] = new_correct
+    return {"variant": variant_code, "quizzes": result}
+
+
+class TeacherVariantsRequest(BaseModel):
+    user_id: int
+    quiz_id: str
+    variants: List[str] = Field(default_factory=lambda: ["A", "B", "C", "D"])
+
+
+@app.post("/api/teacher/generate-variants")
+def teacher_generate_variants(req: TeacherVariantsRequest):
+    require_teacher(req.user_id)
+    row, items = _load_quiz_items(req.quiz_id, req.user_id)
+    requested = []
+    for code in req.variants:
+        code = str(code).strip().upper()
+        if code in TEACHER_VARIANT_CODES and code not in requested:
+            requested.append(code)
+    if not requested:
+        raise HTTPException(status_code=400, detail="A, B, C yoki D variantidan kamida bittasini tanlang")
+
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cur = conn.cursor()
+    now = int(time.time())
+    result = []
+    for code in requested:
+        variant = _make_variant(items, code)
+        cur.execute(
+            "INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(quiz_id, variant_code) DO UPDATE SET variant_json=excluded.variant_json, created_at=excluded.created_at",
+            (req.quiz_id, code, json.dumps(variant, ensure_ascii=False), now),
+        )
+        result.append({"variant": code, "question_count": len(variant["quizzes"])})
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "quiz_id": req.quiz_id, "title": row["title"], "variants": result}
+
+
+@app.get("/api/teacher/variants")
+def teacher_list_variants(user_id: int, quiz_id: str):
+    require_teacher(user_id)
+    _load_quiz_items(quiz_id, user_id)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id=? ORDER BY variant_code", (quiz_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return {"status": "ok", "variants": [dict(r) for r in rows]}
+
+
+def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
+    _load_quiz_items(quiz_id, owner_id)
+    code = (variant_code or "A").strip().upper()
+    if code not in TEACHER_VARIANT_CODES:
+        raise HTTPException(status_code=400, detail="Variant A, B, C yoki D bo'lishi kerak")
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT variant_json FROM teacher_variants WHERE quiz_id=? AND variant_code=?", (quiz_id, code))
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        return json.loads(row["variant_json"])
+    # Variant hali yaratilmagan bo'lsa, uni xavfsiz tarzda yaratib olamiz.
+    _, items = _load_quiz_items(quiz_id, owner_id)
+    variant = _make_variant(items, code)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("INSERT OR REPLACE INTO teacher_variants (quiz_id,variant_code,variant_json,created_at) VALUES (?,?,?,?)",
+                 (quiz_id, code, json.dumps(variant, ensure_ascii=False), int(time.time())))
+    conn.commit(); conn.close()
+    return variant
+
+
+class TeacherGroupCreateRequest(BaseModel):
+    user_id: int
+    name: str
+    description: str = ""
+
+
+class TeacherGroupJoinRequest(BaseModel):
+    group_id: str
+    user_id: int
+    first_name: str = ""
+    username: str = ""
+
+
+@app.post("/api/teacher/groups")
+def teacher_create_group(req: TeacherGroupCreateRequest):
+    require_teacher(req.user_id)
+    name = (req.name or "").strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Guruh nomini kiriting")
+    gid = f"tg_{uuid.uuid4().hex[:10]}"
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("INSERT INTO teacher_groups (id,owner_id,name,description,created_at,active) VALUES (?,?,?,?,?,1)",
+                 (gid, req.user_id, name, (req.description or "")[:500], int(time.time())))
+    conn.commit(); conn.close()
+    return {"status":"ok", "group_id":gid, "name":name}
+
+
+@app.get("/api/teacher/groups")
+def teacher_groups(user_id: int):
+    require_teacher(user_id)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(m.id) AS member_count "
+                "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
+                "WHERE g.owner_id=? GROUP BY g.id ORDER BY g.created_at DESC", (user_id,))
+    rows = cur.fetchall(); conn.close()
+    return {"status":"ok", "groups":[dict(r) for r in rows]}
+
+
+@app.post("/api/teacher/groups/join")
+def teacher_join_group(req: TeacherGroupJoinRequest):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id,active FROM teacher_groups WHERE id=?", (req.group_id,))
+    group = cur.fetchone()
+    if not group or not group["active"]:
+        conn.close(); raise HTTPException(status_code=404, detail="Guruh topilmadi yoki yopilgan")
+    now = int(time.time())
+    cur.execute("INSERT OR IGNORE INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (?,?,?,?,?)",
+                (req.group_id, req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now))
+    conn.commit(); conn.close()
+    return {"status":"ok", "group_id":req.group_id}
+
+
+@app.get("/api/teacher/group-members")
+def teacher_group_members(group_id: str, user_id: int):
+    require_teacher(user_id)
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT g.id,g.name FROM teacher_groups g WHERE g.id=? AND g.owner_id=?", (group_id,user_id)); g=cur.fetchone()
+    if not g: conn.close(); raise HTTPException(status_code=404, detail="Guruh topilmadi")
+    cur.execute("SELECT user_id,first_name,username,joined_at FROM teacher_group_members WHERE group_id=? ORDER BY joined_at", (group_id,)); rows=cur.fetchall(); conn.close()
+    return {"status":"ok", "group":dict(g), "members":[dict(r) for r in rows]}
+
+
+@app.delete("/api/teacher/groups/{group_id}")
+def teacher_delete_group(group_id: str, user_id: int):
+    require_teacher(user_id)
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); cur=conn.cursor()
+    cur.execute("UPDATE teacher_groups SET active=0 WHERE id=? AND owner_id=?", (group_id,user_id))
+    changed=cur.rowcount; conn.commit(); conn.close()
+    if changed != 1: raise HTTPException(status_code=404, detail="Guruh topilmadi")
+    return {"status":"ok"}
+
+
+@app.get("/api/teacher/export-quiz")
+def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = "A", all_variants: int = 0):
+    require_teacher(user_id)
+    row, items = _load_quiz_items(quiz_id, user_id)
+    fmt = format.lower().strip()
+    codes = list(TEACHER_VARIANT_CODES) if int(all_variants) else [variant.upper()]
+    for c in codes:
+        if c not in TEACHER_VARIANT_CODES: raise HTTPException(status_code=400, detail="Noto'g'ri variant")
+
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", row["title"] or "quiz")[:40]
+    variant_payloads = [(c, _get_teacher_variant(quiz_id, user_id, c)) for c in codes]
+
+    def answer_key(payload):
+        return [chr(65 + int(q.get("correct_index", 0))) for q in payload.get("quizzes", [])]
+
+    if fmt == "xlsx":
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.xlsx")
+        wb=Workbook(); ws=wb.active; ws.title="Testlar"
+        ws.append(["Variant","№","Savol","A","B","C","D","To'g'ri javob"])
+        for code,payload in variant_payloads:
+            for i,q in enumerate(payload.get("quizzes",[]),1):
+                opts=(q.get("options") or [])+['','','','']
+                ws.append([code,i,q.get("question",""),opts[0],opts[1],opts[2],opts[3],chr(65+int(q.get("correct_index",0)))])
+        ws.freeze_panes="A2"; wb.save(path)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    if fmt == "docx":
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.docx")
+        doc=Document(); doc.add_heading(row["title"], level=1); doc.add_paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes))
+        for code,payload in variant_payloads:
+            doc.add_heading(f"Variant {code}", level=2)
+            for i,q in enumerate(payload.get("quizzes",[]),1):
+                doc.add_paragraph(f"{i}. {q.get('question','')}")
+                opts=(q.get("options") or [])+['','','','']
+                for j in range(4): doc.add_paragraph(f"{chr(65+j)}) {opts[j]}", style=None)
+            doc.add_paragraph("Javoblar: " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))))
+        doc.save(path)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    if fmt == "pdf":
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.pdf")
+        reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
+        doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
+        styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
+        story=[Paragraph(row["title"],title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
+        for code,payload in variant_payloads:
+            story.append(Paragraph(f"<b>Variant {code}</b>", q_style)); story.append(Spacer(1,5))
+            for i,q in enumerate(payload.get("quizzes",[]),1):
+                story.append(Paragraph(f"{i}. {q.get('question','')}",q_style))
+                opts=(q.get("options") or [])+['','','','']
+                for j in range(4): story.append(Paragraph(f"{chr(65+j)}) {opts[j]}",q_style))
+                story.append(Spacer(1,4))
+            story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
+        doc.build(story)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+    raise HTTPException(status_code=400, detail="Noto'g'ri format. xlsx, docx yoki pdf")
+
+
 # --- O'QITUVCHI GURUH REJIMI ---
 def require_teacher(user_id: int):
     add_user_to_db(user_id)
@@ -1252,6 +1549,8 @@ class TeacherSessionCreateRequest(BaseModel):
     user_id: int
     quiz_id: str
     duration_minutes: int = 30
+    variant_code: str = ""
+    group_id: str = ""
 
 
 @app.post("/api/teacher/create-session")
@@ -1264,20 +1563,30 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
     quiz = cur.fetchone()
     if not quiz:
         conn.close(); raise HTTPException(status_code=404, detail="Test topilmadi")
+    variant_code = (req.variant_code or "").strip().upper()
+    if variant_code and variant_code not in TEACHER_VARIANT_CODES:
+        conn.close(); raise HTTPException(status_code=400, detail="Variant A, B, C yoki D bo'lishi kerak")
+    group_id = (req.group_id or "").strip()
+    if group_id:
+        cur.execute("SELECT id FROM teacher_groups WHERE id=? AND owner_id=? AND active=1", (group_id, req.user_id))
+        if not cur.fetchone():
+            conn.close(); raise HTTPException(status_code=404, detail="Guruh topilmadi")
+    if variant_code:
+        _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
     sid = f"ts_{uuid.uuid4().hex[:10]}"
     code = uuid.uuid4().hex[:8].upper()
     now = int(time.time())
     expires = now + duration * 60
-    cur.execute("INSERT INTO teacher_sessions (id, owner_id, quiz_id, code, duration_minutes, created_at, expires_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)", (sid, req.user_id, req.quiz_id, code, duration, now, expires))
+    cur.execute("INSERT INTO teacher_sessions (id, owner_id, quiz_id, code, duration_minutes, created_at, expires_at, active, group_id, variant_code) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)", (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code))
     conn.commit(); conn.close()
-    return {"status": "ok", "session_id": sid, "code": code, "expires_at": expires, "quiz_title": quiz[1]}
+    return {"status": "ok", "session_id": sid, "code": code, "expires_at": expires, "quiz_title": quiz[1], "variant_code": variant_code, "group_id": group_id}
 
 
 @app.get("/api/teacher-sessions")
 def teacher_sessions(user_id: int):
     require_teacher(user_id)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory = sqlite3.Row
-    cur = conn.cursor(); cur.execute("SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.owner_id=? ORDER BY s.created_at DESC LIMIT 30", (user_id,))
+    cur = conn.cursor(); cur.execute("SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active, COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.owner_id=? ORDER BY s.created_at DESC LIMIT 30", (user_id,))
     rows=cur.fetchall(); conn.close(); now=int(time.time())
     result=[]
     for r in rows:
@@ -1289,21 +1598,32 @@ def teacher_sessions(user_id: int):
 @app.get("/api/teacher-session")
 def teacher_session_info(code: str, user_id: int):
     conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=?", (code.upper(),))
+    cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=?", (code.upper(),))
     row=cur.fetchone(); conn.close()
     if not row: raise HTTPException(status_code=404, detail="Sessiya topilmadi")
     if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail="Sessiya muddati tugagan")
-    return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"]}
+    return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"], "variant_code":row["variant_code"], "group_id":row["group_id"]}
+
+
+def _session_owner_id(session_id: str):
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); cur=conn.cursor()
+    cur.execute("SELECT owner_id FROM teacher_sessions WHERE id=?", (session_id,)); row=cur.fetchone(); conn.close()
+    if not row: raise HTTPException(status_code=404, detail="Sessiya topilmadi")
+    return row[0]
 
 
 @app.get("/api/teacher-session-quiz")
 def teacher_session_quiz(session_id: str, user_id: int):
     conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, s.expires_at, s.active, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=?", (session_id,))
+    cur.execute("SELECT s.quiz_id, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=?", (session_id,))
     row=cur.fetchone(); conn.close()
     if not row: raise HTTPException(status_code=404, detail="Sessiya topilmadi")
     if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail="Sessiya muddati tugagan")
-    return {"status":"ok", "quiz_id":row["quiz_id"], "quiz_json":json.loads(row["quiz_json"])}
+    if row["variant_code"]:
+        payload = _get_teacher_variant(row["quiz_id"], _session_owner_id(session_id), row["variant_code"])
+    else:
+        payload = json.loads(row["quiz_json"])
+    return {"status":"ok", "quiz_id":row["quiz_id"], "quiz_json":payload, "variant_code":row["variant_code"]}
 
 
 class TeacherSubmitRequest(BaseModel):
