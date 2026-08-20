@@ -361,6 +361,17 @@ def init_db():
         joined_at INTEGER NOT NULL,
         UNIQUE(group_id, user_id))""")
 
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_assignments (
+        id TEXT PRIMARY KEY,
+        owner_id INTEGER NOT NULL,
+        group_id TEXT NOT NULL,
+        quiz_id TEXT NOT NULL,
+        variant_code TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        due_at INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        active INTEGER DEFAULT 1)""")
+
     # Existing teacher_sessions jadvaliga yangi ustunlarni qo'shish.
     cursor.execute("PRAGMA table_info(teacher_sessions);")
     teacher_session_columns = [col[1] for col in cursor.fetchall()]
@@ -1459,6 +1470,67 @@ def teacher_delete_group(group_id: str, user_id: int):
     changed=cur.rowcount; conn.commit(); conn.close()
     if changed != 1: raise HTTPException(status_code=404, detail="Guruh topilmadi")
     return {"status":"ok"}
+
+
+class TeacherAssignmentCreateRequest(BaseModel):
+    user_id: int
+    group_id: str
+    quiz_id: str
+    variant_code: str = ""
+    title: str = ""
+    due_at: int = 0
+
+
+@app.post("/api/teacher/assignments")
+def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
+    require_teacher(req.user_id)
+    group_id=(req.group_id or "").strip(); quiz_id=(req.quiz_id or "").strip()
+    if not group_id or not quiz_id: raise HTTPException(status_code=400, detail="Guruh va testni tanlang")
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT id,name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",(group_id,req.user_id)); group=cur.fetchone()
+    cur.execute("SELECT id,title FROM quizzes WHERE id=? AND user_id=?",(quiz_id,req.user_id)); quiz=cur.fetchone()
+    if not group: conn.close(); raise HTTPException(status_code=404,detail="Guruh topilmadi")
+    if not quiz: conn.close(); raise HTTPException(status_code=404,detail="Test topilmadi")
+    code=(req.variant_code or "").strip().upper()
+    if code and code not in TEACHER_VARIANT_CODES: conn.close(); raise HTTPException(status_code=400,detail="Variant A, B, C yoki D bo'lishi kerak")
+    if code: _get_teacher_variant(quiz_id,req.user_id,code)
+    aid=f"ta_{uuid.uuid4().hex[:10]}"; now=int(time.time()); title=(req.title or "").strip()[:150] or quiz["title"]; due_at=max(0,int(req.due_at or 0))
+    cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,created_at,active) VALUES (?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,now))
+    conn.commit(); conn.close()
+    return {"status":"ok","assignment":{"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}}
+
+
+@app.get("/api/teacher/assignments")
+def teacher_assignments(user_id: int):
+    require_teacher(user_id)
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,a.created_at,a.active,
+                         g.name AS group_name,q.title AS quiz_title
+                  FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id
+                  LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=? ORDER BY a.created_at DESC LIMIT 100""",(user_id,))
+    rows=cur.fetchall(); conn.close(); return {"status":"ok","assignments":[dict(r) for r in rows]}
+
+
+@app.delete("/api/teacher/assignments/{assignment_id}")
+def teacher_delete_assignment(assignment_id: str, user_id: int):
+    require_teacher(user_id)
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); cur=conn.cursor()
+    cur.execute("UPDATE teacher_assignments SET active=0 WHERE id=? AND owner_id=?",(assignment_id,user_id))
+    changed=cur.rowcount; conn.commit(); conn.close()
+    if changed!=1: raise HTTPException(status_code=404,detail="Topshiriq topilmadi")
+    return {"status":"ok"}
+
+
+@app.get("/api/teacher/export-assignment")
+def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
+    require_teacher(user_id)
+    conn=sqlite3.connect(DB_PATH, check_same_thread=False); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("""SELECT a.*,g.name AS group_name,q.title AS quiz_title FROM teacher_assignments a
+                   LEFT JOIN teacher_groups g ON g.id=a.group_id LEFT JOIN quizzes q ON q.id=a.quiz_id
+                   WHERE a.id=? AND a.owner_id=?""",(assignment_id,user_id))
+    a=cur.fetchone(); conn.close()
+    if not a: raise HTTPException(status_code=404,detail="Topshiriq topilmadi")
+    return teacher_export_quiz(a["quiz_id"],user_id,format,a["variant_code"] or "A",0)
 
 
 @app.get("/api/teacher/export-quiz")
