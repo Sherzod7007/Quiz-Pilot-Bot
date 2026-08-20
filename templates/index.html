@@ -366,7 +366,7 @@
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         /* ===== Professional Teacher Center ===== */
-        .teacher-screen-wrap{padding-bottom:8px}.teacher-hero{padding:18px;margin-bottom:14px;background:linear-gradient(135deg,rgba(0,153,255,.18),rgba(0,0,0,.28));border:1px solid rgba(0,210,255,.35)}.teacher-hero h2{margin:0 0 5px;font-size:21px}.teacher-hero p{margin:0;color:var(--text-hint);font-size:12px;line-height:1.45}.teacher-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}.teacher-feature{padding:14px 10px;min-height:82px;cursor:pointer;text-align:left}.teacher-feature .tf-icon{font-size:24px;display:block;margin-bottom:7px}.teacher-feature b{display:block;font-size:13px}.teacher-feature span:last-child{display:block;color:var(--text-hint);font-size:10px;margin-top:3px;line-height:1.25}.teacher-section{padding:15px;margin-bottom:12px}.teacher-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;font-size:16px;font-weight:700}.teacher-mini-btn{border:1px solid var(--aero-border);background:rgba(255,255,255,.08);color:#fff;border-radius:8px;padding:7px 10px;font-size:11px;cursor:pointer}.teacher-chip-row{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 0}.teacher-chip{padding:6px 9px;border-radius:20px;background:rgba(0,120,215,.18);border:1px solid rgba(0,210,255,.25);color:#d9f6ff;font-size:11px}.variant-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.variant-btn{padding:10px 5px;border-radius:8px;border:1px solid var(--aero-border);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer}.variant-btn.active{background:linear-gradient(180deg,#0099ff,#005a9e);border-color:#00d2ff;box-shadow:0 0 9px rgba(0,153,255,.45)}.teacher-note{color:var(--text-hint);font-size:11px;line-height:1.45;margin-top:9px}.teacher-session-card{padding:12px;margin-top:9px}.teacher-session-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.teacher-empty{text-align:center;color:var(--text-hint);padding:22px 8px;font-size:12px}
+        .teacher-screen-wrap{padding-bottom:8px}.teacher-hero{padding:18px;margin-bottom:14px;background:linear-gradient(135deg,rgba(0,153,255,.18),rgba(0,0,0,.28));border:1px solid rgba(0,210,255,.35)}.teacher-hero h2{margin:0 0 5px;font-size:21px}.teacher-hero p{margin:0;color:var(--text-hint);font-size:12px;line-height:1.45}.teacher-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}.teacher-feature{padding:14px 10px;min-height:82px;cursor:pointer;text-align:left}.teacher-feature .tf-icon{font-size:24px;display:block;margin-bottom:7px}.teacher-feature b{display:block;font-size:13px}.teacher-feature span:last-child{display:block;color:var(--text-hint);font-size:10px;margin-top:3px;line-height:1.25}.teacher-feature-panel{scroll-margin-top:10px}.teacher-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.teacher-export-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.teacher-session-card{padding:11px;margin-top:8px}.teacher-chip-row{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.teacher-chip{font-size:10px;padding:4px 7px;border-radius:10px;background:rgba(255,255,255,.08)}@media(max-width:520px){.teacher-form-grid{grid-template-columns:1fr}}.teacher-section{padding:15px;margin-bottom:12px}.teacher-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;font-size:16px;font-weight:700}.teacher-mini-btn{border:1px solid var(--aero-border);background:rgba(255,255,255,.08);color:#fff;border-radius:8px;padding:7px 10px;font-size:11px;cursor:pointer}.teacher-chip-row{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 0}.teacher-chip{padding:6px 9px;border-radius:20px;background:rgba(0,120,215,.18);border:1px solid rgba(0,210,255,.25);color:#d9f6ff;font-size:11px}.variant-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}.variant-btn{padding:10px 5px;border-radius:8px;border:1px solid var(--aero-border);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer}.variant-btn.active{background:linear-gradient(180deg,#0099ff,#005a9e);border-color:#00d2ff;box-shadow:0 0 9px rgba(0,153,255,.45)}.teacher-note{color:var(--text-hint);font-size:11px;line-height:1.45;margin-top:9px}.teacher-session-card{padding:12px;margin-top:9px}.teacher-session-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.teacher-empty{text-align:center;color:var(--text-hint);padding:22px 8px;font-size:12px}
     </style>
 </head>
 <body>
@@ -439,8 +439,32 @@
                 <button class="teacher-feature glass-panel" onclick="teacherFeature('variants')"><span class="tf-icon">🔄</span><b data-lang="teacher_variants">4 ta variant</b><span data-lang="teacher_variants_desc">A, B, C, D variantlar</span></button>
                 <button class="teacher-feature glass-panel" onclick="teacherFeature('results')"><span class="tf-icon">📊</span><b data-lang="teacher_results_title">Natijalar</b><span data-lang="teacher_results_desc">Ball, reyting va statistika</span></button>
             </div>
+            <div id="teacher-feature-groups" class="teacher-section glass-panel teacher-feature-panel" style="display:none;">
+                <div class="teacher-section-title"><span>👥 <span data-lang="teacher_groups">Guruhlar</span></span><button class="teacher-mini-btn" onclick="loadTeacherGroups()" data-lang="teacher_refresh">Yangilash</button></div>
+                <div class="teacher-form-grid"><input id="teacher-group-name" class="input-card" placeholder="Guruh nomi"><input id="teacher-group-desc" class="input-card" placeholder="Izoh (ixtiyoriy)"></div>
+                <button class="submit-btn" onclick="createTeacherGroup()" data-lang="teacher_create_group">➕ Guruh yaratish</button>
+                <div id="teacher-groups-list" style="margin-top:12px;"></div>
+            </div>
+            <div id="teacher-feature-assignments" class="teacher-section glass-panel teacher-feature-panel" style="display:none;">
+                <div class="teacher-section-title"><span>📋 <span data-lang="teacher_assignments">Topshiriqlar</span></span><button class="teacher-mini-btn" onclick="loadTeacherAssignments()" data-lang="teacher_refresh">Yangilash</button></div>
+                <select id="teacher-assignment-group" class="input-card"></select><select id="teacher-assignment-quiz" class="input-card"></select>
+                <select id="teacher-assignment-variant" class="input-card"><option value="">Oddiy test</option><option value="A">Variant A</option><option value="B">Variant B</option><option value="C">Variant C</option><option value="D">Variant D</option></select>
+                <input id="teacher-assignment-title" class="input-card" placeholder="Topshiriq nomi (ixtiyoriy)">
+                <button class="submit-btn" onclick="createTeacherAssignment()" data-lang="teacher_assign_btn">📋 Topshiriq biriktirish</button>
+                <div id="teacher-assignments-list" style="margin-top:12px;"></div>
+            </div>
+            <div id="teacher-feature-variants" class="teacher-section glass-panel teacher-feature-panel" style="display:none;">
+                <div class="teacher-section-title"><span>🔄 <span data-lang="teacher_variants">4 ta variant — A, B, C, D</span></span></div>
+                <select id="teacher-variant-quiz" class="input-card"></select>
+                <div class="variant-grid">
+                    <button class="variant-btn active" onclick="toggleVariantCode('A',this)">A</button><button class="variant-btn active" onclick="toggleVariantCode('B',this)">B</button><button class="variant-btn active" onclick="toggleVariantCode('C',this)">C</button><button class="variant-btn active" onclick="toggleVariantCode('D',this)">D</button>
+                </div>
+                <button class="submit-btn" onclick="generateTeacherVariants()">⚙️ A, B, C, D variantlarni yaratish</button>
+                <div id="teacher-variants-result" class="teacher-note" style="margin-top:10px;"></div>
+                <div class="teacher-export-row"><button class="teacher-mini-btn" onclick="exportTeacherQuiz('xlsx',true)">Excel + Kalit</button><button class="teacher-mini-btn" onclick="exportTeacherQuiz('pdf',true)">PDF + Kalit</button><button class="teacher-mini-btn" onclick="exportTeacherQuiz('docx',true)">Word + Kalit</button></div>
+            </div>
             <div class="teacher-section glass-panel"><div class="teacher-section-title"><span data-lang="teacher_session_title">🚀 Guruh testini boshlash</span></div><select id="teacher-quiz-select-pro" class="input-card"></select><select id="teacher-duration-pro" class="input-card"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option></select><button class="submit-btn" onclick="createTeacherSessionPro()" data-lang="teacher_create_btn">🚀 Guruh testini boshlash</button><div class="teacher-note" data-lang="teacher_session_note">Sessiya yaratilgach havolani o‘quvchilarga yuboring. Natijalar avtomatik yig‘iladi.</div></div>
-            <div class="teacher-section glass-panel"><div class="teacher-section-title"><span data-lang="teacher_variant_title">🔄 Test variantlari</span></div><div class="variant-grid"><button class="variant-btn active" onclick="selectTeacherVariant('A',this)">A</button><button class="variant-btn" onclick="selectTeacherVariant('B',this)">B</button><button class="variant-btn" onclick="selectTeacherVariant('C',this)">C</button><button class="variant-btn" onclick="selectTeacherVariant('D',this)">D</button></div><div class="teacher-note" data-lang="teacher_variant_note">Bitta testdan A, B, C, D ko‘rinishidagi 4 ta variant va mos test kalitlari. To‘liq avtomatik aralashtirish server logikasini talab qiladi.</div></div>
+            <div class="teacher-section glass-panel"><div class="teacher-section-title"><span data-lang="teacher_variant_title">🔄 Test variantlari</span></div><div class="variant-grid"><button class="variant-btn active" onclick="selectTeacherVariant('A',this)">A</button><button class="variant-btn" onclick="selectTeacherVariant('B',this)">B</button><button class="variant-btn" onclick="selectTeacherVariant('C',this)">C</button><button class="variant-btn" onclick="selectTeacherVariant('D',this)">D</button></div><div class="teacher-note" data-lang="teacher_variant_note">A, B, C, D variantlar avtomatik yaratiladi va har bir variant uchun test kaliti saqlanadi.</div></div>
             <div class="teacher-section glass-panel"><div class="teacher-section-title"><span data-lang="teacher_sessions_title">📚 Faol va oldingi sessiyalar</span><button class="teacher-mini-btn" onclick="loadTeacherSessionsPro()" data-lang="teacher_refresh">Yangilash</button></div><div id="teacher-sessions-pro"><div class="teacher-empty" data-lang="teacher_loading">Yuklanmoqda...</div></div></div>
         </div>
     </div>
@@ -457,17 +481,6 @@
             <div class="p-pro-header">
                 <h3 data-lang="premium_pro_title">Quiz Pilot PRO 👑</h3>
                 <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring!</p>
-            </div>
-
-            <div id="teacher-panel" class="p-status-box" style="display:none; text-align:left;">
-                <h2 style="justify-content:center;">👨‍🏫 <span data-lang="teacher_panel_title">O'qituvchi rejimi</span></h2>
-                <p data-lang="teacher_panel_desc" style="text-align:center; margin-bottom:12px;">Testni tanlang, guruh sessiyasini oching va havolani o'quvchilarga yuboring.</p>
-                <select id="teacher-quiz-select" class="input-card" style="width:100%; box-sizing:border-box;"></select>
-                <select id="teacher-duration" class="input-card" style="width:100%; box-sizing:border-box;">
-                    <option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option>
-                </select>
-                <button class="submit-btn" onclick="createTeacherSession()" data-lang="teacher_create_btn">🚀 Guruh testini boshlash</button>
-                <div id="teacher-sessions-list" style="margin-top:12px;"></div>
             </div>
 
             <div class="tariff-card" id="card-daily">
@@ -988,8 +1001,6 @@
                     document.getElementById('p-limit-val').innerText =
                         data.quiz_remaining !== undefined ? data.quiz_remaining : "0";
 
-                    const tp=document.getElementById('teacher-panel');
-                    if(tp) tp.style.display=data.is_teacher ? 'block' : 'none';
                     const tn=document.getElementById('nav-teacher');
                     if(tn) tn.style.display=data.is_teacher ? 'flex' : 'none';
                     if(!data.is_teacher && document.getElementById('teacher-screen')?.classList.contains('active')) switchScreen('library');
@@ -1366,22 +1377,24 @@
             try {
                 const statusRes = await fetch(`${BASE_URL}/api/premium-status?user_id=${userId}&_t=${Date.now()}`);
                 const status = await statusRes.json();
-                const panel = document.getElementById('teacher-panel');
-                if (!panel) return;
-                panel.style.display = status.is_teacher ? 'block' : 'none';
-                const tn=document.getElementById('nav-teacher'); if(tn) tn.style.display=status.is_teacher ? 'flex' : 'none';
-                if (!status.is_teacher) return;
+                const tn=document.getElementById('nav-teacher');
+                if(tn) tn.style.display=status.is_teacher ? 'flex' : 'none';
+                if(!status.is_teacher) return;
                 const qRes = await fetch(`${BASE_URL}/api/teacher-quizzes?user_id=${userId}`);
                 const qData = await qRes.json();
                 const select = document.getElementById('teacher-quiz-select');
                 const proSelect = document.getElementById('teacher-quiz-select-pro');
-                select.innerHTML = '';
-                if(proSelect) proSelect.innerHTML = '';
+                if(select) select.innerHTML='';
+                if(proSelect) proSelect.innerHTML='';
                 if (!qData.quizzes || !qData.quizzes.length) {
-                    select.innerHTML = `<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
-                    if(proSelect) proSelect.innerHTML = `<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
+                    if(select) select.innerHTML=`<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
+                    if(proSelect) proSelect.innerHTML=`<option value="">${langPack[currentLang].teacher_no_quizzes}</option>`;
                 } else {
-                    qData.quizzes.forEach(q => { const o=document.createElement('option'); o.value=q.id; o.textContent=`${q.title} (${q.total})`; select.appendChild(o); if(proSelect) proSelect.appendChild(o.cloneNode(true)); });
+                    qData.quizzes.forEach(q => {
+                        const o=document.createElement('option'); o.value=q.id; o.textContent=`${q.title} (${q.total})`;
+                        if(select) select.appendChild(o);
+                        if(proSelect) proSelect.appendChild(o.cloneNode(true));
+                    });
                 }
                 loadTeacherSessions();
                 loadTeacherSessionsPro();
@@ -1438,9 +1451,37 @@
 
         let selectedTeacherVariant='A';
         function selectTeacherVariant(v,btn){selectedTeacherVariant=v;document.querySelectorAll('.variant-btn').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');}
-        function teacherFeature(kind){const u={groups:'Guruhlar funksiyasi uchun serverdagi guruh moduli kerak.',assignments:'Topshiriqlar funksiyasi uchun serverdagi topshiriq moduli kerak.',variants:'A/B/C/D variantlarni to‘liq avtomatik yaratish serverdagi variant modulini talab qiladi.',results:'Natijalarni kerakli sessiya yonidagi Natijalar tugmasidan oching.'};const r={groups:'Для групп нужен серверный модуль групп.',assignments:'Для заданий нужен серверный модуль заданий.',variants:'Полная генерация A/B/C/D требует серверного модуля вариантов.',results:'Откройте результаты кнопкой «Результаты» у нужной сессии.'};const e={groups:'Groups require the server-side group module.',assignments:'Assignments require the server-side assignment module.',variants:'Full A/B/C/D generation requires the server-side variant module.',results:'Open results using the Results button on a session.'};showAppAlert('👨‍🏫',(currentLang==='ru'?r:currentLang==='en'?e:u)[kind]);}
+        function teacherFeature(kind){
+            document.querySelectorAll('.teacher-feature-panel').forEach(p=>p.style.display='none');
+            const panel=document.getElementById('teacher-feature-'+kind);
+            if(panel) panel.style.display='block';
+            if(kind==='groups') loadTeacherGroups();
+            if(kind==='assignments') loadTeacherAssignments();
+            if(kind==='variants') loadTeacherVariantQuizList();
+            if(kind==='results') loadTeacherSessionsPro();
+            if(panel) panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+        }
+        function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+        async function loadTeacherGroups(){
+            const box=document.getElementById('teacher-groups-list');
+            try{const r=await fetch(`${BASE_URL}/api/teacher/groups?user_id=${userId}&_t=${Date.now()}`),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');
+                const s=document.getElementById('teacher-assignment-group');if(s)s.innerHTML=(d.groups||[]).filter(g=>g.active).map(g=>`<option value="${g.id}">${escapeHtml(g.name)} (${g.member_count||0})</option>`).join('')||'<option value="">Avval guruh yarating</option>';
+                if(box)box.innerHTML=(d.groups||[]).map(g=>`<div class="teacher-session-card glass-panel"><b>👥 ${escapeHtml(g.name)}</b><div class="teacher-chip-row"><span class="teacher-chip">${g.member_count||0} a'zo</span><span class="teacher-chip">${g.active?'🟢 Faol':'🔴 Yopiq'}</span></div><div class="teacher-note">${escapeHtml(g.description||'')}</div>${g.active?`<button class="teacher-mini-btn" onclick="deleteTeacherGroup('${g.id}')">🗑️ O‘chirish</button>`:''}</div>`).join('')||'<div class="teacher-empty">Hozircha guruhlar yo‘q.</div>';
+            }catch(e){if(box)box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].alert_system_err}</div>`;}
+        }
+        async function createTeacherGroup(){const name=document.getElementById('teacher-group-name').value.trim(),description=document.getElementById('teacher-group-desc').value.trim();if(!name){showAppAlert('⚠️','Guruh nomini kiriting');return;}try{const r=await fetch(`${BASE_URL}/api/teacher/groups`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,name,description})}),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');document.getElementById('teacher-group-name').value='';document.getElementById('teacher-group-desc').value='';showAppAlert('✅',d.name);loadTeacherGroups();}catch(e){showAppAlert('❌',e.message||langPack[currentLang].alert_system_err);}}
+        async function deleteTeacherGroup(id){try{const r=await fetch(`${BASE_URL}/api/teacher/groups/${encodeURIComponent(id)}?user_id=${userId}`,{method:'DELETE'}),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');loadTeacherGroups();}catch(e){showAppAlert('❌',e.message||langPack[currentLang].alert_system_err);}}
+        async function loadTeacherAssignmentQuizzes(){const q=document.getElementById('teacher-assignment-quiz'),v=document.getElementById('teacher-variant-quiz');try{const r=await fetch(`${BASE_URL}/api/teacher-quizzes?user_id=${userId}`),d=await r.json();const o=(d.quizzes||[]).map(x=>`<option value="${x.id}">${escapeHtml(x.title)} (${x.total})</option>`).join('')||'<option value="">Avval test yarating</option>';if(q)q.innerHTML=o;if(v)v.innerHTML=o;}catch(e){}}
+        async function loadTeacherAssignments(){await loadTeacherGroups();await loadTeacherAssignmentQuizzes();const box=document.getElementById('teacher-assignments-list');if(!box)return;try{const r=await fetch(`${BASE_URL}/api/teacher/assignments?user_id=${userId}&_t=${Date.now()}`),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');box.innerHTML=(d.assignments||[]).filter(a=>a.active).map(a=>`<div class="teacher-session-card glass-panel"><b>📋 ${escapeHtml(a.title||a.quiz_title||'Topshiriq')}</b><div class="teacher-chip-row"><span class="teacher-chip">👥 ${escapeHtml(a.group_name||'-')}</span><span class="teacher-chip">📝 ${escapeHtml(a.quiz_title||'-')}</span><span class="teacher-chip">${a.variant_code?'Variant '+a.variant_code:'Oddiy'}</span></div><div class="teacher-session-actions"><button class="teacher-mini-btn" onclick="exportAssignment('${a.id}','xlsx')">Excel</button><button class="teacher-mini-btn" onclick="exportAssignment('${a.id}','pdf')">PDF</button><button class="teacher-mini-btn" onclick="exportAssignment('${a.id}','docx')">Word</button><button class="teacher-mini-btn" onclick="deleteTeacherAssignment('${a.id}')">🗑️</button></div></div>`).join('')||'<div class="teacher-empty">Hozircha topshiriqlar yo‘q.</div>';}catch(e){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].alert_system_err}</div>`;}}
+        async function createTeacherAssignment(){const group_id=document.getElementById('teacher-assignment-group').value,quiz_id=document.getElementById('teacher-assignment-quiz').value,variant_code=document.getElementById('teacher-assignment-variant').value,title=document.getElementById('teacher-assignment-title').value.trim();if(!group_id||!quiz_id){showAppAlert('⚠️','Guruh va testni tanlang');return;}try{const r=await fetch(`${BASE_URL}/api/teacher/assignments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,group_id,quiz_id,variant_code,title})}),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');document.getElementById('teacher-assignment-title').value='';showAppAlert('✅','Topshiriq guruhga biriktirildi');loadTeacherAssignments();}catch(e){showAppAlert('❌',e.message||langPack[currentLang].alert_system_err);}}
+        async function deleteTeacherAssignment(id){try{const r=await fetch(`${BASE_URL}/api/teacher/assignments/${encodeURIComponent(id)}?user_id=${userId}`,{method:'DELETE'}),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');loadTeacherAssignments();}catch(e){showAppAlert('❌',e.message||langPack[currentLang].alert_system_err);}}
+        function exportAssignment(id,fmt){window.open(`${BASE_URL}/api/teacher/export-assignment?assignment_id=${encodeURIComponent(id)}&user_id=${userId}&format=${fmt}`,'_blank');}
+        function toggleVariantCode(code,btn){btn.classList.toggle('active');}
+        async function loadTeacherVariantQuizList(){await loadTeacherAssignmentQuizzes();}
+        async function generateTeacherVariants(){const quiz=document.getElementById('teacher-variant-quiz').value,codes=[...document.querySelectorAll('#teacher-feature-variants .variant-btn.active')].map(b=>b.innerText.trim());if(!quiz||!codes.length){showAppAlert('⚠️','Test va kamida bitta variantni tanlang');return;}try{const r=await fetch(`${BASE_URL}/api/teacher/generate-variants`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quiz,variants:codes})}),d=await r.json();if(d.status!=='ok')throw new Error(d.detail||'Error');document.getElementById('teacher-variants-result').innerText=`✅ ${codes.join(', ')} variantlar tayyor. Har bir variant uchun test kaliti saqlandi.`;}catch(e){showAppAlert('❌',e.message||langPack[currentLang].alert_system_err);}}
+        function exportTeacherQuiz(fmt,all){const quiz=document.getElementById('teacher-variant-quiz').value,active=[...document.querySelectorAll('#teacher-feature-variants .variant-btn.active')].map(b=>b.innerText.trim());if(!quiz||!active.length){showAppAlert('⚠️','Test va variantni tanlang');return;}window.open(`${BASE_URL}/api/teacher/export-quiz?quiz_id=${encodeURIComponent(quiz)}&user_id=${userId}&format=${fmt}&variant=${active[0]}&all_variants=${all?1:0}`,'_blank');}
         async function loadTeacherCenter(){await loadTeacherPanel();await loadTeacherSessionsPro();}
-        async function createTeacherSessionPro(){const q=document.getElementById('teacher-quiz-select-pro'),d=Number(document.getElementById('teacher-duration-pro').value);if(!q||!q.value){showAppAlert('⚠️',langPack[currentLang].teacher_no_quizzes);return;}try{const res=await fetch(`${BASE_URL}/api/teacher/create-session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:q.value,duration_minutes:d})});const data=await res.json();if(data.status==='ok'){const link=`${BASE_URL}/?session=${data.code}`;try{await navigator.clipboard.writeText(link)}catch(e){}showAppAlert('🚀',`${langPack[currentLang].teacher_created}\n\n${link}`);loadTeacherSessionsPro();}else showAppAlert('❌',data.detail||data.message||langPack[currentLang].alert_system_err)}catch(e){showAppAlert('❌',langPack[currentLang].alert_system_err)}}
+        async function createTeacherSessionPro(){const q=document.getElementById('teacher-quiz-select-pro'),d=Number(document.getElementById('teacher-duration-pro').value);if(!q||!q.value){showAppAlert('⚠️',langPack[currentLang].teacher_no_quizzes);return;}try{const res=await fetch(`${BASE_URL}/api/teacher/create-session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:q.value,duration_minutes:d,variant_code:selectedTeacherVariant})});const data=await res.json();if(data.status==='ok'){const link=`${BASE_URL}/?session=${data.code}`;try{await navigator.clipboard.writeText(link)}catch(e){}showAppAlert('🚀',`${langPack[currentLang].teacher_created}\n\n${link}`);loadTeacherSessionsPro();}else showAppAlert('❌',data.detail||data.message||langPack[currentLang].alert_system_err)}catch(e){showAppAlert('❌',langPack[currentLang].alert_system_err)}}
         async function loadTeacherSessionsPro(){const box=document.getElementById('teacher-sessions-pro');if(!box)return;try{const res=await fetch(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`),data=await res.json();box.innerHTML='';const ss=data.sessions||[];if(!ss.length){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].teacher_no_results}</div>`;return;}ss.slice(0,12).forEach(s=>{const link=`${BASE_URL}/?session=${s.code}`,div=document.createElement('div');div.className='teacher-session-card glass-panel';div.innerHTML=`<div style="font-weight:700;">${s.title}</div><div class="teacher-chip-row"><span class="teacher-chip">${s.code}</span><span class="teacher-chip">${s.active?'🟢':'🔴'}</span><span class="teacher-chip">${s.duration_minutes} min</span></div><div class="teacher-session-actions"><button class="teacher-mini-btn" onclick="copyTeacherLink('${link}')">${langPack[currentLang].teacher_copy}</button><button class="teacher-mini-btn" onclick="showTeacherResults('${s.id}')">${langPack[currentLang].teacher_results}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${s.id}','xlsx')">${langPack[currentLang].teacher_excel}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${s.id}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${s.id}','docx')">${langPack[currentLang].teacher_word}</button></div>`;box.appendChild(div);});}catch(e){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].alert_system_err}</div>`;}}
 
         async function openTeacherSessionFromUrl() {
