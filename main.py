@@ -5,7 +5,7 @@ import re
 from docx import Document
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
@@ -372,19 +372,78 @@ def init_db():
         created_at INTEGER NOT NULL,
         active INTEGER DEFAULT 1)""")
 
-    # Existing teacher_sessions jadvaliga yangi ustunlarni qo'shish.
-    cursor.execute("PRAGMA table_info(teacher_sessions);")
-    teacher_session_columns = [col[1] for col in cursor.fetchall()]
-    if "group_id" not in teacher_session_columns:
+    # Eski Railway/SQLite bazalarida Teacher jadvallari avvalgi versiyadan qolgan
+    # bo‘lishi mumkin. CREATE TABLE IF NOT EXISTS mavjud jadvalga yangi ustunlarni
+    # qo‘shmaydi, shuning uchun xavfsiz migration qilamiz. Bu faqat yetishmayotgan
+    # Teacher ustunlarini qo‘shadi va boshqa funksiyalarga tegmaydi.
+    teacher_migrations = {
+        "teacher_sessions": {
+            "group_id": "TEXT DEFAULT ''",
+            "variant_code": "TEXT DEFAULT ''",
+        },
+        "teacher_participants": {
+            "first_name": "TEXT DEFAULT ''",
+            "username": "TEXT DEFAULT ''",
+            "score": "INTEGER DEFAULT 0",
+            "total": "INTEGER DEFAULT 0",
+            "percent": "INTEGER DEFAULT 0",
+            "started_at": "INTEGER DEFAULT 0",
+            "finished_at": "INTEGER DEFAULT 0",
+        },
+        "teacher_variants": {
+            "variant_code": "TEXT DEFAULT ''",
+            "variant_json": "TEXT DEFAULT '{}'",
+            "created_at": "INTEGER DEFAULT 0",
+        },
+        "teacher_groups": {
+            "owner_id": "INTEGER DEFAULT 0",
+            "name": "TEXT DEFAULT ''",
+            "description": "TEXT DEFAULT ''",
+            "created_at": "INTEGER DEFAULT 0",
+            "active": "INTEGER DEFAULT 1",
+        },
+        "teacher_group_members": {
+            "group_id": "TEXT DEFAULT ''",
+            "user_id": "INTEGER DEFAULT 0",
+            "first_name": "TEXT DEFAULT ''",
+            "username": "TEXT DEFAULT ''",
+            "joined_at": "INTEGER DEFAULT 0",
+        },
+        "teacher_assignments": {
+            "owner_id": "INTEGER DEFAULT 0",
+            "group_id": "TEXT DEFAULT ''",
+            "quiz_id": "TEXT DEFAULT ''",
+            "variant_code": "TEXT DEFAULT ''",
+            "title": "TEXT DEFAULT ''",
+            "due_at": "INTEGER DEFAULT 0",
+            "created_at": "INTEGER DEFAULT 0",
+            "active": "INTEGER DEFAULT 1",
+        },
+    }
+    for table_name, columns in teacher_migrations.items():
         try:
-            cursor.execute("ALTER TABLE teacher_sessions ADD COLUMN group_id TEXT DEFAULT '';")
-        except Exception:
-            pass
-    if "variant_code" not in teacher_session_columns:
-        try:
-            cursor.execute("ALTER TABLE teacher_sessions ADD COLUMN variant_code TEXT DEFAULT '';")
-        except Exception:
-            pass
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            existing = {row[1] for row in cursor.fetchall()}
+            for column_name, column_def in columns.items():
+                if column_name not in existing:
+                    try:
+                        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+                    except Exception as migration_error:
+                        logging.warning("Teacher DB migration %s.%s: %s", table_name, column_name, migration_error)
+        except Exception as migration_error:
+            logging.warning("Teacher DB schema check %s: %s", table_name, migration_error)
+
+    # Eski yozuvlardagi NULL qiymatlar Teacher endpointlari uchun xavfsiz qiymatga o‘tkaziladi.
+    for table_name, updates in {
+        "teacher_groups": [("description", "''"), ("active", "1")],
+        "teacher_assignments": [("variant_code", "''"), ("title", "''"), ("due_at", "0"), ("active", "1")],
+        "teacher_sessions": [("group_id", "''"), ("variant_code", "'" + "'" + "'")],
+    }.items():
+        for col, value in updates:
+            try:
+                cursor.execute(f"UPDATE {table_name} SET {col}={value} WHERE {col} IS NULL")
+            except Exception:
+                pass
 
     conn.commit()
     conn.close()
@@ -1349,11 +1408,13 @@ def teacher_generate_variants(req: TeacherVariantsRequest):
     result = []
     for code in requested:
         variant = _make_variant(items, code)
-        cur.execute(
-            "INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(quiz_id, variant_code) DO UPDATE SET variant_json=excluded.variant_json, created_at=excluded.created_at",
-            (req.quiz_id, code, json.dumps(variant, ensure_ascii=False), now),
-        )
+        payload_json = json.dumps(variant, ensure_ascii=False)
+        cur.execute("SELECT id FROM teacher_variants WHERE quiz_id=? AND variant_code=? ORDER BY id LIMIT 1", (req.quiz_id, code))
+        existing_variant = cur.fetchone()
+        if existing_variant:
+            cur.execute("UPDATE teacher_variants SET variant_json=?, created_at=? WHERE id=?", (payload_json, now, existing_variant[0]))
+        else:
+            cur.execute("INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (?, ?, ?, ?)", (req.quiz_id, code, payload_json, now))
         result.append({"variant": code, "question_count": len(variant["quizzes"])})
     conn.commit()
     conn.close()
@@ -1715,7 +1776,13 @@ def teacher_submit(req: TeacherSubmitRequest):
     if not s: conn.close(); raise HTTPException(status_code=404, detail="Sessiya topilmadi")
     now=int(time.time())
     if not s["active"] or now>s["expires_at"]: conn.close(); raise HTTPException(status_code=410, detail="Sessiya muddati tugagan")
-    cur.execute("INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(session_id,user_id) DO UPDATE SET first_name=excluded.first_name, username=excluded.username, score=excluded.score, total=excluded.total, percent=excluded.percent, finished_at=excluded.finished_at", (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
+    cur.execute("SELECT id FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
+    existing_participant = cur.fetchone()
+    values = (req.first_name[:100], req.username[:100], req.score, req.total, req.percent, now, now)
+    if existing_participant:
+        cur.execute("UPDATE teacher_participants SET first_name=?, username=?, score=?, total=?, percent=?, finished_at=? WHERE id=?", (*values[:5], values[6], existing_participant[0]))
+    else:
+        cur.execute("INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?)", (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
     conn.commit(); conn.close(); return {"status":"ok"}
 
 
@@ -1925,6 +1992,16 @@ def start_bot_polling():
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception:
             time.sleep(5)
+
+
+@app.exception_handler(Exception)
+async def api_exception_handler(request: Request, exc: Exception):
+    # Teacher/frontend fetchlari 500 paytida "Unexpected token I..." kabi JSON parse
+    # xatosini bermasligi uchun API xatolarini ham JSON ko‘rinishida qaytaramiz.
+    if request.url.path.startswith("/api/"):
+        logging.exception("API internal error: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"status": "error", "detail": "Server ichki xatosi"})
+    raise exc
 
 
 @app.on_event("startup")
