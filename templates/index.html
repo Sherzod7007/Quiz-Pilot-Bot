@@ -441,6 +441,10 @@
             </div>
             <div id="teacher-feature-results" class="teacher-section glass-panel teacher-feature-panel" style="display:none;">
                 <div class="teacher-section-title"><span>📊 <span data-lang="teacher_results_title">Natijalar</span></span><button class="teacher-mini-btn" onclick="loadTeacherResultsPanel()" data-lang="teacher_refresh">Yangilash</button></div>
+                <div class="teacher-section glass-panel teacher-nested-section">
+                    <div class="teacher-section-title"><span data-lang="teacher_sessions_title">📚 Faol va oldingi sessiyalar</span><button class="teacher-mini-btn" onclick="loadTeacherSessionsPro()" data-lang="teacher_refresh">Yangilash</button></div>
+                    <div id="teacher-sessions-pro"><div class="teacher-empty" data-lang="teacher_loading">Yuklanmoqda...</div></div>
+                </div>
                 <select id="teacher-results-session" class="input-card"></select>
                 <button class="submit-btn" onclick="loadTeacherResultsPanel()" data-lang="teacher_show_results">📊 Natijalarni ko‘rsatish</button>
                 <div id="teacher-results-panel-list" style="margin-top:12px;"></div>
@@ -476,7 +480,6 @@
                 <div id="teacher-variants-result" class="teacher-note" style="margin-top:10px;"></div>
                 <div class="teacher-export-row"><button class="teacher-mini-btn" onclick="exportTeacherQuiz('xlsx',true)" data-lang="teacher_export_excel_key">Excel + Kalit</button><button class="teacher-mini-btn" onclick="exportTeacherQuiz('pdf',true)" data-lang="teacher_export_pdf_key">PDF + Kalit</button><button class="teacher-mini-btn" onclick="exportTeacherQuiz('docx',true)" data-lang="teacher_export_word_key">Word + Kalit</button></div>
             </div>
-            <div class="teacher-section glass-panel"><div class="teacher-section-title"><span data-lang="teacher_sessions_title">📚 Faol va oldingi sessiyalar</span><button class="teacher-mini-btn" onclick="loadTeacherSessionsPro()" data-lang="teacher_refresh">Yangilash</button></div><div id="teacher-sessions-pro"><div class="teacher-empty" data-lang="teacher_loading">Yuklanmoqda...</div></div></div>
         </div>
     </div>
 
@@ -1531,6 +1534,7 @@
         function exportTeacherQuiz(fmt,all){const quiz=document.getElementById('teacher-variant-quiz').value,active=[...document.querySelectorAll('#teacher-feature-variants .variant-btn.active')].map(b=>b.innerText.trim());if(!quiz||!active.length){showAppAlert('⚠️',langPack[currentLang].teacher_select_quiz_variant);return;}window.open(`${BASE_URL}/api/teacher/export-quiz?quiz_id=${encodeURIComponent(quiz)}&user_id=${userId}&format=${fmt}&variant=${active[0]}&all_variants=${all?1:0}`,'_blank');}
         async function loadTeacherResultsPanel(){
             const sel=document.getElementById('teacher-results-session'),box=document.getElementById('teacher-results-panel-list');if(!sel||!box)return;
+            await loadTeacherSessionsPro();
             try{
                 const d=await teacherFetchJson(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`);
                 const ss=d.sessions||[];sel.innerHTML=ss.map(s=>`<option value="${s.id}">${escapeHtml(s.title)} — ${s.code}</option>`).join('')||`<option value="">${langPack[currentLang].teacher_no_sessions}</option>`;
@@ -1543,7 +1547,7 @@
                 html+=`<div class="teacher-export-row"><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','xlsx')">Excel</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','pdf')">PDF</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','docx')">Word</button></div>`;box.innerHTML=html;
             }catch(e){box.innerHTML=`<div class="teacher-empty">❌ ${escapeHtml(e.message||langPack[currentLang].teacher_server_error)}</div>`;}
         }
-        async function loadTeacherCenter(){await loadTeacherPanel();await loadTeacherSessionsPro();}
+        async function loadTeacherCenter(){await loadTeacherPanel();}
         async function createTeacherSessionPro(){const q=document.getElementById('teacher-quiz-select-pro'),d=Number(document.getElementById('teacher-duration-pro').value);if(!q||!q.value){showAppAlert('⚠️',langPack[currentLang].teacher_no_quizzes);return;}try{const data=await teacherFetchJson(`${BASE_URL}/api/teacher/create-session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:q.value,duration_minutes:d,variant_code:selectedTeacherVariant})});const link=`${BASE_URL}/?session=${data.code}`;try{await navigator.clipboard.writeText(link)}catch(e){}showAppAlert('🚀',`${langPack[currentLang].teacher_created}\n\n${link}`);loadTeacherSessionsPro();}catch(e){showAppAlert('❌',e.message||langPack[currentLang].teacher_server_error)}}
         async function loadTeacherSessionsPro(){const box=document.getElementById('teacher-sessions-pro');if(!box)return;try{const data=await teacherFetchJson(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`);box.innerHTML='';const ss=data.sessions||[];if(!ss.length){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].teacher_no_results}</div>`;return;}ss.slice(0,12).forEach(s=>{const link=`${BASE_URL}/?session=${s.code}`,div=document.createElement('div');div.className='teacher-session-card glass-panel';div.innerHTML=`<div style="font-weight:700;">${escapeHtml(s.title)}</div><div class="teacher-chip-row"><span class="teacher-chip">${s.code}</span><span class="teacher-chip">${s.active?'🟢':'🔴'}</span><span class="teacher-chip">${s.duration_minutes} min</span>${s.variant_code?`<span class="teacher-chip">${teacherVariantLabel(s.variant_code)}</span>`:''}</div><div class="teacher-session-actions"><button class="teacher-mini-btn" onclick="copyTeacherLink('${link}')">${langPack[currentLang].teacher_copy}</button><button class="teacher-mini-btn" onclick="showTeacherResults('${s.id}')">${langPack[currentLang].teacher_results}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${s.id}','xlsx')">${langPack[currentLang].teacher_excel}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${s.id}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${s.id}','docx')">${langPack[currentLang].teacher_word}</button></div>`;box.appendChild(div);});}catch(e){box.innerHTML=`<div class="teacher-empty">❌ ${escapeHtml(e.message||langPack[currentLang].teacher_server_error)}</div>`;}}
 
