@@ -1352,13 +1352,13 @@ TEACHER_VARIANT_CODES = ("A", "B", "C", "D")
 
 
 def _load_quiz_items(quiz_id: str, owner_id: int):
-    conn = teacher_db_connect()
-    cur = conn.cursor()
-    cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, owner_id))
-    row = cur.fetchone()
-    conn.close()
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, owner_id))
+        return cur.fetchone()
+    row = teacher_db_read(_read)
     if not row:
-        raise HTTPException(status_code=404, detail="Test topilmadi")
+        raise HTTPException(status_code=404, detail=teacher_text(owner_id, "quiz_not_found"))
     try:
         data = json.loads(row["quiz_json"])
         items = data.get("quizzes", [])
@@ -1367,7 +1367,6 @@ def _load_quiz_items(quiz_id: str, owner_id: int):
     if not items:
         raise HTTPException(status_code=400, detail=teacher_text(owner_id, "quiz_questions_missing"))
     return row, items
-
 
 def _make_variant(items, variant_code: str):
     """Variantlar bir-biridan farqli bo'lishi uchun savollar va variantlar deterministik aralashtiriladi."""
@@ -1435,14 +1434,12 @@ def teacher_generate_variants(req: TeacherVariantsRequest):
 def teacher_list_variants(user_id: int, quiz_id: str):
     require_teacher(user_id)
     _load_quiz_items(quiz_id, user_id)
-    conn = teacher_db_connect()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id=? ORDER BY variant_code", (quiz_id,))
-    rows = cur.fetchall()
-    conn.close()
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id=? ORDER BY variant_code", (quiz_id,))
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
     return {"status": "ok", "variants": [dict(r) for r in rows]}
-
 
 def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
     _load_quiz_items(quiz_id, owner_id)
@@ -1487,61 +1484,73 @@ def teacher_create_group(req: TeacherGroupCreateRequest):
     if not name:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_name_required"))
     gid = f"tg_{uuid.uuid4().hex[:10]}"
-    conn = teacher_db_connect()
-    conn.execute("INSERT INTO teacher_groups (id,owner_id,name,description,created_at,active) VALUES (?,?,?,?,?,1)",
-                 (gid, req.user_id, name, (req.description or "")[:500], int(time.time())))
-    conn.commit(); conn.close()
+    now = int(time.time())
+    description = (req.description or "")[:500]
+    def _write(conn):
+        conn.execute(
+            "INSERT INTO teacher_groups (id,owner_id,name,description,created_at,active) VALUES (?,?,?,?,?,1)",
+            (gid, req.user_id, name, description, now),
+        )
+    teacher_db_write(_write)
     return {"status":"ok", "group_id":gid, "name":name}
-
 
 @app.get("/api/teacher/groups")
 def teacher_groups(user_id: int):
     require_teacher(user_id)
-    conn = teacher_db_connect()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(m.id) AS member_count "
-                "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
-                "WHERE g.owner_id=? GROUP BY g.id ORDER BY g.created_at DESC", (user_id,))
-    rows = cur.fetchall(); conn.close()
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(m.id) AS member_count "
+            "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
+            "WHERE g.owner_id=? GROUP BY g.id ORDER BY g.created_at DESC",
+            (user_id,),
+        )
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
     return {"status":"ok", "groups":[dict(r) for r in rows]}
-
 
 @app.post("/api/teacher/groups/join")
 def teacher_join_group(req: TeacherGroupJoinRequest):
-    conn = teacher_db_connect()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT id,active FROM teacher_groups WHERE id=?", (req.group_id,))
-    group = cur.fetchone()
-    if not group or not group["active"]:
-        conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
-    now = int(time.time())
-    cur.execute("INSERT OR IGNORE INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (?,?,?,?,?)",
-                (req.group_id, req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now))
-    conn.commit(); conn.close()
+    def _write(conn):
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id,active FROM teacher_groups WHERE id=?", (req.group_id,))
+        group = cur.fetchone()
+        if not group or not group["active"]:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+        now = int(time.time())
+        cur.execute(
+            "INSERT OR IGNORE INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (?,?,?,?,?)",
+            (req.group_id, req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
+        )
+    teacher_db_write(_write)
     return {"status":"ok", "group_id":req.group_id}
-
 
 @app.get("/api/teacher/group-members")
 def teacher_group_members(group_id: str, user_id: int):
     require_teacher(user_id)
-    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT g.id,g.name FROM teacher_groups g WHERE g.id=? AND g.owner_id=?", (group_id,user_id)); g=cur.fetchone()
-    if not g: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
-    cur.execute("SELECT user_id,first_name,username,joined_at FROM teacher_group_members WHERE group_id=? ORDER BY joined_at", (group_id,)); rows=cur.fetchall(); conn.close()
-    return {"status":"ok", "group":dict(g), "members":[dict(r) for r in rows]}
-
+    def _read(conn):
+        conn.row_factory = sqlite3.Row
+        cur=conn.cursor()
+        cur.execute("SELECT g.id,g.name FROM teacher_groups g WHERE g.id=? AND g.owner_id=?", (group_id,user_id))
+        g=cur.fetchone()
+        if not g:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
+        cur.execute("SELECT user_id,first_name,username,joined_at FROM teacher_group_members WHERE group_id=? ORDER BY joined_at", (group_id,))
+        return dict(g), cur.fetchall()
+    g, rows = teacher_db_read(_read)
+    return {"status":"ok", "group":g, "members":[dict(r) for r in rows]}
 
 @app.delete("/api/teacher/groups/{group_id}")
 def teacher_delete_group(group_id: str, user_id: int):
     require_teacher(user_id)
-    conn=teacher_db_connect(); cur=conn.cursor()
-    cur.execute("UPDATE teacher_groups SET active=0 WHERE id=? AND owner_id=?", (group_id,user_id))
-    changed=cur.rowcount; conn.commit(); conn.close()
-    if changed != 1: raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
+    def _write(conn):
+        cur=conn.cursor()
+        cur.execute("UPDATE teacher_groups SET active=0 WHERE id=? AND owner_id=?", (group_id,user_id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
+    teacher_db_write(_write)
     return {"status":"ok"}
-
 
 class TeacherAssignmentCreateRequest(BaseModel):
     user_id: int
@@ -1556,44 +1565,51 @@ class TeacherAssignmentCreateRequest(BaseModel):
 def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
     require_teacher(req.user_id)
     group_id=(req.group_id or "").strip(); quiz_id=(req.quiz_id or "").strip()
-    if not group_id or not quiz_id: raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_required"))
-    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT id,name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",(group_id,req.user_id)); group=cur.fetchone()
-    cur.execute("SELECT id,title FROM quizzes WHERE id=? AND user_id=?",(quiz_id,req.user_id)); quiz=cur.fetchone()
-    if not group: conn.close(); raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "group_not_found"))
-    if not quiz: conn.close(); raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "quiz_not_found"))
+    if not group_id or not quiz_id:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_required"))
     code=(req.variant_code or "").strip().upper()
-    if code and code not in TEACHER_VARIANT_CODES: conn.close(); raise HTTPException(status_code=400,detail=teacher_text(req.user_id, "variant_required"))
+    if code and code not in TEACHER_VARIANT_CODES:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
     if code:
-        conn.close()
         _get_teacher_variant(quiz_id,req.user_id,code)
-        conn=teacher_db_connect(); cur=conn.cursor()
-    aid=f"ta_{uuid.uuid4().hex[:10]}"; now=int(time.time()); title=(req.title or "").strip()[:150] or quiz["title"]; due_at=max(0,int(req.due_at or 0))
-    cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,created_at,active) VALUES (?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,now))
-    conn.commit(); conn.close()
-    return {"status":"ok","assignment":{"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}}
-
+    def _write(conn):
+        conn.row_factory = sqlite3.Row
+        cur=conn.cursor()
+        cur.execute("SELECT id,name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",(group_id,req.user_id)); group=cur.fetchone()
+        cur.execute("SELECT id,title FROM quizzes WHERE id=? AND user_id=?",(quiz_id,req.user_id)); quiz=cur.fetchone()
+        if not group:
+            raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "group_not_found"))
+        if not quiz:
+            raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "quiz_not_found"))
+        aid=f"ta_{uuid.uuid4().hex[:10]}"; now=int(time.time()); title=(req.title or "").strip()[:150] or quiz["title"]; due_at=max(0,int(req.due_at or 0))
+        cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,created_at,active) VALUES (?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,now))
+        return {"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}
+    assignment = teacher_db_write(_write)
+    return {"status":"ok","assignment":assignment}
 
 @app.get("/api/teacher/assignments")
 def teacher_assignments(user_id: int):
     require_teacher(user_id)
-    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,a.created_at,a.active,
-                         g.name AS group_name,q.title AS quiz_title
-                  FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id
-                  LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=? ORDER BY a.created_at DESC LIMIT 100""",(user_id,))
-    rows=cur.fetchall(); conn.close(); return {"status":"ok","assignments":[dict(r) for r in rows]}
-
+    def _read(conn):
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,a.created_at,a.active,
+                             g.name AS group_name,q.title AS quiz_title
+                      FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id
+                      LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=? ORDER BY a.created_at DESC LIMIT 100""",(user_id,))
+        return cur.fetchall()
+    rows=teacher_db_read(_read)
+    return {"status":"ok","assignments":[dict(r) for r in rows]}
 
 @app.delete("/api/teacher/assignments/{assignment_id}")
 def teacher_delete_assignment(assignment_id: str, user_id: int):
     require_teacher(user_id)
-    conn=teacher_db_connect(); cur=conn.cursor()
-    cur.execute("UPDATE teacher_assignments SET active=0 WHERE id=? AND owner_id=?",(assignment_id,user_id))
-    changed=cur.rowcount; conn.commit(); conn.close()
-    if changed!=1: raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
+    def _write(conn):
+        cur=conn.cursor()
+        cur.execute("UPDATE teacher_assignments SET active=0 WHERE id=? AND owner_id=?",(assignment_id,user_id))
+        if cur.rowcount!=1:
+            raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
+    teacher_db_write(_write)
     return {"status":"ok"}
-
 
 @app.get("/api/teacher/export-assignment")
 def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
@@ -1746,13 +1762,18 @@ def _ensure_teacher_schema(conn):
 _teacher_schema_checked = False
 
 def teacher_db_connect():
+    """Teacher uchun barqaror SQLite ulanishi.
+
+    Muhim: har bir so'rovda PRAGMA journal_mode=WAL ni qayta yoqish SQLite
+    faylini qisqa muddatga lock qilib qo'yishi mumkin. Shu sabab WAL/synchronous
+    rejimi init_db() vaqtida o'rnatiladi, bu yerda esa faqat busy_timeout ishlatiladi.
+    """
     global _teacher_schema_checked
     conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=20000")
     try:
-        conn.execute("PRAGMA busy_timeout=20000")
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
         if not _teacher_schema_checked:
             _ensure_teacher_schema(conn)
             conn.commit()
@@ -1762,7 +1783,39 @@ def teacher_db_connect():
             conn.rollback()
         except Exception:
             pass
+        conn.close()
+        raise
     return conn
+
+def teacher_db_read(work, attempts=6):
+    """Teacher o'qish so'rovlarini SQLite lock bo'lsa avtomatik qayta urinadi."""
+    last_error = None
+    for attempt in range(attempts):
+        conn = None
+        try:
+            conn = teacher_db_connect()
+            result = work(conn)
+            conn.close()
+            return result
+        except sqlite3.OperationalError as e:
+            last_error = e
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if "locked" in str(e).lower() or "busy" in str(e).lower():
+                time.sleep(0.25 * (attempt + 1))
+                continue
+            raise
+        except Exception:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            raise
+    raise last_error or sqlite3.OperationalError("SQLite database is busy")
 
 def teacher_db_write(work, attempts=6):
     last_error = None
@@ -1902,14 +1955,13 @@ def teacher_text(user_id, key, default=None):
 
 def require_teacher(user_id: int):
     add_user_to_db(user_id)
-    conn = teacher_db_connect()
-    cur = conn.cursor()
-    cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = ?", (user_id,))
-    row = cur.fetchone()
-    conn.close()
+    def _check(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = ?", (user_id,))
+        return cur.fetchone()
+    row = teacher_db_read(_check)
     if not row or not is_active_paid_status(row["status"] or "", row["premium_until"] or 0) or (row["plan_key"] or get_plan_key(row["status"] or "")) != "teachers":
         raise HTTPException(status_code=403, detail=teacher_text(user_id, "teacher_plan_required"))
-
 
 @app.get("/api/teacher-quizzes")
 def teacher_quizzes(user_id: int):
@@ -1935,55 +1987,59 @@ class TeacherSessionCreateRequest(BaseModel):
 def teacher_create_session(req: TeacherSessionCreateRequest):
     require_teacher(req.user_id)
     duration = max(5, min(int(req.duration_minutes), 180))
-    conn = teacher_db_connect()
-    cur = conn.cursor()
-    cur.execute("SELECT id, title FROM quizzes WHERE id = ? AND user_id = ?", (req.quiz_id, req.user_id))
-    quiz = cur.fetchone()
-    if not quiz:
-        conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "quiz_not_found"))
     variant_code = (req.variant_code or "").strip().upper()
     if variant_code and variant_code not in TEACHER_VARIANT_CODES:
-        conn.close(); raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
-    group_id = (req.group_id or "").strip()
-    if group_id:
-        cur.execute("SELECT id FROM teacher_groups WHERE id=? AND owner_id=? AND active=1", (group_id, req.user_id))
-        if not cur.fetchone():
-            conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
     if variant_code:
-        conn.close()
         _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
-        conn=teacher_db_connect(); cur=conn.cursor()
-    sid = f"ts_{uuid.uuid4().hex[:10]}"
-    code = uuid.uuid4().hex[:8].upper()
-    now = int(time.time())
-    expires = now + duration * 60
-    cur.execute("INSERT INTO teacher_sessions (id, owner_id, quiz_id, code, duration_minutes, created_at, expires_at, active, group_id, variant_code) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)", (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code))
-    conn.commit(); conn.close()
-    return {"status": "ok", "session_id": sid, "code": code, "expires_at": expires, "quiz_title": quiz[1], "variant_code": variant_code, "group_id": group_id}
-
+    def _write(conn):
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT id, title FROM quizzes WHERE id = ? AND user_id = ?", (req.quiz_id, req.user_id))
+        quiz = cur.fetchone()
+        if not quiz:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "quiz_not_found"))
+        group_id = (req.group_id or "").strip()
+        if group_id:
+            cur.execute("SELECT id FROM teacher_groups WHERE id=? AND owner_id=? AND active=1", (group_id, req.user_id))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+        sid = f"ts_{uuid.uuid4().hex[:10]}"
+        code = uuid.uuid4().hex[:8].upper()
+        now = int(time.time()); expires = now + duration * 60
+        cur.execute("INSERT INTO teacher_sessions (id, owner_id, quiz_id, code, duration_minutes, created_at, expires_at, active, group_id, variant_code) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)", (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code))
+        return {"session_id": sid, "code": code, "expires_at": expires, "quiz_title": quiz["title"], "variant_code": variant_code, "group_id": group_id}
+    data = teacher_db_write(_write)
+    return {"status":"ok", **data}
 
 @app.get("/api/teacher-sessions")
 def teacher_sessions(user_id: int):
     require_teacher(user_id)
-    conn = teacher_db_connect(); conn.row_factory = sqlite3.Row
-    cur = conn.cursor(); cur.execute("SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active, COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.owner_id=? ORDER BY s.created_at DESC LIMIT 30", (user_id,))
-    rows=cur.fetchall(); conn.close(); now=int(time.time())
+    def _read(conn):
+        conn.row_factory = sqlite3.Row
+        cur=conn.cursor()
+        cur.execute("""SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,
+                             COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code
+                      FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
+                      WHERE s.owner_id=? ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
+        return cur.fetchall()
+    rows=teacher_db_read(_read); now=int(time.time())
     result=[]
     for r in rows:
         active=bool(r["active"] and r["expires_at"]>=now)
         result.append({**dict(r), "active": active})
     return {"status":"ok", "sessions":result}
 
-
 @app.get("/api/teacher-session")
 def teacher_session_info(code: str, user_id: int):
-    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=?", (code.upper(),))
-    row=cur.fetchone(); conn.close()
+    def _read(conn):
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=?", (code.upper(),))
+        return cur.fetchone()
+    row=teacher_db_read(_read)
     if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
     return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"], "variant_code":row["variant_code"], "group_id":row["group_id"]}
-
 
 def _session_owner_id(session_id: str, user_id: int):
     conn=teacher_db_connect(); cur=conn.cursor()
@@ -2036,12 +2092,15 @@ def teacher_submit(req: TeacherSubmitRequest):
 @app.get("/api/teacher-session-results")
 def teacher_session_results(session_id: str, user_id: int):
     require_teacher(user_id)
-    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=?", (session_id,user_id)); s=cur.fetchone()
-    if not s: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-    cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall(); conn.close()
+    def _read(conn):
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=?", (session_id,user_id)); s=cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+        cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
+        return dict(s), rows
+    s, rows=teacher_db_read(_read)
     return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"]}, "participants":[dict(r) for r in rows]}
-
 
 def _teacher_export_rows(session_id, owner_id):
     require_teacher(owner_id)
