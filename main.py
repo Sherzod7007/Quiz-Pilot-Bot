@@ -1500,7 +1500,7 @@ def teacher_groups(user_id: int):
     def _read(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(m.id) AS member_count "
+            "SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(*) AS member_count "
             "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
             "WHERE g.owner_id=? GROUP BY g.id ORDER BY g.created_at DESC",
             (user_id,),
@@ -1685,78 +1685,159 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
 # --- O'QITUVCHI GURUH REJIMI ---
 # --- Teacher DB: barqaror ulanish va SQLite lock himoyasi ---
 def _ensure_teacher_schema(conn):
-    """Railway/SQLite eski bazalarida Teacher jadvallari va ustunlari yo‘q bo‘lsa, shu yerning o‘zida tiklaydi."""
-    tables = {
+    """Teacher jadvallarini Railway'dagi eski SQLite bazalari bilan ham moslaydi.
+
+    Oldingi Teacher versiyalarida jadvallar qisman yaratilgan bo'lishi mumkin edi.
+    CREATE TABLE IF NOT EXISTS bunday jadvalni yangilamaydi, shuning uchun bu yerda
+    kerakli ustunlar birma-bir tekshiriladi va yetishmaganlari xavfsiz qo'shiladi.
+    Bu faqat teacher_* jadvallariga taalluqli.
+    """
+    table_defs = {
+        "teacher_variants": {
+            "id": "INTEGER",
+            "quiz_id": "TEXT",
+            "variant_code": "TEXT",
+            "variant_json": "TEXT",
+            "created_at": "INTEGER",
+        },
+        "teacher_groups": {
+            "id": "TEXT",
+            "owner_id": "INTEGER",
+            "name": "TEXT",
+            "description": "TEXT",
+            "created_at": "INTEGER",
+            "active": "INTEGER",
+        },
+        "teacher_group_members": {
+            "id": "INTEGER",
+            "group_id": "TEXT",
+            "user_id": "INTEGER",
+            "first_name": "TEXT",
+            "username": "TEXT",
+            "joined_at": "INTEGER",
+        },
+        "teacher_assignments": {
+            "id": "TEXT",
+            "owner_id": "INTEGER",
+            "group_id": "TEXT",
+            "quiz_id": "TEXT",
+            "variant_code": "TEXT",
+            "title": "TEXT",
+            "due_at": "INTEGER",
+            "created_at": "INTEGER",
+            "active": "INTEGER",
+        },
+        "teacher_sessions": {
+            "id": "TEXT",
+            "owner_id": "INTEGER",
+            "quiz_id": "TEXT",
+            "code": "TEXT",
+            "duration_minutes": "INTEGER",
+            "created_at": "INTEGER",
+            "expires_at": "INTEGER",
+            "active": "INTEGER",
+            "group_id": "TEXT",
+            "variant_code": "TEXT",
+        },
+        "teacher_participants": {
+            "id": "INTEGER",
+            "session_id": "TEXT",
+            "user_id": "INTEGER",
+            "first_name": "TEXT",
+            "username": "TEXT",
+            "score": "INTEGER",
+            "total": "INTEGER",
+            "percent": "INTEGER",
+            "started_at": "INTEGER",
+            "finished_at": "INTEGER",
+        },
+    }
+
+    # Avval jadvalning o'zi mavjudligini kafolatlaymiz.
+    create_sql = {
         "teacher_variants": """CREATE TABLE IF NOT EXISTS teacher_variants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            quiz_id TEXT NOT NULL,
-            variant_code TEXT NOT NULL,
-            variant_json TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
+            quiz_id TEXT NOT NULL, variant_code TEXT NOT NULL,
+            variant_json TEXT NOT NULL, created_at INTEGER NOT NULL,
             UNIQUE(quiz_id, variant_code))""",
         "teacher_groups": """CREATE TABLE IF NOT EXISTS teacher_groups (
-            id TEXT PRIMARY KEY,
-            owner_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            description TEXT DEFAULT '',
-            created_at INTEGER NOT NULL,
+            id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, name TEXT NOT NULL,
+            description TEXT DEFAULT '', created_at INTEGER NOT NULL,
             active INTEGER DEFAULT 1)""",
         "teacher_group_members": """CREATE TABLE IF NOT EXISTS teacher_group_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id TEXT NOT NULL,
-            user_id INTEGER NOT NULL,
-            first_name TEXT DEFAULT '',
-            username TEXT DEFAULT '',
-            joined_at INTEGER NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL, first_name TEXT DEFAULT '',
+            username TEXT DEFAULT '', joined_at INTEGER NOT NULL,
             UNIQUE(group_id, user_id))""",
         "teacher_assignments": """CREATE TABLE IF NOT EXISTS teacher_assignments (
-            id TEXT PRIMARY KEY,
-            owner_id INTEGER NOT NULL,
-            group_id TEXT NOT NULL,
-            quiz_id TEXT NOT NULL,
-            variant_code TEXT DEFAULT '',
-            title TEXT DEFAULT '',
-            due_at INTEGER DEFAULT 0,
-            created_at INTEGER NOT NULL,
+            id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, group_id TEXT NOT NULL,
+            quiz_id TEXT NOT NULL, variant_code TEXT DEFAULT '', title TEXT DEFAULT '',
+            due_at INTEGER DEFAULT 0, created_at INTEGER NOT NULL,
             active INTEGER DEFAULT 1)""",
         "teacher_sessions": """CREATE TABLE IF NOT EXISTS teacher_sessions (
-            id TEXT PRIMARY KEY,
-            owner_id INTEGER,
-            quiz_id TEXT,
-            code TEXT UNIQUE,
-            duration_minutes INTEGER DEFAULT 30,
-            created_at INTEGER,
-            expires_at INTEGER,
-            active INTEGER DEFAULT 1)""",
+            id TEXT PRIMARY KEY, owner_id INTEGER, quiz_id TEXT, code TEXT UNIQUE,
+            duration_minutes INTEGER DEFAULT 30, created_at INTEGER,
+            expires_at INTEGER, active INTEGER DEFAULT 1,
+            group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '')""",
         "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT,
-            user_id INTEGER,
-            first_name TEXT,
-            username TEXT,
-            score INTEGER DEFAULT 0,
-            total INTEGER DEFAULT 0,
-            percent INTEGER DEFAULT 0,
-            started_at INTEGER,
-            finished_at INTEGER,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, user_id INTEGER,
+            first_name TEXT, username TEXT, score INTEGER DEFAULT 0,
+            total INTEGER DEFAULT 0, percent INTEGER DEFAULT 0,
+            started_at INTEGER, finished_at INTEGER,
             UNIQUE(session_id, user_id))""",
     }
-    for ddl in tables.values():
+    for name, ddl in create_sql.items():
         conn.execute(ddl)
-    migrations = {
-        "teacher_sessions": {"group_id":"TEXT DEFAULT ''", "variant_code":"TEXT DEFAULT ''"},
-        "teacher_participants": {"first_name":"TEXT DEFAULT ''", "username":"TEXT DEFAULT ''", "score":"INTEGER DEFAULT 0", "total":"INTEGER DEFAULT 0", "percent":"INTEGER DEFAULT 0", "started_at":"INTEGER DEFAULT 0", "finished_at":"INTEGER DEFAULT 0"},
-        "teacher_groups": {"description":"TEXT DEFAULT ''", "active":"INTEGER DEFAULT 1"},
-        "teacher_assignments": {"variant_code":"TEXT DEFAULT ''", "title":"TEXT DEFAULT ''", "due_at":"INTEGER DEFAULT 0", "active":"INTEGER DEFAULT 1"},
+
+    # Eski jadvallarga yetishmayotgan ustunlarni qo'shamiz.
+    for table, columns in table_defs.items():
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for col, typ in columns.items():
+            if col in existing:
+                continue
+            try:
+                # ALTER TABLE ADD COLUMN uchun xavfsiz oddiy tip.
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+                logging.info("Teacher DB migration: %s.%s qo'shildi", table, col)
+            except sqlite3.OperationalError as e:
+                # Bir nechta Railway worker bir paytda migration qilsa, keyingi
+                # worker ustun allaqachon qo'shilgan bo'lishi mumkin.
+                logging.warning("Teacher DB migration %s.%s: %s", table, col, e)
+
+    # ID ustuni eski bazada mavjud bo'lmagan bo'lsa, qo'shilgan qiymatlarni
+    # mavjud rowlar uchun ham to'ldiramiz. Yangi yozuvlar endpointlar tomonidan
+    # o'z ID'sini beradi.
+    id_prefixes = {
+        "teacher_groups": "tg_migrated_",
+        "teacher_assignments": "ta_migrated_",
+        "teacher_sessions": "ts_migrated_",
     }
-    for table, cols in migrations.items():
-        existing={r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        for col, definition in cols.items():
-            if col not in existing:
-                try:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
-                except sqlite3.OperationalError:
-                    pass
+    for table, prefix in id_prefixes.items():
+        try:
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "id" in cols:
+                conn.execute(
+                    f"UPDATE {table} SET id=? || rowid WHERE id IS NULL OR TRIM(CAST(id AS TEXT))=''",
+                    (prefix,),
+                )
+        except sqlite3.OperationalError as e:
+            logging.warning("Teacher DB ID repair %s: %s", table, e)
+
+    # NULL qiymatlar endpointlar ishlashiga xalaqit bermasin.
+    null_defaults = {
+        "teacher_groups": {"description": "", "active": 1},
+        "teacher_assignments": {"variant_code": "", "title": "", "due_at": 0, "active": 1},
+        "teacher_sessions": {"group_id": "", "variant_code": "", "active": 1},
+        "teacher_participants": {"first_name": "", "username": "", "score": 0, "total": 0, "percent": 0, "started_at": 0, "finished_at": 0},
+    }
+    for table, values in null_defaults.items():
+        for col, value in values.items():
+            try:
+                conn.execute(f"UPDATE {table} SET {col}=? WHERE {col} IS NULL", (value,))
+            except sqlite3.OperationalError as e:
+                logging.warning("Teacher DB default repair %s.%s: %s", table, col, e)
+
+    conn.commit()
 
 
 _teacher_schema_checked = False
