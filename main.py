@@ -1668,15 +1668,100 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
 
 # --- O'QITUVCHI GURUH REJIMI ---
 # --- Teacher DB: barqaror ulanish va SQLite lock himoyasi ---
+def _ensure_teacher_schema(conn):
+    """Railway/SQLite eski bazalarida Teacher jadvallari va ustunlari yo‘q bo‘lsa, shu yerning o‘zida tiklaydi."""
+    tables = {
+        "teacher_variants": """CREATE TABLE IF NOT EXISTS teacher_variants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            quiz_id TEXT NOT NULL,
+            variant_code TEXT NOT NULL,
+            variant_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            UNIQUE(quiz_id, variant_code))""",
+        "teacher_groups": """CREATE TABLE IF NOT EXISTS teacher_groups (
+            id TEXT PRIMARY KEY,
+            owner_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            created_at INTEGER NOT NULL,
+            active INTEGER DEFAULT 1)""",
+        "teacher_group_members": """CREATE TABLE IF NOT EXISTS teacher_group_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            first_name TEXT DEFAULT '',
+            username TEXT DEFAULT '',
+            joined_at INTEGER NOT NULL,
+            UNIQUE(group_id, user_id))""",
+        "teacher_assignments": """CREATE TABLE IF NOT EXISTS teacher_assignments (
+            id TEXT PRIMARY KEY,
+            owner_id INTEGER NOT NULL,
+            group_id TEXT NOT NULL,
+            quiz_id TEXT NOT NULL,
+            variant_code TEXT DEFAULT '',
+            title TEXT DEFAULT '',
+            due_at INTEGER DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            active INTEGER DEFAULT 1)""",
+        "teacher_sessions": """CREATE TABLE IF NOT EXISTS teacher_sessions (
+            id TEXT PRIMARY KEY,
+            owner_id INTEGER,
+            quiz_id TEXT,
+            code TEXT UNIQUE,
+            duration_minutes INTEGER DEFAULT 30,
+            created_at INTEGER,
+            expires_at INTEGER,
+            active INTEGER DEFAULT 1)""",
+        "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            user_id INTEGER,
+            first_name TEXT,
+            username TEXT,
+            score INTEGER DEFAULT 0,
+            total INTEGER DEFAULT 0,
+            percent INTEGER DEFAULT 0,
+            started_at INTEGER,
+            finished_at INTEGER,
+            UNIQUE(session_id, user_id))""",
+    }
+    for ddl in tables.values():
+        conn.execute(ddl)
+    migrations = {
+        "teacher_sessions": {"group_id":"TEXT DEFAULT ''", "variant_code":"TEXT DEFAULT ''"},
+        "teacher_participants": {"first_name":"TEXT DEFAULT ''", "username":"TEXT DEFAULT ''", "score":"INTEGER DEFAULT 0", "total":"INTEGER DEFAULT 0", "percent":"INTEGER DEFAULT 0", "started_at":"INTEGER DEFAULT 0", "finished_at":"INTEGER DEFAULT 0"},
+        "teacher_groups": {"description":"TEXT DEFAULT ''", "active":"INTEGER DEFAULT 1"},
+        "teacher_assignments": {"variant_code":"TEXT DEFAULT ''", "title":"TEXT DEFAULT ''", "due_at":"INTEGER DEFAULT 0", "active":"INTEGER DEFAULT 1"},
+    }
+    for table, cols in migrations.items():
+        existing={r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for col, definition in cols.items():
+            if col not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
+                except sqlite3.OperationalError:
+                    pass
+
+
+_teacher_schema_checked = False
+
 def teacher_db_connect():
+    global _teacher_schema_checked
     conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA busy_timeout=20000")
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        if not _teacher_schema_checked:
+            _ensure_teacher_schema(conn)
+            conn.commit()
+            _teacher_schema_checked = True
     except Exception:
-        pass
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     return conn
 
 def teacher_db_write(work, attempts=6):
@@ -1900,10 +1985,10 @@ def teacher_session_info(code: str, user_id: int):
     return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"], "variant_code":row["variant_code"], "group_id":row["group_id"]}
 
 
-def _session_owner_id(session_id: str, requester_id: int = 0):
+def _session_owner_id(session_id: str, user_id: int):
     conn=teacher_db_connect(); cur=conn.cursor()
     cur.execute("SELECT owner_id FROM teacher_sessions WHERE id=?", (session_id,)); row=cur.fetchone(); conn.close()
-    if not row: raise HTTPException(status_code=404, detail=teacher_text(requester_id, "session_not_found"))
+    if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     return row[0]
 
 
