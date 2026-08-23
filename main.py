@@ -1823,6 +1823,16 @@ def _ensure_teacher_schema(conn):
         except sqlite3.OperationalError as e:
             logging.warning("Teacher DB ID repair %s: %s", table, e)
 
+    # Eski Railway bazasida teacher_sessions.teacher_id mavjud bo'lsa,
+    # owner_id bilan bir xil qiymatga to'ldiramiz. Bu yangi endpointlar va
+    # eski sessiyalarni bir xil sxemada ishlashini ta'minlaydi.
+    try:
+        session_cols = {r[1] for r in conn.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
+        if "teacher_id" in session_cols and "owner_id" in session_cols:
+            conn.execute("UPDATE teacher_sessions SET teacher_id=owner_id WHERE teacher_id IS NULL")
+    except sqlite3.OperationalError as e:
+        logging.warning("Teacher DB teacher_id repair: %s", e)
+
     # NULL qiymatlar endpointlar ishlashiga xalaqit bermasin.
     null_defaults = {
         "teacher_groups": {"description": "", "active": 1},
@@ -2121,13 +2131,29 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         if not code:
             raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
 
-        cur.execute(
-            """INSERT INTO teacher_sessions
-               (id, owner_id, quiz_id, code, duration_minutes, created_at,
-                expires_at, active, group_id, variant_code)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-            (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code),
-        )
+        # Railway'dagi eski Teacher bazasida teacher_sessions jadvalida
+        # owner_id bilan birga NOT NULL teacher_id ham mavjud bo'lishi mumkin.
+        # V4 faqat owner_id yozgani uchun aynan shu holatda SQLite:
+        # "NOT NULL constraint failed: teacher_sessions.teacher_id" beradi.
+        # Yangi va eski sxemalarni bir xil ishlatish uchun mavjud ustunlarni
+        # tekshirib, kerak bo'lsa ikkala identifikatorni ham birga yozamiz.
+        session_columns = {r[1] for r in cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
+        if "teacher_id" in session_columns:
+            cur.execute(
+                """INSERT INTO teacher_sessions
+                   (id, owner_id, teacher_id, quiz_id, code, duration_minutes, created_at,
+                    expires_at, active, group_id, variant_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                (sid, req.user_id, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code),
+            )
+        else:
+            cur.execute(
+                """INSERT INTO teacher_sessions
+                   (id, owner_id, quiz_id, code, duration_minutes, created_at,
+                    expires_at, active, group_id, variant_code)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code),
+            )
         return {
             "session_id": sid,
             "code": code,
