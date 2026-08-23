@@ -1730,8 +1730,10 @@ def _ensure_teacher_schema(conn):
         "teacher_sessions": {
             "id": "TEXT",
             "owner_id": "INTEGER",
+            "teacher_id": "INTEGER",
             "quiz_id": "TEXT",
             "code": "TEXT",
+            "title": "TEXT",
             "duration_minutes": "INTEGER",
             "created_at": "INTEGER",
             "expires_at": "INTEGER",
@@ -1775,8 +1777,8 @@ def _ensure_teacher_schema(conn):
             due_at INTEGER DEFAULT 0, created_at INTEGER NOT NULL,
             active INTEGER DEFAULT 1)""",
         "teacher_sessions": """CREATE TABLE IF NOT EXISTS teacher_sessions (
-            id TEXT PRIMARY KEY, owner_id INTEGER, quiz_id TEXT, code TEXT UNIQUE,
-            duration_minutes INTEGER DEFAULT 30, created_at INTEGER,
+            id TEXT PRIMARY KEY, owner_id INTEGER, teacher_id INTEGER, quiz_id TEXT, code TEXT UNIQUE,
+            title TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 30, created_at INTEGER,
             expires_at INTEGER, active INTEGER DEFAULT 1,
             group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '')""",
         "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
@@ -2138,22 +2140,36 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         # Yangi va eski sxemalarni bir xil ishlatish uchun mavjud ustunlarni
         # tekshirib, kerak bo'lsa ikkala identifikatorni ham birga yozamiz.
         session_columns = {r[1] for r in cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
+
+        # Railway'dagi turli avlod Teacher bazalarida majburiy ustunlar bir-biridan
+        # farq qilishi mumkin. Xususan eski sxemada teacher_id va title NOT NULL
+        # bo'lgan. INSERT faqat mavjud ustunlarni to'ldiradi, lekin mavjud bo'lsa
+        # majburiy identifikator va test nomini ham albatta beradi. Shu bilan birga
+        # yangi bazada ham ayni ma'lumotlar saqlanadi.
+        insert_columns = [
+            "id", "owner_id", "quiz_id", "code", "duration_minutes",
+            "created_at", "expires_at", "active", "group_id", "variant_code"
+        ]
+        insert_values = [
+            sid, req.user_id, req.quiz_id, code, duration,
+            now, expires, 1, group_id, variant_code
+        ]
+
         if "teacher_id" in session_columns:
-            cur.execute(
-                """INSERT INTO teacher_sessions
-                   (id, owner_id, teacher_id, quiz_id, code, duration_minutes, created_at,
-                    expires_at, active, group_id, variant_code)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-                (sid, req.user_id, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code),
-            )
-        else:
-            cur.execute(
-                """INSERT INTO teacher_sessions
-                   (id, owner_id, quiz_id, code, duration_minutes, created_at,
-                    expires_at, active, group_id, variant_code)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-                (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code),
-            )
+            insert_columns.insert(2, "teacher_id")
+            insert_values.insert(2, req.user_id)
+        if "title" in session_columns:
+            # Eski Railway sxemasidagi NOT NULL teacher_sessions.title xatosini
+            # bartaraf etish uchun testning haqiqiy nomini shu yerda yozamiz.
+            session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
+            insert_columns.insert(5 if "teacher_id" in session_columns else 4, "title")
+            insert_values.insert(5 if "teacher_id" in session_columns else 4, session_title)
+
+        placeholders = ", ".join("?" for _ in insert_columns)
+        cur.execute(
+            f"INSERT INTO teacher_sessions ({', '.join(insert_columns)}) VALUES ({placeholders})",
+            tuple(insert_values),
+        )
         return {
             "session_id": sid,
             "code": code,
