@@ -1933,6 +1933,7 @@ TEACHER_MESSAGES = {
         "quiz_questions_missing": "Test savollari mavjud emas.",
         "variant_required": "A, B, C yoki D variantidan foydalaning.",
         "group_required": "Guruh va testni tanlang.",
+        "select_group": "Avval guruhni tanlang.",
         "assignment_not_found": "Topshiriq topilmadi.",
         "session_expired": "Sessiya muddati tugagan.",
         "format_invalid": "Fayl formati noto‘g‘ri.",
@@ -1966,6 +1967,7 @@ TEACHER_MESSAGES = {
         "quiz_questions_missing": "В тесте нет вопросов.",
         "variant_required": "Используйте вариант A, B, C или D.",
         "group_required": "Выберите группу и тест.",
+        "select_group": "Сначала выберите группу.",
         "assignment_not_found": "Задание не найдено.",
         "session_expired": "Срок сессии истёк.",
         "format_invalid": "Неверный формат файла.",
@@ -1999,6 +2001,7 @@ TEACHER_MESSAGES = {
         "quiz_questions_missing": "The quiz has no questions.",
         "variant_required": "Use variant A, B, C or D.",
         "group_required": "Select a group and a quiz.",
+        "select_group": "Select a group first.",
         "assignment_not_found": "Assignment not found.",
         "session_expired": "The session has expired.",
         "format_invalid": "Invalid file format.",
@@ -2066,32 +2069,77 @@ class TeacherSessionCreateRequest(BaseModel):
 
 @app.post("/api/teacher/create-session")
 def teacher_create_session(req: TeacherSessionCreateRequest):
+    """Teacher guruh sessiyasini yaratish.
+
+    Bu endpoint avvalgi versiyadagi to'g'ridan-to'g'ri SQLite SELECT/INSERT
+    aralashmasini bitta teacher_db_write oqimiga yig'adi. Shu sabab eski
+    teacher_* sxemasi migrationdan o'tgach ham guruh testi barqaror yaratiladi.
+    Oddiy testda variant bo'sh qoladi; A/B/C/D tanlansa saqlangan variant
+    ishlatiladi.
+    """
     require_teacher(req.user_id)
-    duration = max(5, min(int(req.duration_minutes), 180))
+    duration = max(5, min(int(req.duration_minutes or 30), 180))
     variant_code = (req.variant_code or "").strip().upper()
     if variant_code and variant_code not in TEACHER_VARIANT_CODES:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
+
+    # Quiz va savollar haqiqatan ham shu teacherga tegishli ekanini oldindan
+    # tekshiramiz. Variant tanlangan bo'lsa, variant ham shu yerda tayyorlanadi.
+    quiz_row, _items = _load_quiz_items(req.quiz_id, req.user_id)
     if variant_code:
         _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
+
+    group_id = (req.group_id or "").strip()
+    if not group_id:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "select_group"))
+
     def _write(conn):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT id, title FROM quizzes WHERE id = ? AND user_id = ?", (req.quiz_id, req.user_id))
-        quiz = cur.fetchone()
-        if not quiz:
-            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "quiz_not_found"))
-        group_id = (req.group_id or "").strip()
-        if group_id:
-            cur.execute("SELECT id FROM teacher_groups WHERE id=? AND owner_id=? AND active=1", (group_id, req.user_id))
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+
+        # Guruh teacherning o'ziga tegishli va faol bo'lishi shart.
+        cur.execute(
+            "SELECT id, name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",
+            (group_id, req.user_id),
+        )
+        group = cur.fetchone()
+        if not group:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+
         sid = f"ts_{uuid.uuid4().hex[:10]}"
-        code = uuid.uuid4().hex[:8].upper()
-        now = int(time.time()); expires = now + duration * 60
-        cur.execute("INSERT INTO teacher_sessions (id, owner_id, quiz_id, code, duration_minutes, created_at, expires_at, active, group_id, variant_code) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)", (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code))
-        return {"session_id": sid, "code": code, "expires_at": expires, "quiz_title": quiz["title"], "variant_code": variant_code, "group_id": group_id}
+        now = int(time.time())
+        expires = now + duration * 60
+
+        # Juda kam ehtimol bo'lsa ham kod to'qnashsa qayta generatsiya qilamiz.
+        code = ""
+        for _ in range(5):
+            candidate = uuid.uuid4().hex[:8].upper()
+            cur.execute("SELECT 1 FROM teacher_sessions WHERE code=? LIMIT 1", (candidate,))
+            if not cur.fetchone():
+                code = candidate
+                break
+        if not code:
+            raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
+
+        cur.execute(
+            """INSERT INTO teacher_sessions
+               (id, owner_id, quiz_id, code, duration_minutes, created_at,
+                expires_at, active, group_id, variant_code)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+            (sid, req.user_id, req.quiz_id, code, duration, now, expires, group_id, variant_code),
+        )
+        return {
+            "session_id": sid,
+            "code": code,
+            "expires_at": expires,
+            "quiz_title": quiz_row["title"],
+            "variant_code": variant_code,
+            "group_id": group_id,
+            "group_name": group["name"],
+        }
+
     data = teacher_db_write(_write)
-    return {"status":"ok", **data}
+    return {"status": "ok", **data}
 
 @app.get("/api/teacher-sessions")
 def teacher_sessions(user_id: int):
