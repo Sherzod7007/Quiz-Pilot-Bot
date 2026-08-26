@@ -1499,7 +1499,7 @@
                 const sessionGroup=document.getElementById('teacher-session-group');
                 if(s)s.innerHTML=groupOptions;
                 if(sessionGroup)sessionGroup.innerHTML=groupOptions;
-                if(box)box.innerHTML=(d.groups||[]).map(g=>`<div class="teacher-session-card glass-panel"><b>👥 ${escapeHtml(g.name)}</b><div class="teacher-chip-row"><span class="teacher-chip">${g.member_count||0} ${langPack[currentLang].teacher_members}</span><span class="teacher-chip">${g.active?'🟢 '+langPack[currentLang].teacher_active_word:'🔴 '+langPack[currentLang].teacher_closed_word}</span></div><div class="teacher-note">${escapeHtml(g.description||'')}</div>${g.active?`<button class="teacher-mini-btn" onclick="deleteTeacherGroup('${g.id}')">${langPack[currentLang].teacher_delete}</button>`:''}</div>`).join('')||`<div class="teacher-empty">${langPack[currentLang].teacher_group_empty}</div>`;
+                if(box)box.innerHTML=activeGroups.map(g=>`<div class="teacher-session-card glass-panel"><b>👥 ${escapeHtml(g.name)}</b><div class="teacher-chip-row"><span class="teacher-chip">${g.member_count||0} ${langPack[currentLang].teacher_members}</span><span class="teacher-chip">🟢 ${langPack[currentLang].teacher_active_word}</span></div><div class="teacher-note">${escapeHtml(g.description||'')}</div><button class="teacher-mini-btn" onclick="deleteTeacherGroup('${g.id}')">${langPack[currentLang].teacher_delete}</button></div>`).join('')||`<div class="teacher-empty">${langPack[currentLang].teacher_group_empty}</div>`;
             }catch(e){if(box)box.innerHTML=`<div class="teacher-empty">❌ ${escapeHtml(e.message||langPack[currentLang].teacher_server_error)}</div>`;}
         }
 
