@@ -30,6 +30,7 @@ from typing import List, Optional
 import uvicorn
 import uuid
 import random
+import secrets
 from copy import deepcopy
 from pathlib import Path
 
@@ -349,6 +350,7 @@ def init_db():
         owner_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         description TEXT DEFAULT '',
+        join_code TEXT DEFAULT '',
         created_at INTEGER NOT NULL,
         active INTEGER DEFAULT 1)""")
 
@@ -399,6 +401,7 @@ def init_db():
             "owner_id": "INTEGER DEFAULT 0",
             "name": "TEXT DEFAULT ''",
             "description": "TEXT DEFAULT ''",
+            "join_code": "TEXT DEFAULT ''",
             "created_at": "INTEGER DEFAULT 0",
             "active": "INTEGER DEFAULT 1",
         },
@@ -444,6 +447,17 @@ def init_db():
                 cursor.execute(f"UPDATE {table_name} SET {col}={value} WHERE {col} IS NULL")
             except Exception:
                 pass
+
+    # Existing groups from older versions receive a 6-character join code.
+    try:
+        cursor.execute("SELECT id FROM teacher_groups WHERE COALESCE(join_code,'')='' AND active=1")
+        for row in cursor.fetchall():
+            code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+            while cursor.execute("SELECT 1 FROM teacher_groups WHERE join_code=? LIMIT 1", (code,)).fetchone():
+                code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+            cursor.execute("UPDATE teacher_groups SET join_code=? WHERE id=?", (code, row[0]))
+    except Exception as e:
+        logging.warning("Teacher group code migration: %s", e)
 
     conn.commit()
     conn.close()
@@ -1471,10 +1485,22 @@ class TeacherGroupCreateRequest(BaseModel):
 
 
 class TeacherGroupJoinRequest(BaseModel):
-    group_id: str
+    group_id: str = ""
+    join_code: str = ""
     user_id: int
     first_name: str = ""
     username: str = ""
+
+
+def _new_group_code(conn, length=6):
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    for _ in range(50):
+        code = "".join(secrets.choice(alphabet) for _ in range(length))
+        row = conn.execute("SELECT 1 FROM teacher_groups WHERE join_code=? LIMIT 1", (code,)).fetchone()
+        if not row:
+            return code
+    raise HTTPException(status_code=500, detail="__TEACHER_SERVER_ERROR__")
 
 
 @app.post("/api/teacher/groups")
@@ -1487,12 +1513,14 @@ def teacher_create_group(req: TeacherGroupCreateRequest):
     now = int(time.time())
     description = (req.description or "")[:500]
     def _write(conn):
+        code = _new_group_code(conn)
         conn.execute(
-            "INSERT INTO teacher_groups (id,owner_id,name,description,created_at,active) VALUES (?,?,?,?,?,1)",
-            (gid, req.user_id, name, description, now),
+            "INSERT INTO teacher_groups (id,owner_id,name,description,join_code,created_at,active) VALUES (?,?,?,?,?,?,1)",
+            (gid, req.user_id, name, description, code, now),
         )
-    teacher_db_write(_write)
-    return {"status":"ok", "group_id":gid, "name":name}
+        return code
+    code = teacher_db_write(_write)
+    return {"status":"ok", "group_id":gid, "name":name, "join_code":code}
 
 @app.get("/api/teacher/groups")
 def teacher_groups(user_id: int):
@@ -1500,7 +1528,7 @@ def teacher_groups(user_id: int):
     def _read(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(m.id) AS member_count "
+            "SELECT g.id,g.name,g.description,g.join_code,g.created_at,g.active,COUNT(m.id) AS member_count "
             "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
             "WHERE g.owner_id=? AND g.active=1 GROUP BY g.id ORDER BY g.created_at DESC",
             (user_id,),
@@ -1511,20 +1539,43 @@ def teacher_groups(user_id: int):
 
 @app.post("/api/teacher/groups/join")
 def teacher_join_group(req: TeacherGroupJoinRequest):
+    code = (req.join_code or "").strip().upper().replace(" ", "")
+    group_id = (req.group_id or "").strip()
     def _write(conn):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT id,active FROM teacher_groups WHERE id=?", (req.group_id,))
+        if code:
+            cur.execute("SELECT id,name,active FROM teacher_groups WHERE join_code=?", (code,))
+        elif group_id:
+            cur.execute("SELECT id,name,active FROM teacher_groups WHERE id=?", (group_id,))
+        else:
+            raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_code_required"))
         group = cur.fetchone()
         if not group or not group["active"]:
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
         now = int(time.time())
         cur.execute(
             "INSERT OR IGNORE INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (?,?,?,?,?)",
-            (req.group_id, req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
+            (group["id"], req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
         )
-    teacher_db_write(_write)
-    return {"status":"ok", "group_id":req.group_id}
+        return dict(group)
+    group = teacher_db_write(_write)
+    return {"status":"ok", "group_id":group["id"], "group_name":group["name"]}
+
+@app.get("/api/teacher/my-groups")
+def teacher_my_groups(user_id: int):
+    def _read(conn):
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT g.id,g.name,g.description,g.join_code,g.created_at,m.joined_at "
+            "FROM teacher_group_members m JOIN teacher_groups g ON g.id=m.group_id "
+            "WHERE m.user_id=? AND g.active=1 ORDER BY m.joined_at DESC",
+            (user_id,),
+        )
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
+    return {"status":"ok", "groups":[dict(r) for r in rows]}
 
 @app.get("/api/teacher/group-members")
 def teacher_group_members(group_id: str, user_id: int):
