@@ -368,6 +368,8 @@
         /* ===== Professional Teacher Center ===== */
         .teacher-screen-wrap{padding-bottom:8px}.teacher-hero{padding:18px;margin-bottom:14px;background:linear-gradient(135deg,rgba(0,153,255,.18),rgba(0,0,0,.28));border:1px solid rgba(0,210,255,.35)}.teacher-hero h2{margin:0 0 5px;font-size:21px}.teacher-hero p{margin:0;color:var(--text-hint);font-size:12px;line-height:1.45}.teacher-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}.teacher-feature{padding:14px 10px;min-height:82px;cursor:pointer;text-align:left;color:#fff!important;border:1px solid rgba(190,210,230,.35);transition:box-shadow .18s ease,border-color .18s ease,transform .12s ease,background .18s ease}.teacher-feature:hover{border-color:rgba(0,210,255,.75);box-shadow:0 0 10px rgba(0,153,255,.22)}.teacher-feature:active{transform:scale(.985)}.teacher-feature.active{border-color:#00d2ff!important;box-shadow:0 0 7px rgba(0,153,255,.55),0 0 18px rgba(0,153,255,.28),inset 0 0 12px rgba(0,153,255,.10);background:linear-gradient(135deg,rgba(0,153,255,.18),rgba(255,255,255,.05))}.teacher-feature .tf-icon{font-size:24px;display:block;margin-bottom:7px}.teacher-feature b{display:block;font-size:13px;color:#fff!important}.teacher-feature span:last-child{color:#b9c7d8!important}.teacher-feature span:last-child{display:block;color:var(--text-hint);font-size:10px;margin-top:3px;line-height:1.25}.teacher-feature-panel{scroll-margin-top:10px}.teacher-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.teacher-export-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.teacher-session-card{padding:11px;margin-top:8px}.teacher-chip-row{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.teacher-chip{font-size:10px;padding:4px 7px;border-radius:10px;background:rgba(255,255,255,.08)}@media(max-width:520px){.teacher-form-grid{grid-template-columns:1fr}}.teacher-section{padding:17px;margin-bottom:12px}.teacher-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;font-size:16px;font-weight:700;color:#fff}.teacher-mini-btn{border:1px solid var(--aero-border);background:rgba(255,255,255,.08);color:#fff;border-radius:8px;padding:7px 10px;font-size:11px;cursor:pointer}.teacher-chip-row{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 0}.teacher-chip{padding:6px 9px;border-radius:20px;background:rgba(0,120,215,.18);border:1px solid rgba(0,210,255,.25);color:#d9f6ff;font-size:11px}.teacher-subsection{margin-top:16px;padding-top:15px;border-top:1px solid rgba(180,205,230,.16)}.teacher-variants-panel{padding:20px 18px;min-height:260px}.teacher-main-variant-grid{gap:10px;margin:8px 0 14px}.variant-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.variant-btn{min-height:48px;padding:10px 5px;border-radius:9px;border:1px solid var(--aero-border);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer}.variant-btn.active{background:linear-gradient(180deg,#0099ff,#005a9e);border-color:#00d2ff;box-shadow:0 0 9px rgba(0,153,255,.45)}.teacher-variant-create-btn{margin-top:2px}.teacher-note{color:var(--text-hint);font-size:11px;line-height:1.45;margin-top:9px}.teacher-session-card{padding:12px;margin-top:9px}.teacher-session-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}.teacher-empty{text-align:center;color:var(--text-hint);padding:22px 8px;font-size:12px}
     
+        .group-join-open-btn { width:100%; display:block; margin:12px 0 10px; padding:11px 12px; border-radius:12px; border:1px solid var(--aero-border); background:var(--aero-glass); color:var(--text-main); font-weight:800; font-size:13px; cursor:pointer; box-shadow:var(--glass-shadow); }
+        .group-join-open-btn:active { transform:scale(.99); }
         .group-join-card { margin: 12px 0 14px; padding: 14px; border-radius: 14px; border: 1px solid var(--aero-border); background: var(--aero-glass); box-shadow: var(--glass-shadow); }
         .group-join-title { font-size: 16px; font-weight: 800; margin-bottom: 5px; }
         .group-join-desc { color: var(--text-hint); font-size: 12px; line-height: 1.45; margin-bottom: 10px; }
@@ -407,8 +409,9 @@
             <button id="tab-cards" class="tab" onclick="switchLibTab('cards')" data-lang="tab_cards">🗂️ Kartochkalar</button>
         </div>
 
-        <div class="group-join-card glass-panel">
-            <div class="group-join-title">👥 <span data-lang="student_group_join_title">Guruhga qo‘shilish</span></div>
+        <button id="group-join-open-btn" class="group-join-open-btn" type="button" onclick="toggleStudentGroupJoin()">👥 <span data-lang="student_group_join_title">Guruhga qo‘shilish</span></button>
+
+        <div id="group-join-panel" class="group-join-card glass-panel" style="display:none;">
             <div class="group-join-desc" data-lang="student_group_join_desc">O‘qituvchingiz bergan 6 belgili guruh kodini kiriting.</div>
             <div class="group-join-row">
                 <input id="student-group-code" class="input-card" maxlength="6" autocomplete="off" data-placeholder="student_group_code_placeholder" placeholder="Masalan: A7K29P" style="text-transform:uppercase;letter-spacing:2px;font-weight:700;text-align:center;">
@@ -1516,6 +1519,17 @@
             const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : {};
             return { first_name: u.first_name || '', username: u.username || '' };
         }
+        function toggleStudentGroupJoin(){
+            const panel=document.getElementById('group-join-panel');
+            if(!panel) return;
+            const open=panel.style.display!=='none';
+            panel.style.display=open?'none':'block';
+            if(!open){
+                const input=document.getElementById('student-group-code');
+                if(input) setTimeout(()=>input.focus(),80);
+            }
+        }
+
         async function loadStudentGroups(){
             const box=document.getElementById('student-joined-groups');
             if(!box) return;
