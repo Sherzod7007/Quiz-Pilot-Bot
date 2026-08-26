@@ -1500,9 +1500,9 @@ def teacher_groups(user_id: int):
     def _read(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(*) AS member_count "
+            "SELECT g.id,g.name,g.description,g.created_at,g.active,COUNT(m.id) AS member_count "
             "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
-            "WHERE g.owner_id=? GROUP BY g.id ORDER BY g.created_at DESC",
+            "WHERE g.owner_id=? AND g.active=1 GROUP BY g.id ORDER BY g.created_at DESC",
             (user_id,),
         )
         return cur.fetchall()
@@ -2141,29 +2141,73 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         # tekshirib, kerak bo'lsa ikkala identifikatorni ham birga yozamiz.
         session_columns = {r[1] for r in cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
 
-        # Railway'dagi turli avlod Teacher bazalarida majburiy ustunlar bir-biridan
-        # farq qilishi mumkin. Xususan eski sxemada teacher_id va title NOT NULL
-        # bo'lgan. INSERT faqat mavjud ustunlarni to'ldiradi, lekin mavjud bo'lsa
-        # majburiy identifikator va test nomini ham albatta beradi. Shu bilan birga
-        # yangi bazada ham ayni ma'lumotlar saqlanadi.
-        insert_columns = [
+        # Railway'dagi turli avlod Teacher bazalarida teacher_sessions sxemasi
+        # farq qilishi mumkin. Ayniqsa eski bazalarda teacher_id yoki title
+        # NOT NULL bo'lishi mumkin. Mavjud ustunlarni tekshirib, barcha majburiy
+        # ustunlarni ham to'ldiramiz — shu bilan guruh testi va topshiriq testi
+        # bir xil barqaror endpointdan foydalanadi.
+        session_columns = cur.execute(
+            "PRAGMA table_info(teacher_sessions)"
+        ).fetchall()
+        column_info = {row[1]: row for row in session_columns}
+
+        session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
+        values_by_column = {
+            "id": sid,
+            "owner_id": req.user_id,
+            "teacher_id": req.user_id,
+            "quiz_id": req.quiz_id,
+            "code": code,
+            "title": session_title,
+            "duration_minutes": duration,
+            "created_at": now,
+            "expires_at": expires,
+            "active": 1,
+            "group_id": group_id,
+            "variant_code": variant_code,
+        }
+
+        insert_columns = []
+        insert_values = []
+        for name, row in column_info.items():
+            # PK/autoincrement ustunlari qiymat talab qilmasa o'tkazib yuboriladi.
+            if name not in values_by_column:
+                continue
+            insert_columns.append(name)
+            insert_values.append(values_by_column[name])
+
+        # Bizga kerak bo'lgan asosiy ustunlar jadvalda mavjudligini kafolatlaymiz.
+        required_core = (
             "id", "owner_id", "quiz_id", "code", "duration_minutes",
             "created_at", "expires_at", "active", "group_id", "variant_code"
-        ]
-        insert_values = [
-            sid, req.user_id, req.quiz_id, code, duration,
-            now, expires, 1, group_id, variant_code
-        ]
+        )
+        missing_core = [c for c in required_core if c not in column_info]
+        if missing_core:
+            raise HTTPException(
+                status_code=500,
+                detail=teacher_text(req.user_id, "server_error"),
+            )
 
-        if "teacher_id" in session_columns:
-            insert_columns.insert(2, "teacher_id")
-            insert_values.insert(2, req.user_id)
-        if "title" in session_columns:
-            # Eski Railway sxemasidagi NOT NULL teacher_sessions.title xatosini
-            # bartaraf etish uchun testning haqiqiy nomini shu yerda yozamiz.
-            session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
-            insert_columns.insert(5 if "teacher_id" in session_columns else 4, "title")
-            insert_values.insert(5 if "teacher_id" in session_columns else 4, session_title)
+        # Noma'lum NOT NULL ustun bo'lsa, SQLite INSERTni IntegrityError bilan
+        # yiqitmasligi uchun xavfsiz default berishga urinmaymiz; aksincha logga
+        # aniq sabab yoziladi. Amaldagi eski sxemalardagi teacher_id/title yuqorida
+        # to'liq qo'llab-quvvatlanadi.
+        unknown_required = []
+        for name, row in column_info.items():
+            not_null = bool(row[3])
+            default_value = row[4]
+            is_pk = bool(row[5])
+            if not_null and not is_pk and default_value is None and name not in insert_columns:
+                unknown_required.append(name)
+        if unknown_required:
+            logging.error(
+                "Teacher session schema has unsupported required columns: %s",
+                unknown_required,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=teacher_text(req.user_id, "server_error"),
+            )
 
         placeholders = ", ".join("?" for _ in insert_columns)
         cur.execute(
