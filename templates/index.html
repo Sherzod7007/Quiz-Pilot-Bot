@@ -1361,11 +1361,18 @@
         async function playQuiz(quizId, isPublic=false, sessionId=null) {
             try {
                 let url;
-                if (sessionId) url = `${BASE_URL}/api/quiz-detail?quiz_id=${quizId}&_t=${Date.now()}`;
-                else if (isPublic) url = `${BASE_URL}/api/public-quiz-detail?quiz_id=${quizId}&user_id=${userId}&_t=${Date.now()}`;
+                if (sessionId) {
+                    // Guruh sessiyasida oddiy quiz-detail emas, sessiyaga bog'langan
+                    // endpoint ishlatiladi. Aks holda sessiya rejimi oddiy testdek
+                    // yuklanib, ayrim Railway versiyalarida ichki xato berishi mumkin.
+                    url = `${BASE_URL}/api/teacher-session-quiz?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&_t=${Date.now()}`;
+                } else if (isPublic) url = `${BASE_URL}/api/public-quiz-detail?quiz_id=${quizId}&user_id=${userId}&_t=${Date.now()}`;
                 else url = BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now();
                 const response = await fetch(url);
                 const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data?.detail || data?.message || langPack[currentLang].teacher_server_error);
+                }
                 if (data && data.error_code === "public_limit") {
                     showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
                     return;
@@ -1482,11 +1489,13 @@
         }
 
         async function createTeacherSession() {
-            const quizId=document.getElementById('teacher-quiz-select').value;
-            const duration=Number(document.getElementById('teacher-duration').value);
+            const quizId=document.getElementById('teacher-quiz-select')?.value;
+            const duration=Number(document.getElementById('teacher-duration')?.value || 30);
+            const groupId=document.getElementById('teacher-session-group')?.value;
             if(!quizId) { showAppAlert('⚠️', langPack[currentLang].teacher_no_quizzes); return; }
+            if(!groupId) { showAppAlert('⚠️', langPack[currentLang].teacher_select_group); return; }
             try {
-                const res=await fetch(`${BASE_URL}/api/teacher/create-session`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quizId,duration_minutes:duration})});
+                const res=await fetch(`${BASE_URL}/api/teacher/create-session`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quizId,group_id:groupId,duration_minutes:duration})});
                 const data=await res.json();
                 if(data.status==='ok') {
                     const link=`${BASE_URL}/?session=${data.code}`;
