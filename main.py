@@ -2203,18 +2203,31 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         column_info = {row[1]: row for row in session_columns}
 
         session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
+        # Asosiy va eski versiyalardagi mumkin bo'lgan ustunlar uchun qiymatlar.
+        # Railway'dagi eski bazalarda teacher_sessions sxemasi bir necha marta
+        # o'zgargani sabab INSERTni faqat yangi ustunlar bilan cheklash 500 xatoga
+        # olib kelishi mumkin. Shu yerda nomi ma'lum bo'lgan eski ustunlarni ham
+        # to'ldiramiz.
         values_by_column = {
             "id": sid,
+            "session_id": sid,
             "owner_id": req.user_id,
             "teacher_id": req.user_id,
+            "teacher_user_id": req.user_id,
+            "user_id": req.user_id,
             "quiz_id": req.quiz_id,
             "code": code,
+            "join_code": code,
             "title": session_title,
+            "name": session_title,
             "duration_minutes": duration,
+            "duration": duration,
             "created_at": now,
+            "started_at": now,
             "expires_at": expires,
             "active": 1,
             "group_id": group_id,
+            "group_name": group["name"],
             "variant_code": variant_code,
         }
 
@@ -2222,10 +2235,29 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         insert_values = []
         for name, row in column_info.items():
             # PK/autoincrement ustunlari qiymat talab qilmasa o'tkazib yuboriladi.
-            if name not in values_by_column:
+            if name in values_by_column:
+                insert_columns.append(name)
+                insert_values.append(values_by_column[name])
                 continue
-            insert_columns.append(name)
-            insert_values.append(values_by_column[name])
+
+            # Eski sxemada bizga noma'lum NOT NULL ustun uchrasa ham sessiyani
+            # bekorga 500 bilan to'xtatmaymiz. Oddiy tipiga mos xavfsiz bo'sh
+            # qiymat beramiz; bu ustun yangi Teacher oqimida ishlatilmaydi.
+            not_null = bool(row[3])
+            default_value = row[4]
+            is_pk = bool(row[5])
+            if not_null and not is_pk and default_value is None:
+                declared_type = str(row[2] or "").upper()
+                if "INT" in declared_type or "REAL" in declared_type or "NUM" in declared_type:
+                    fallback = 0
+                else:
+                    fallback = ""
+                insert_columns.append(name)
+                insert_values.append(fallback)
+                logging.warning(
+                    "Teacher session legacy required column filled with fallback: %s=%r",
+                    name, fallback,
+                )
 
         # Bizga kerak bo'lgan asosiy ustunlar jadvalda mavjudligini kafolatlaymiz.
         required_core = (
@@ -2234,27 +2266,6 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         )
         missing_core = [c for c in required_core if c not in column_info]
         if missing_core:
-            raise HTTPException(
-                status_code=500,
-                detail=teacher_text(req.user_id, "server_error"),
-            )
-
-        # Noma'lum NOT NULL ustun bo'lsa, SQLite INSERTni IntegrityError bilan
-        # yiqitmasligi uchun xavfsiz default berishga urinmaymiz; aksincha logga
-        # aniq sabab yoziladi. Amaldagi eski sxemalardagi teacher_id/title yuqorida
-        # to'liq qo'llab-quvvatlanadi.
-        unknown_required = []
-        for name, row in column_info.items():
-            not_null = bool(row[3])
-            default_value = row[4]
-            is_pk = bool(row[5])
-            if not_null and not is_pk and default_value is None and name not in insert_columns:
-                unknown_required.append(name)
-        if unknown_required:
-            logging.error(
-                "Teacher session schema has unsupported required columns: %s",
-                unknown_required,
-            )
             raise HTTPException(
                 status_code=500,
                 detail=teacher_text(req.user_id, "server_error"),
