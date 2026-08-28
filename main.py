@@ -1158,7 +1158,7 @@ CRITICAL RULES:
             try:
                 client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash",
+                    model="gemini-2.5-flash",
                     contents=extracted_text[:80000],
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
@@ -2302,6 +2302,12 @@ def teacher_session_info(code: str, user_id: int):
         return cur.fetchone()
     row=teacher_db_read(_read)
     if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    # Session link is private to the teacher who created it and students who
+    # belong to the corresponding group.
+    def _access(conn):
+        return _student_can_access_session(conn, row["id"], user_id)
+    if not teacher_db_read(_access):
+        raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
     if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
     return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"], "variant_code":row["variant_code"], "group_id":row["group_id"]}
 
@@ -2312,12 +2318,115 @@ def _session_owner_id(session_id: str, user_id: int):
     return row[0]
 
 
+@app.get("/api/teacher-group-sessions")
+def teacher_group_sessions(user_id: int):
+    """Return currently active test sessions for groups the student has joined.
+
+    This endpoint intentionally does not require the Teacher plan: students only
+    need to be members of the group. The teacher/owner can also see their own
+    sessions through the normal Teacher UI.
+    """
+    now = int(time.time())
+    def _read(conn):
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT s.id, s.code, s.quiz_id, q.title, q.total,
+                   s.duration_minutes, s.created_at, s.expires_at, s.group_id,
+                   g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code
+            FROM teacher_group_members m
+            JOIN teacher_groups g ON g.id=m.group_id AND g.active=1
+            JOIN teacher_sessions s ON s.group_id=g.id
+            JOIN quizzes q ON q.id=s.quiz_id
+            WHERE m.user_id=? AND s.active=1 AND COALESCE(s.deleted,0)=0
+              AND s.expires_at>?
+            ORDER BY s.created_at DESC
+            LIMIT 30
+        """, (user_id, now))
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
+    return {"status":"ok", "sessions":[dict(r) for r in rows], "server_time":now}
+
+
+def _student_can_access_session(conn, session_id: str, user_id: int):
+    """A session is accessible to its owner or to a member of its group."""
+    row = conn.execute("""
+        SELECT s.owner_id, s.group_id, s.active, COALESCE(s.deleted,0) AS deleted,
+               s.expires_at
+        FROM teacher_sessions s WHERE s.id=?
+    """, (session_id,)).fetchone()
+    if not row:
+        return None
+    if int(row[0] or 0) == int(user_id):
+        return row
+    group_id = str(row[1] or '')
+    if not group_id:
+        return None
+    member = conn.execute(
+        "SELECT 1 FROM teacher_group_members WHERE group_id=? AND user_id=? LIMIT 1",
+        (group_id, user_id),
+    ).fetchone()
+    return row if member else None
+
+
+@app.post("/api/teacher-session-start")
+def teacher_session_start(session_id: str, user_id: int):
+    """Register the moment a student actually enters a group test."""
+    now = int(time.time())
+    def _write(conn):
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT s.id,s.owner_id,s.group_id,s.quiz_id,s.expires_at,s.active,
+                   COALESCE(s.deleted,0) AS deleted,s.duration_minutes,q.title,q.total,
+                   COALESCE(s.variant_code,'') AS variant_code
+            FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
+            WHERE s.id=?
+        """, (session_id,))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+        if not _student_can_access_session(conn, session_id, user_id):
+            raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
+        if s["deleted"] or not s["active"] or now > int(s["expires_at"] or 0):
+            raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+        # The shared users table intentionally stores only account/status data;
+        # Telegram profile names are supplied by the client when the result is submitted.
+        first_name = "Telegram User"
+        username = ""
+        existing = cur.execute(
+            "SELECT id FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1",
+            (session_id, user_id),
+        ).fetchone()
+        if existing:
+            cur.execute("""
+                UPDATE teacher_participants
+                SET first_name=?, username=?, started_at=?, finished_at=0, score=0, total=?, percent=0
+                WHERE id=?
+            """, (first_name, username, now, s["total"], existing[0]))
+        else:
+            cur.execute("""
+                INSERT INTO teacher_participants
+                (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at)
+                VALUES (?,?,?,?,?,?,?,?,0)
+            """, (session_id,user_id,first_name,username,0,s["total"],0,now))
+        return dict(s)
+    data = teacher_db_write(_write)
+    return {"status":"ok", "session_id":data["id"], "quiz_id":data["quiz_id"],
+            "title":data["title"], "total":data["total"],
+            "duration_minutes":data["duration_minutes"], "expires_at":data["expires_at"],
+            "variant_code":data["variant_code"], "server_time":now}
+
+
 @app.get("/api/teacher-session-quiz")
 def teacher_session_quiz(session_id: str, user_id: int):
     conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
     cur.execute("SELECT s.quiz_id, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND COALESCE(s.deleted,0)=0", (session_id,))
-    row=cur.fetchone(); conn.close()
-    if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    row=cur.fetchone()
+    if not row: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    access = _student_can_access_session(conn, session_id, user_id)
+    conn.close()
+    if not access: raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
     if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
     if row["variant_code"]:
         payload = _get_teacher_variant(row["quiz_id"], _session_owner_id(session_id, user_id), row["variant_code"])
@@ -2343,9 +2452,16 @@ def teacher_submit(req: TeacherSubmitRequest):
     if not s: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
     now=int(time.time())
     if s["deleted"]: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
-    if not s["active"] or now>s["expires_at"]: conn.close(); raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
-    cur.execute("SELECT id FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
+    cur.execute("SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
     existing_participant = cur.fetchone()
+    # Timer 00:00 da avtomatik yuborilgan natija ham server tomonidan qabul qilinadi,
+    # lekin faqat o'quvchi sessiya tugashidan oldin kirgan bo'lsa. Bu kechikkan
+    # network request sabab natijaning yo'qolib qolishini oldini oladi.
+    if not s["active"] or now>s["expires_at"]:
+        started = int(existing_participant[1] or 0) if existing_participant else 0
+        finished = int(existing_participant[2] or 0) if existing_participant else 0
+        if not existing_participant or not started or started > int(s["expires_at"] or 0) or finished:
+            conn.close(); raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
     values = (req.first_name[:100], req.username[:100], req.score, req.total, req.percent, now, now)
     if existing_participant:
         cur.execute("UPDATE teacher_participants SET first_name=?, username=?, score=?, total=?, percent=?, finished_at=? WHERE id=?", (*values[:5], values[6], existing_participant[0]))
@@ -2362,10 +2478,12 @@ def teacher_session_results(session_id: str, user_id: int):
         cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-        cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
-        return dict(s), rows
-    s, rows=teacher_db_read(_read)
-    return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"]}, "participants":[dict(r) for r in rows]}
+        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
+        active_students = sum(1 for r in rows if int(r["started_at"] or 0) > 0 and int(r["finished_at"] or 0) == 0)
+        completed_students = sum(1 for r in rows if int(r["finished_at"] or 0) > 0)
+        return dict(s), rows, active_students, completed_students
+    s, rows, active_students, completed_students=teacher_db_read(_read)
+    return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"]}, "active_students":active_students, "completed_students":completed_students, "participants":[dict(r) for r in rows]}
 
 def _teacher_export_rows(session_id, owner_id):
     require_teacher(owner_id)
