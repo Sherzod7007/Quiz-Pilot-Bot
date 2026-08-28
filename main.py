@@ -320,7 +320,8 @@ def init_db():
         duration_minutes INTEGER DEFAULT 30,
         created_at INTEGER,
         expires_at INTEGER,
-        active INTEGER DEFAULT 1)""")
+        active INTEGER DEFAULT 1,
+        deleted INTEGER DEFAULT 0)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -382,6 +383,7 @@ def init_db():
         "teacher_sessions": {
             "group_id": "TEXT DEFAULT ''",
             "variant_code": "TEXT DEFAULT ''",
+            "deleted": "INTEGER DEFAULT 0",
         },
         "teacher_participants": {
             "first_name": "TEXT DEFAULT ''",
@@ -440,7 +442,7 @@ def init_db():
     for table_name, updates in {
         "teacher_groups": [("description", "''"), ("active", "1")],
         "teacher_assignments": [("variant_code", "''"), ("title", "''"), ("due_at", "0"), ("active", "1")],
-        "teacher_sessions": [("group_id", "''"), ("variant_code", "'" + "'" + "'")],
+        "teacher_sessions": [("group_id", "''"), ("variant_code", "'" + "'" + "'"), ("deleted", "0")],
     }.items():
         for col, value in updates:
             try:
@@ -1791,6 +1793,7 @@ def _ensure_teacher_schema(conn):
             "active": "INTEGER",
             "group_id": "TEXT",
             "variant_code": "TEXT",
+            "deleted": "INTEGER",
         },
         "teacher_participants": {
             "id": "INTEGER",
@@ -1831,7 +1834,7 @@ def _ensure_teacher_schema(conn):
             id TEXT PRIMARY KEY, owner_id INTEGER, teacher_id INTEGER, quiz_id TEXT, code TEXT UNIQUE,
             title TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 30, created_at INTEGER,
             expires_at INTEGER, active INTEGER DEFAULT 1,
-            group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '')""",
+            group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '', deleted INTEGER DEFAULT 0)""",
         "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, user_id INTEGER,
             first_name TEXT, username TEXT, score INTEGER DEFAULT 0,
@@ -1890,7 +1893,7 @@ def _ensure_teacher_schema(conn):
     null_defaults = {
         "teacher_groups": {"description": "", "active": 1},
         "teacher_assignments": {"variant_code": "", "title": "", "due_at": 0, "active": 1},
-        "teacher_sessions": {"group_id": "", "variant_code": "", "active": 1},
+        "teacher_sessions": {"group_id": "", "variant_code": "", "active": 1, "deleted": 0},
         "teacher_participants": {"first_name": "", "username": "", "score": 0, "total": 0, "percent": 0, "started_at": 0, "finished_at": 0},
     }
     for table, values in null_defaults.items():
@@ -2132,13 +2135,11 @@ class TeacherSessionCreateRequest(BaseModel):
 
 @app.post("/api/teacher/create-session")
 def teacher_create_session(req: TeacherSessionCreateRequest):
-    """Teacher guruh sessiyasini yaratish.
+    """Create a fresh teacher group session safely on both new and legacy SQLite schemas.
 
-    Bu endpoint avvalgi versiyadagi to'g'ridan-to'g'ri SQLite SELECT/INSERT
-    aralashmasini bitta teacher_db_write oqimiga yig'adi. Shu sabab eski
-    teacher_* sxemasi migrationdan o'tgach ham guruh testi barqaror yaratiladi.
-    Oddiy testda variant bo'sh qoladi; A/B/C/D tanlansa saqlangan variant
-    ishlatiladi.
+    The endpoint deliberately does not reuse an old session. Every click creates a new
+    session id and an independent 8-character access code. Legacy NOT NULL/extra columns
+    are populated dynamically, and rare UNIQUE collisions are retried automatically.
     """
     require_teacher(req.user_id)
     duration = max(5, min(int(req.duration_minutes or 30), 180))
@@ -2146,21 +2147,18 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
     if variant_code and variant_code not in TEACHER_VARIANT_CODES:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
 
-    # Quiz va savollar haqiqatan ham shu teacherga tegishli ekanini oldindan
-    # tekshiramiz. Variant tanlangan bo'lsa, variant ham shu yerda tayyorlanadi.
-    quiz_row, _items = _load_quiz_items(req.quiz_id, req.user_id)
-    if variant_code:
-        _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
-
     group_id = (req.group_id or "").strip()
     if not group_id:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "select_group"))
 
+    # Validate quiz and group before opening the write transaction.
+    quiz_row, _items = _load_quiz_items(req.quiz_id, req.user_id)
+    if variant_code:
+        _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
+
     def _write(conn):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-
-        # Guruh teacherning o'ziga tegishli va faol bo'lishi shart.
         cur.execute(
             "SELECT id, name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",
             (group_id, req.user_id),
@@ -2169,122 +2167,92 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         if not group:
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
 
-        sid = f"ts_{uuid.uuid4().hex[:10]}"
+        # Read the actual live schema every time. Railway may contain a database
+        # created by an older Teacher version with extra required columns.
+        rows = cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()
+        column_info = {row[1]: row for row in rows}
+        required_core = {"id", "owner_id", "quiz_id", "code", "duration_minutes", "created_at", "expires_at", "active", "group_id", "variant_code"}
+        missing_core = sorted(required_core - set(column_info))
+        if missing_core:
+            raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
+
+        session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
         now = int(time.time())
         expires = now + duration * 60
 
-        # Juda kam ehtimol bo'lsa ham kod to'qnashsa qayta generatsiya qilamiz.
-        code = ""
-        for _ in range(5):
-            candidate = uuid.uuid4().hex[:8].upper()
-            cur.execute("SELECT 1 FROM teacher_sessions WHERE code=? LIMIT 1", (candidate,))
-            if not cur.fetchone():
-                code = candidate
-                break
-        if not code:
-            raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
+        # A new id/code is generated for every session. We retry the INSERT itself,
+        # not just the code lookup, because legacy databases may have additional
+        # UNIQUE constraints unknown to this version.
+        last_integrity = None
+        for _attempt in range(12):
+            sid = f"ts_{uuid.uuid4().hex[:12]}"
+            code = uuid.uuid4().hex[:8].upper()
+            values_by_column = {
+                "id": sid,
+                "session_id": sid,
+                "owner_id": req.user_id,
+                "teacher_id": req.user_id,
+                "teacher_user_id": req.user_id,
+                "user_id": req.user_id,
+                "quiz_id": req.quiz_id,
+                "code": code,
+                "join_code": code,
+                "title": session_title,
+                "name": session_title,
+                "duration_minutes": duration,
+                "duration": duration,
+                "created_at": now,
+                "started_at": now,
+                "expires_at": expires,
+                "active": 1,
+                "group_id": group_id,
+                "group_name": group["name"],
+                "variant_code": variant_code,
+                "deleted": 0,
+            }
 
-        # Railway'dagi eski Teacher bazasida teacher_sessions jadvalida
-        # owner_id bilan birga NOT NULL teacher_id ham mavjud bo'lishi mumkin.
-        # V4 faqat owner_id yozgani uchun aynan shu holatda SQLite:
-        # "NOT NULL constraint failed: teacher_sessions.teacher_id" beradi.
-        # Yangi va eski sxemalarni bir xil ishlatish uchun mavjud ustunlarni
-        # tekshirib, kerak bo'lsa ikkala identifikatorni ham birga yozamiz.
-        session_columns = {r[1] for r in cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
+            insert_columns, insert_values = [], []
+            for name, row in column_info.items():
+                if name in values_by_column:
+                    insert_columns.append(name)
+                    insert_values.append(values_by_column[name])
+                    continue
+                not_null = bool(row[3])
+                default_value = row[4]
+                is_pk = bool(row[5])
+                if not_null and not is_pk and default_value is None:
+                    declared_type = str(row[2] or "").upper()
+                    # Give unknown legacy required columns a value that is also
+                    # unlikely to collide if the column happens to be UNIQUE.
+                    if "INT" in declared_type or "REAL" in declared_type or "NUM" in declared_type:
+                        fallback = now + random.randint(1, 999999)
+                    else:
+                        fallback = f"{sid}_{name}"
+                    insert_columns.append(name)
+                    insert_values.append(fallback)
+                    logging.warning("Teacher session legacy required column filled: %s=%r", name, fallback)
 
-        # Railway'dagi turli avlod Teacher bazalarida teacher_sessions sxemasi
-        # farq qilishi mumkin. Ayniqsa eski bazalarda teacher_id yoki title
-        # NOT NULL bo'lishi mumkin. Mavjud ustunlarni tekshirib, barcha majburiy
-        # ustunlarni ham to'ldiramiz — shu bilan guruh testi va topshiriq testi
-        # bir xil barqaror endpointdan foydalanadi.
-        session_columns = cur.execute(
-            "PRAGMA table_info(teacher_sessions)"
-        ).fetchall()
-        column_info = {row[1]: row for row in session_columns}
-
-        session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
-        # Asosiy va eski versiyalardagi mumkin bo'lgan ustunlar uchun qiymatlar.
-        # Railway'dagi eski bazalarda teacher_sessions sxemasi bir necha marta
-        # o'zgargani sabab INSERTni faqat yangi ustunlar bilan cheklash 500 xatoga
-        # olib kelishi mumkin. Shu yerda nomi ma'lum bo'lgan eski ustunlarni ham
-        # to'ldiramiz.
-        values_by_column = {
-            "id": sid,
-            "session_id": sid,
-            "owner_id": req.user_id,
-            "teacher_id": req.user_id,
-            "teacher_user_id": req.user_id,
-            "user_id": req.user_id,
-            "quiz_id": req.quiz_id,
-            "code": code,
-            "join_code": code,
-            "title": session_title,
-            "name": session_title,
-            "duration_minutes": duration,
-            "duration": duration,
-            "created_at": now,
-            "started_at": now,
-            "expires_at": expires,
-            "active": 1,
-            "group_id": group_id,
-            "group_name": group["name"],
-            "variant_code": variant_code,
-        }
-
-        insert_columns = []
-        insert_values = []
-        for name, row in column_info.items():
-            # PK/autoincrement ustunlari qiymat talab qilmasa o'tkazib yuboriladi.
-            if name in values_by_column:
-                insert_columns.append(name)
-                insert_values.append(values_by_column[name])
+            placeholders = ", ".join("?" for _ in insert_columns)
+            try:
+                cur.execute(
+                    f"INSERT INTO teacher_sessions ({', '.join(insert_columns)}) VALUES ({placeholders})",
+                    tuple(insert_values),
+                )
+                return {
+                    "session_id": sid,
+                    "code": code,
+                    "expires_at": expires,
+                    "quiz_title": quiz_row["title"],
+                    "variant_code": variant_code,
+                    "group_id": group_id,
+                    "group_name": group["name"],
+                }
+            except sqlite3.IntegrityError as e:
+                last_integrity = e
+                logging.warning("Teacher session INSERT collision/constraint (attempt %s): %s", _attempt + 1, e)
                 continue
 
-            # Eski sxemada bizga noma'lum NOT NULL ustun uchrasa ham sessiyani
-            # bekorga 500 bilan to'xtatmaymiz. Oddiy tipiga mos xavfsiz bo'sh
-            # qiymat beramiz; bu ustun yangi Teacher oqimida ishlatilmaydi.
-            not_null = bool(row[3])
-            default_value = row[4]
-            is_pk = bool(row[5])
-            if not_null and not is_pk and default_value is None:
-                declared_type = str(row[2] or "").upper()
-                if "INT" in declared_type or "REAL" in declared_type or "NUM" in declared_type:
-                    fallback = 0
-                else:
-                    fallback = ""
-                insert_columns.append(name)
-                insert_values.append(fallback)
-                logging.warning(
-                    "Teacher session legacy required column filled with fallback: %s=%r",
-                    name, fallback,
-                )
-
-        # Bizga kerak bo'lgan asosiy ustunlar jadvalda mavjudligini kafolatlaymiz.
-        required_core = (
-            "id", "owner_id", "quiz_id", "code", "duration_minutes",
-            "created_at", "expires_at", "active", "group_id", "variant_code"
-        )
-        missing_core = [c for c in required_core if c not in column_info]
-        if missing_core:
-            raise HTTPException(
-                status_code=500,
-                detail=teacher_text(req.user_id, "server_error"),
-            )
-
-        placeholders = ", ".join("?" for _ in insert_columns)
-        cur.execute(
-            f"INSERT INTO teacher_sessions ({', '.join(insert_columns)}) VALUES ({placeholders})",
-            tuple(insert_values),
-        )
-        return {
-            "session_id": sid,
-            "code": code,
-            "expires_at": expires,
-            "quiz_title": quiz_row["title"],
-            "variant_code": variant_code,
-            "group_id": group_id,
-            "group_name": group["name"],
-        }
+        raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error")) from last_integrity
 
     data = teacher_db_write(_write)
     return {"status": "ok", **data}
@@ -2294,24 +2262,43 @@ def teacher_sessions(user_id: int):
     require_teacher(user_id)
     def _read(conn):
         conn.row_factory = sqlite3.Row
-        cur=conn.cursor()
+        cur = conn.cursor()
         cur.execute("""SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,
                              COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code
                       FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
-                      WHERE s.owner_id=? ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
+                      WHERE s.owner_id=? AND COALESCE(s.deleted,0)=0
+                      ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
         return cur.fetchall()
-    rows=teacher_db_read(_read); now=int(time.time())
-    result=[]
+    rows = teacher_db_read(_read)
+    now = int(time.time())
+    result = []
     for r in rows:
-        active=bool(r["active"] and r["expires_at"]>=now)
+        active = bool(r["active"] and r["expires_at"] and r["expires_at"] >= now)
         result.append({**dict(r), "active": active})
-    return {"status":"ok", "sessions":result}
+    return {"status": "ok", "sessions": result}
+
+
+@app.delete("/api/teacher/sessions/{session_id}")
+def teacher_delete_session(session_id: str, user_id: int):
+    require_teacher(user_id)
+    def _write(conn):
+        cur = conn.cursor()
+        # Soft-delete: the teacher no longer sees the session, but participant
+        # records remain safe for database integrity/audit purposes.
+        cur.execute(
+            "UPDATE teacher_sessions SET active=0, deleted=1 WHERE id=? AND owner_id=?",
+            (session_id, user_id),
+        )
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    teacher_db_write(_write)
+    return {"status": "ok"}
 
 @app.get("/api/teacher-session")
 def teacher_session_info(code: str, user_id: int):
     def _read(conn):
         conn.row_factory=sqlite3.Row; cur=conn.cursor()
-        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=?", (code.upper(),))
+        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=? AND COALESCE(s.deleted,0)=0", (code.upper(),))
         return cur.fetchone()
     row=teacher_db_read(_read)
     if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
@@ -2328,7 +2315,7 @@ def _session_owner_id(session_id: str, user_id: int):
 @app.get("/api/teacher-session-quiz")
 def teacher_session_quiz(session_id: str, user_id: int):
     conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=?", (session_id,))
+    cur.execute("SELECT s.quiz_id, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND COALESCE(s.deleted,0)=0", (session_id,))
     row=cur.fetchone(); conn.close()
     if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
@@ -2352,9 +2339,10 @@ class TeacherSubmitRequest(BaseModel):
 @app.post("/api/teacher-submit")
 def teacher_submit(req: TeacherSubmitRequest):
     conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT expires_at, active FROM teacher_sessions WHERE id=?", (req.session_id,)); s=cur.fetchone()
+    cur.execute("SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id=?", (req.session_id,)); s=cur.fetchone()
     if not s: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
     now=int(time.time())
+    if s["deleted"]: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
     if not s["active"] or now>s["expires_at"]: conn.close(); raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
     cur.execute("SELECT id FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
     existing_participant = cur.fetchone()
@@ -2371,7 +2359,7 @@ def teacher_session_results(session_id: str, user_id: int):
     require_teacher(user_id)
     def _read(conn):
         conn.row_factory=sqlite3.Row; cur=conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=?", (session_id,user_id)); s=cur.fetchone()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
         cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
@@ -2382,7 +2370,7 @@ def teacher_session_results(session_id: str, user_id: int):
 def _teacher_export_rows(session_id, owner_id):
     require_teacher(owner_id)
     conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=?", (session_id,owner_id)); s=cur.fetchone()
+    cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,owner_id)); s=cur.fetchone()
     cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC", (session_id,)); rows=cur.fetchall(); conn.close()
     if not s: raise HTTPException(status_code=404, detail=teacher_text(owner_id, "session_not_found"))
     return s, rows
