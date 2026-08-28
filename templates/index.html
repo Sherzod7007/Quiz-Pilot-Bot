@@ -416,7 +416,20 @@
         .student-joined-groups { margin-top:12px; display:flex; flex-direction:column; gap:6px; max-height:220px; overflow:auto; }
         .student-group-item { padding:9px 10px; border-radius:9px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.10); font-size:14px; display:flex; justify-content:space-between; gap:8px; line-height:1.3; }
         .student-group-code { font-weight:800; letter-spacing:1.5px; font-size:14px; }
-        @media (max-width:520px) { .group-join-row { flex-direction:column; } .group-join-row .submit-btn { width:100%; } }
+        .student-active-sessions { margin-top:16px; padding-top:12px; border-top:1px solid rgba(255,255,255,.10); display:flex; flex-direction:column; gap:8px; }
+        .student-session-card { padding:12px; border-radius:10px; background:rgba(255,255,255,.055); border:1px solid rgba(0,210,255,.18); box-shadow:inset 0 1px 0 rgba(255,255,255,.10); }
+        .student-session-title { font-size:16px; font-weight:800; color:#fff; margin-bottom:7px; }
+        .student-session-meta { color:var(--text-hint); font-size:13px; line-height:1.45; margin-bottom:9px; }
+        .student-session-start { width:100%; margin:0; padding:11px 12px; font-size:14px; }
+        .student-session-empty { color:var(--text-hint); font-size:13px; line-height:1.45; }
+        .game-session-bar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:-8px 0 18px; padding:10px 12px; border:1px solid rgba(0,210,255,.22); border-radius:10px; background:rgba(0,0,0,.22); }
+        .game-session-meta { min-width:0; color:var(--text-hint); font-size:13px; line-height:1.35; }
+        .game-session-meta strong { color:#fff; font-size:14px; }
+        .game-timer { flex:0 0 auto; color:#72f297; font-size:18px; font-weight:900; letter-spacing:.5px; }
+        .game-timer.warning { color:#ffd24d; }
+        .game-timer.danger { color:#ff7777; animation:timerPulse 1s infinite; }
+        @keyframes timerPulse { 50% { opacity:.55; } }
+        @media (max-width:520px) { .group-join-row { flex-direction:column; } .group-join-row .submit-btn { width:100%; } .game-session-bar { align-items:flex-start; } .game-timer { font-size:17px; } }
 </style>
 </head>
 <body>
@@ -639,6 +652,10 @@
             <span id="game-title">Test</span>
             <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
         </div>
+        <div id="game-session-bar" class="game-session-bar" style="display:none;">
+            <div id="game-session-meta" class="game-session-meta"></div>
+            <div id="game-timer" class="game-timer">30:00</div>
+        </div>
         <div id="game-progress" style="font-size: 14px; color: var(--text-hint); margin-bottom: 10px;">Savol: 1/10</div>
         <div class="q-text" id="question-text">Savol yuklanmoqda...</div>
         <div class="options-list" id="options-container"></div>
@@ -675,11 +692,17 @@
         let wrongAnswersCount = 0;
         let selectedTariffKey = "";
         let currentTeacherSessionId = null;
+        let currentTeacherSessionExpiresAt = 0;
+        let teacherSessionTimer = null;
+        let quizFinished = false;
+        let studentGroupPollTimer = null;
+        let studentGroupKnownSessions = new Set();
+        let studentGroupInitialLoad = true;
 
         const langPack = {
             uz: {
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_teacher: "O‘qituvchi", teacher_active: "FAOL", teacher_center_title: "👨‍🏫 Professional O‘qituvchi Markazi", teacher_center_desc: "Guruhlar, topshiriqlar, test sessiyalari, 4 xil variant, natijalar va eksport — barchasi bir joyda.", teacher_groups: "Guruhlar", teacher_groups_desc: "Sinf va guruhlarni boshqarish", teacher_assignments: "Topshiriqlar", teacher_assignments_desc: "Testni guruhga biriktirish", teacher_variants: "4 ta variant", teacher_variants_desc: "A, B, C, D variantlar", teacher_results_title: "Natijalar", teacher_results_desc: "Ball, reyting va statistika", teacher_session_title: "🚀 Guruh testini boshlash", teacher_session_note: "Sessiya yaratilgach havolani o‘quvchilarga yuboring. Natijalar avtomatik yig‘iladi.", teacher_variant_title: "🔄 Test variantlari", teacher_variant_note: "Bitta testdan A, B, C, D ko‘rinishidagi 4 ta variant va mos test kalitlari.", teacher_sessions_title: "📚 Faol va oldingi sessiyalar", teacher_group_name_required: "Guruh nomini kiriting.", teacher_group_created: "Guruh yaratildi.", teacher_assignment_created: "Topshiriq guruhga biriktirildi.", teacher_variant_label: "Variant", teacher_student: "O‘quvchi", teacher_score: "Ball", teacher_refresh: "Yangilash", teacher_loading: "Yuklanmoqda...", nav_settings: "Sozlamalar", nav_premium: "Premium",
-                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar", student_group_join_title: "Guruhga qo‘shilish", student_group_join_desc: "O‘qituvchingiz bergan 6 belgili guruh kodini kiriting.", student_group_code_placeholder: "Masalan: A7K29P", student_group_join_btn: "➕ Guruhga qo‘shilish", student_group_code_required: "Guruh kodini kiriting.", student_group_not_found: "Bunday faol guruh topilmadi. Kodni tekshiring.", student_group_joined: "Siz guruhga muvaffaqiyatli qo‘shildingiz.", student_group_already: "Siz bu guruhga allaqachon qo‘shilgansiz.", student_my_groups: "👥 Mening guruhlarim", student_no_groups: "Hali hech qanday guruhga qo‘shilmagansiz.",
+                tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar", student_group_join_title: "Guruhga qo‘shilish", student_group_join_desc: "O‘qituvchingiz bergan 6 belgili guruh kodini kiriting.", student_group_code_placeholder: "Masalan: A7K29P", student_group_join_btn: "➕ Guruhga qo‘shilish", student_group_code_required: "Guruh kodini kiriting.", student_group_not_found: "Bunday faol guruh topilmadi. Kodni tekshiring.", student_group_joined: "Siz guruhga muvaffaqiyatli qo‘shildingiz.", student_group_already: "Siz bu guruhga allaqachon qo‘shilgansiz.", student_my_groups: "👥 Mening guruhlarim", student_no_groups: "Hali hech qanday guruhga qo‘shilmagansiz.", student_active_tests: "🚀 Faol testlar", student_no_active_tests: "Hozircha faol test yo‘q. O‘qituvchi testni boshlaganda shu yerda ko‘rinadi.", student_test_start: "🚀 Testni boshlash", student_test_info: "📝 {total} ta savol · ⏱️ {duration} daqiqa", student_test_remaining: "Qolgan vaqt: {time}", student_new_test: "🔔 Yangi test boshlandi", student_session_expired: "⏰ Bu test sessiyasi tugagan.", student_session_access: "Bu guruh testiga kirish uchun avval guruhga qo‘shiling.", student_active_students: "Faol o‘quvchilar", student_completed_students: "Yakunlagan", student_time_up: "⏰ Vaqt tugadi.",
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
@@ -710,7 +733,7 @@
             },
             ru: {
                 nav_create: "Создать", nav_library: "Библиотека", nav_teacher: "Учитель", teacher_active: "АКТИВЕН", teacher_center_title: "👨‍🏫 Профессиональный центр учителя", teacher_center_desc: "Группы, задания, тест-сессии, 4 варианта, результаты и экспорт — всё в одном месте.", teacher_groups: "Группы", teacher_groups_desc: "Управление классами и группами", teacher_assignments: "Задания", teacher_assignments_desc: "Назначение теста группе", teacher_variants: "4 варианта", teacher_variants_desc: "Варианты A, B, C, D", teacher_results_title: "Результаты", teacher_results_desc: "Баллы, рейтинг и статистика", teacher_session_title: "🚀 Запустить групповой тест", teacher_session_note: "После создания сессии отправьте ссылку ученикам. Результаты собираются автоматически.", teacher_variant_title: "🔄 Варианты теста", teacher_variant_note: "Один тест в 4 вариантах A, B, C, D с соответствующими ключами.", teacher_sessions_title: "📚 Активные и прошлые сессии", teacher_group_name_required: "Введите название группы.", teacher_group_created: "Группа создана.", teacher_assignment_created: "Задание назначено группе.", teacher_variant_label: "Вариант", teacher_student: "Ученик", teacher_score: "Баллы", teacher_refresh: "Обновить", teacher_loading: "Загрузка...", nav_settings: "Настройки", nav_premium: "Премиум",
-                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.",
+                tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.", student_active_tests: "🚀 Активные тесты", student_no_active_tests: "Активных тестов пока нет. Когда учитель запустит тест, он появится здесь.", student_test_start: "🚀 Начать тест", student_test_info: "📝 {total} вопросов · ⏱️ {duration} мин.", student_test_remaining: "Осталось: {time}", student_new_test: "🔔 Новый тест начался", student_session_expired: "⏰ Эта сессия теста завершена.", student_session_access: "Чтобы войти в групповой тест, сначала присоединитесь к группе.", student_active_students: "Активные ученики", student_completed_students: "Завершили", student_time_up: "⏰ Время вышло.",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
@@ -740,7 +763,7 @@
             },
             en: {
                 nav_create: "Create", nav_library: "Library", nav_teacher: "Teacher", teacher_active: "ACTIVE", teacher_center_title: "👨‍🏫 Professional Teacher Center", teacher_center_desc: "Groups, assignments, test sessions, 4 variants, results and exports — all in one place.", teacher_groups: "Groups", teacher_groups_desc: "Manage classes and groups", teacher_assignments: "Assignments", teacher_assignments_desc: "Assign a quiz to a group", teacher_variants: "4 variants", teacher_variants_desc: "A, B, C, D variants", teacher_results_title: "Results", teacher_results_desc: "Scores, ranking and statistics", teacher_session_title: "🚀 Start group quiz", teacher_session_note: "After creating a session, send the link to students. Results are collected automatically.", teacher_variant_title: "🔄 Quiz variants", teacher_variant_note: "One quiz in 4 variants A, B, C, D with matching answer keys.", teacher_sessions_title: "📚 Active and previous sessions", teacher_group_name_required: "Enter a group name.", teacher_group_created: "Group created.", teacher_assignment_created: "Assignment was assigned to the group.", teacher_variant_label: "Variant", teacher_student: "Student", teacher_score: "Score", teacher_refresh: "Refresh", teacher_loading: "Loading...", nav_settings: "Settings", nav_premium: "Premium",
-                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.",
+                tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.", student_active_tests: "🚀 Active tests", student_no_active_tests: "No active tests yet. It will appear here when the teacher starts a test.", student_test_start: "🚀 Start test", student_test_info: "📝 {total} questions · ⏱️ {duration} min", student_test_remaining: "Time left: {time}", student_new_test: "🔔 New test started", student_session_expired: "⏰ This test session has ended.", student_session_access: "Join the group first to enter this group test.", student_active_students: "Active students", student_completed_students: "Completed", student_time_up: "⏰ Time is up.",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
@@ -1114,6 +1137,7 @@
         }
 
         function switchLibTab(tabName) {
+            if(tabName !== 'group_join') stopStudentGroupPolling();
             currentTab = tabName;
             setLibraryActiveButton(tabName);
             const panel=document.getElementById('group-join-panel');
@@ -1358,33 +1382,75 @@
             });
         }
 
+        function stopTeacherSessionTimer() {
+            if(teacherSessionTimer){ clearInterval(teacherSessionTimer); teacherSessionTimer=null; }
+        }
+        function formatRemainingTime(seconds) {
+            seconds=Math.max(0,Math.floor(Number(seconds)||0));
+            const h=Math.floor(seconds/3600), m=Math.floor((seconds%3600)/60), sec=seconds%60;
+            if(h>0) return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+            return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+        }
+        function updateTeacherSessionTimer() {
+            if(!currentTeacherSessionId || !currentTeacherSessionExpiresAt) return;
+            const left=Math.max(0, Math.floor(currentTeacherSessionExpiresAt - Date.now()/1000));
+            const timer=document.getElementById('game-timer');
+            if(timer){
+                timer.innerText=formatRemainingTime(left);
+                timer.classList.toggle('warning', left<=300 && left>60);
+                timer.classList.toggle('danger', left<=60);
+            }
+            if(left<=0 && !quizFinished){
+                finishQuiz(true);
+            }
+        }
+        function startTeacherSessionTimer(expiresAt, title, total) {
+            stopTeacherSessionTimer();
+            currentTeacherSessionExpiresAt=Number(expiresAt)||0;
+            const bar=document.getElementById('game-session-bar'), meta=document.getElementById('game-session-meta');
+            if(bar) bar.style.display='flex';
+            if(meta) meta.innerHTML=`<strong>${escapeHtml(title||'Guruh testi')}</strong><br>${escapeHtml(String(total||0))} ${currentLang==='ru'?'вопросов':currentLang==='en'?'questions':'ta savol'}`;
+            updateTeacherSessionTimer();
+            teacherSessionTimer=setInterval(updateTeacherSessionTimer,1000);
+        }
+        function resetGameSessionUi() {
+            stopTeacherSessionTimer();
+            currentTeacherSessionExpiresAt=0;
+            const bar=document.getElementById('game-session-bar'); if(bar) bar.style.display='none';
+        }
+
         async function playQuiz(quizId, isPublic=false, sessionId=null) {
             try {
+                quizFinished=false;
                 let url;
+                let sessionStart=null;
                 if (sessionId) {
-                    // Guruh sessiyasida oddiy quiz-detail emas, sessiyaga bog'langan
-                    // endpoint ishlatiladi. Aks holda sessiya rejimi oddiy testdek
-                    // yuklanib, ayrim Railway versiyalarida ichki xato berishi mumkin.
+                    // Avval foydalanuvchining sessiyaga kirish huquqini va real
+                    // server vaqtiga asoslangan qolgan vaqtni tekshiramiz.
+                    sessionStart=await teacherFetchJson(`${BASE_URL}/api/teacher-session-start?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}`,{method:'POST'});
                     url = `${BASE_URL}/api/teacher-session-quiz?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&_t=${Date.now()}`;
                 } else if (isPublic) url = `${BASE_URL}/api/public-quiz-detail?quiz_id=${quizId}&user_id=${userId}&_t=${Date.now()}`;
                 else url = BASE_URL + '/api/quiz-detail?quiz_id=' + quizId + '&_t=' + Date.now();
                 const response = await fetch(url);
                 const data = await response.json();
-                if (!response.ok) {
-                    throw new Error(data?.detail || data?.message || langPack[currentLang].teacher_server_error);
-                }
+                if (!response.ok) throw new Error(data?.detail || data?.message || langPack[currentLang].teacher_server_error);
                 if (data && data.error_code === "public_limit") {
-                    showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium'));
-                    return;
+                    showAppAlert("🔒", langPack[currentLang].public_limit_over, () => switchScreen('premium')); return;
                 }
                 if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
                     currentQuizId = quizId;
                     currentQuizQuestions = data.quiz_json.quizzes;
                     currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
+                    currentTeacherSessionId=sessionId||null;
                     document.getElementById('game-screen').style.display = 'block';
+                    if(sessionId && sessionStart){
+                        startTeacherSessionTimer(sessionStart.expires_at, sessionStart.title, sessionStart.total);
+                    } else resetGameSessionUi();
                     showQuestion();
                 }
-            } catch (error) { showAppAlert("❌", "Yuklashda xatolik."); }
+            } catch (error) {
+                showAppAlert("❌", error?.message || langPack[currentLang].teacher_server_error);
+            }
         }
 
         function showQuestion() {
@@ -1438,7 +1504,10 @@
             currentQuestionIdx++; showQuestion();
         }
 
-        async function finishQuiz() {
+        async function finishQuiz(autoByTimer=false) {
+            if(quizFinished) return;
+            quizFinished=true;
+            stopTeacherSessionTimer();
             const total = currentQuizQuestions.length;
             const scorePercent = Math.round((correctAnswersCount / total) * 100);
             const resultSound = scorePercent >= 70 ? 'good' : 'bad';
@@ -1460,10 +1529,15 @@
                 }
             } catch (e) {}
             currentTeacherSessionId = null;
-            showAppAlert("🏁", `Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
+            currentTeacherSessionExpiresAt = 0;
+            const resultPrefix = autoByTimer ? `${langPack[currentLang].student_time_up}\n\n` : '';
+            showAppAlert("🏁", `${resultPrefix}Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
         }
 
         function closeGame() {
+            stopTeacherSessionTimer();
+            currentTeacherSessionExpiresAt=0;
+            const bar=document.getElementById('game-session-bar'); if(bar) bar.style.display='none';
             document.getElementById('game-screen').style.display = 'none';
             loadQuizzes();
         }
@@ -1604,18 +1678,68 @@
                     <div id="student-joined-groups" class="student-joined-groups"></div>
                 </div>`;
             applyLocalization();
-            loadStudentGroups();
+            startStudentGroupPolling();
         }
 
-        async function loadStudentGroups(){
+        function stopStudentGroupPolling(){
+            if(studentGroupPollTimer){ clearInterval(studentGroupPollTimer); studentGroupPollTimer=null; }
+        }
+        function fillLang(template, values){
+            return String(template||'').replace(/\{(\w+)\}/g,(_,k)=>String(values?.[k]??''));
+        }
+        async function loadStudentGroups(silent=false){
             const box=document.getElementById('student-joined-groups');
             if(!box) return;
             try{
-                const d=await fetch(`${BASE_URL}/api/teacher/my-groups?user_id=${userId}&_t=${Date.now()}`).then(async r=>{const x=await r.json();if(!r.ok)throw new Error(x.detail||'error');return x;});
-                const groups=d.groups||[];
-                box.innerHTML = `<div style="font-size:14px;font-weight:700;margin-bottom:6px;">${langPack[currentLang].student_my_groups}</div>` +
-                    (groups.length ? groups.map(g=>`<div class="student-group-item"><span>👥 ${escapeHtml(g.name)}</span><span class="student-group-code">${escapeHtml(g.join_code||'')}</span></div>`).join('') : `<div style="color:var(--text-hint);font-size:13px;">${langPack[currentLang].student_no_groups}</div>`);
-            }catch(e){ box.innerHTML=''; }
+                const [groupsRes,sessionsRes]=await Promise.all([
+                    fetch(`${BASE_URL}/api/teacher/my-groups?user_id=${userId}&_t=${Date.now()}`),
+                    fetch(`${BASE_URL}/api/teacher-group-sessions?user_id=${userId}&_t=${Date.now()}`)
+                ]);
+                const groupsData=await groupsRes.json(), sessionsData=await sessionsRes.json();
+                if(!groupsRes.ok) throw new Error(groupsData.detail||langPack[currentLang].teacher_server_error);
+                if(!sessionsRes.ok) throw new Error(sessionsData.detail||langPack[currentLang].teacher_server_error);
+                const groups=groupsData.groups||[], sessions=sessionsData.sessions||[];
+                const byGroup={}; sessions.forEach(s=>{(byGroup[s.group_id] ||= []).push(s);});
+                if(!silent){
+                    studentGroupKnownSessions=new Set(sessions.map(x=>x.id));
+                    studentGroupInitialLoad=false;
+                } else {
+                    const fresh=sessions.filter(x=>!studentGroupKnownSessions.has(x.id));
+                    if(!studentGroupInitialLoad && fresh.length){
+                        showAppAlert('🔔', `${langPack[currentLang].student_new_test}\n\n${fresh.map(x=>`👥 ${x.group_name} — ${x.title}`).join('\n')}`);
+                    }
+                    sessions.forEach(x=>studentGroupKnownSessions.add(x.id));
+                }
+                let html=`<div style="font-size:15px;font-weight:800;margin-bottom:7px;">${langPack[currentLang].student_my_groups}</div>`;
+                html += groups.length ? groups.map(g=>{
+                    const gs=byGroup[g.id]||[];
+                    let out=`<div class="student-group-item"><span>👥 ${escapeHtml(g.name)}</span><span class="student-group-code">${escapeHtml(g.join_code||'')}</span></div>`;
+                    if(gs.length){
+                        out+=`<div class="student-active-sessions"><div style="font-size:14px;font-weight:800;">${langPack[currentLang].student_active_tests}</div>`;
+                        out+=gs.map(sess=>{
+                            const info=fillLang(langPack[currentLang].student_test_info,{total:sess.total,duration:sess.duration_minutes});
+                            const left=Math.max(0,Math.floor(Number(sess.expires_at)-Date.now()/1000));
+                            return `<div class="student-session-card"><div class="student-session-title">📝 ${escapeHtml(sess.title||'Test')}</div><div class="student-session-meta">👥 ${escapeHtml(sess.group_name||g.name)}<br>${escapeHtml(info)}<br>⏳ ${escapeHtml(fillLang(langPack[currentLang].student_test_remaining,{time:formatRemainingTime(left)}))}</div><button class="submit-btn student-session-start" onclick="startStudentGroupSession('${encodeURIComponent(sess.session_id||sess.id)}','${encodeURIComponent(sess.quiz_id)}')">${langPack[currentLang].student_test_start}</button></div>`;
+                        }).join('');
+                        out+='</div>';
+                    }
+                    return `<div style="margin-bottom:8px;">${out}</div>`;
+                }).join('') : `<div class="student-group-item"><span style="color:var(--text-hint);">${langPack[currentLang].student_no_groups}</span></div>`;
+                if(!sessions.length && groups.length){ html+=`<div class="student-session-empty" style="margin-top:10px;">${langPack[currentLang].student_no_active_tests}</div>`; }
+                box.innerHTML=html;
+            }catch(e){ if(!silent) box.innerHTML=`<div class="student-session-empty">❌ ${escapeHtml(e.message||langPack[currentLang].teacher_server_error)}</div>`; }
+        }
+        async function startStudentGroupSession(sessionIdEncoded, quizIdEncoded){
+            const sessionId=decodeURIComponent(sessionIdEncoded||''), quizId=decodeURIComponent(quizIdEncoded||'');
+            if(!sessionId||!quizId) return;
+            currentTeacherSessionId=sessionId;
+            await playQuiz(quizId,false,sessionId);
+        }
+        async function startStudentGroupPolling(){
+            stopStudentGroupPolling();
+            studentGroupInitialLoad=true;
+            await loadStudentGroups(false);
+            studentGroupPollTimer=setInterval(()=>{ if(currentTab==='group_join') loadStudentGroups(true); },5000);
         }
         async function joinStudentGroup(){
             const input=document.getElementById('student-group-code');
@@ -1626,13 +1750,10 @@
             try{
                 const res=await fetch(`${BASE_URL}/api/teacher/groups/join`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,join_code:code,first_name:u.first_name,username:u.username})});
                 const data=await res.json();
-                if(!res.ok){
-                    if(res.status===404){ throw new Error(langPack[currentLang].student_group_not_found); }
-                    throw new Error(data.detail||langPack[currentLang].teacher_server_error);
-                }
+                if(!res.ok) throw new Error(res.status===404?langPack[currentLang].student_group_not_found:(data.detail||langPack[currentLang].teacher_server_error));
                 if(input) input.value='';
                 showAppAlert('✅', `${langPack[currentLang].student_group_joined}\n\n👥 ${data.group_name||''}`);
-                loadStudentGroups();
+                await loadStudentGroups(false);
             }catch(e){ showAppAlert('❌',e.message||langPack[currentLang].student_group_not_found); }
         }
 
@@ -1711,7 +1832,7 @@
                 if(!ss.length){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].teacher_no_student_results}</div>`;return;}
                 const sessionId=sel.value||ss[0].id;
                 const r=await teacherFetchJson(`${BASE_URL}/api/teacher-session-results?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}`);
-                let html=`<div class="teacher-chip-row"><span class="teacher-chip">🔑 ${escapeHtml(r.session.code)}</span><span class="teacher-chip">📝 ${escapeHtml(r.session.quiz_title)}</span><span class="teacher-chip">👨‍🎓 ${r.participants.length} ${langPack[currentLang].teacher_members}</span></div>`;
+                let html=`<div class="teacher-chip-row"><span class="teacher-chip">🔑 ${escapeHtml(r.session.code)}</span><span class="teacher-chip">📝 ${escapeHtml(r.session.quiz_title)}</span><span class="teacher-chip">👨‍🎓 ${r.participants.length} ${langPack[currentLang].teacher_members}</span><span class="teacher-chip">🟢 ${Number(r.active_students||0)} ${langPack[currentLang].student_active_students}</span><span class="teacher-chip">✅ ${Number(r.completed_students||0)} ${langPack[currentLang].student_completed_students}</span></div>`;
                 if(!r.participants.length) html+=`<div class="teacher-empty">${langPack[currentLang].teacher_no_student_results}</div>`;
                 else html+=`<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><tr><th style="text-align:left;padding:7px;">№</th><th style="text-align:left;padding:7px;">${langPack[currentLang].teacher_student}</th><th style="padding:7px;">${langPack[currentLang].teacher_score}</th><th style="padding:7px;">%</th></tr>${r.participants.map((p,i)=>`<tr><td style="padding:7px;">${i+1}</td><td style="padding:7px;">${escapeHtml(p.first_name||'-')}</td><td style="text-align:center;padding:7px;">${p.score}/${p.total}</td><td style="text-align:center;padding:7px;">${p.percent}%</td></tr>`).join('')}</table></div>`;
                 html+=`<div class="teacher-export-row"><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','xlsx')">${langPack[currentLang].teacher_excel}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','docx')">${langPack[currentLang].teacher_word}</button></div>`;
