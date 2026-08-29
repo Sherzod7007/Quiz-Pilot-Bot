@@ -1158,7 +1158,7 @@ CRITICAL RULES:
             try:
                 client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash",
+                    model="gemini-2.5-flash",
                     contents=extracted_text[:80000],
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
@@ -2025,6 +2025,7 @@ TEACHER_MESSAGES = {
         "db_busy": "Server ma’lumotlar bazasi band. Bir necha soniyadan so‘ng qayta urinib ko‘ring.",
         "quiz_not_found": "Test topilmadi.",
         "session_not_found": "Sessiya topilmadi.",
+        "session_already_completed": "Bu testni siz allaqachon yakunlagansiz. Qayta kirish mumkin emas.",
         "test_first": "Avval test yarating.",
         "copy_link": "Havolani nusxalash",
     },
@@ -2059,6 +2060,7 @@ TEACHER_MESSAGES = {
         "db_busy": "База данных сервера занята. Повторите через несколько секунд.",
         "quiz_not_found": "Тест не найден.",
         "session_not_found": "Сессия не найдена.",
+        "session_already_completed": "Вы уже завершили этот тест. Повторный вход недоступен.",
         "test_first": "Сначала создайте тест.",
         "copy_link": "Копировать ссылку",
     },
@@ -2093,6 +2095,7 @@ TEACHER_MESSAGES = {
         "db_busy": "The server database is busy. Please try again in a few seconds.",
         "quiz_not_found": "Quiz not found.",
         "session_not_found": "Session not found.",
+        "session_already_completed": "You have already completed this test. Re-entry is not allowed.",
         "test_first": "Create a quiz first.",
         "copy_link": "Copy link",
     },
@@ -2333,11 +2336,17 @@ def teacher_group_sessions(user_id: int):
         cur.execute("""
             SELECT DISTINCT s.id, s.code, s.quiz_id, q.title, q.total,
                    s.duration_minutes, s.created_at, s.expires_at, s.group_id,
-                   g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code
+                   g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code,
+                   COALESCE(p.finished_at,0) AS finished_at,
+                   COALESCE(p.started_at,0) AS started_at,
+                   COALESCE(p.score,0) AS student_score,
+                   COALESCE(p.total,q.total) AS student_total,
+                   COALESCE(p.percent,0) AS student_percent
             FROM teacher_group_members m
             JOIN teacher_groups g ON g.id=m.group_id AND g.active=1
             JOIN teacher_sessions s ON s.group_id=g.id
             JOIN quizzes q ON q.id=s.quiz_id
+            LEFT JOIN teacher_participants p ON p.session_id=s.id AND p.user_id=m.user_id
             WHERE m.user_id=? AND s.active=1 AND COALESCE(s.deleted,0)=0
               AND s.expires_at>?
             ORDER BY s.created_at DESC
@@ -2395,15 +2404,21 @@ def teacher_session_start(session_id: str, user_id: int):
         first_name = "Telegram User"
         username = ""
         existing = cur.execute(
-            "SELECT id FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1",
+            "SELECT id, started_at, finished_at, score, total, percent FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1",
             (session_id, user_id),
         ).fetchone()
         if existing:
+            # A completed group test is permanently locked for this student.
+            # Never reset finished_at/score by opening the same session again.
+            if int(existing[2] or 0) > 0:
+                raise HTTPException(status_code=409, detail=teacher_text(user_id, "session_already_completed"))
+            # If the student simply reopens an unfinished test, preserve the
+            # original start time so the server-side session timer cannot reset.
             cur.execute("""
                 UPDATE teacher_participants
-                SET first_name=?, username=?, started_at=?, finished_at=0, score=0, total=?, percent=0
+                SET first_name=?, username=?, total=?
                 WHERE id=?
-            """, (first_name, username, now, s["total"], existing[0]))
+            """, (first_name, username, s["total"], existing[0]))
         else:
             cur.execute("""
                 INSERT INTO teacher_participants
@@ -2464,6 +2479,10 @@ def teacher_submit(req: TeacherSubmitRequest):
             conn.close(); raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
     values = (req.first_name[:100], req.username[:100], req.score, req.total, req.percent, now, now)
     if existing_participant:
+        # Once a student has submitted a result, the session is locked for that
+        # student. A duplicate/retry must never overwrite the completed result.
+        if int(existing_participant[2] or 0) > 0:
+            conn.close(); raise HTTPException(status_code=409, detail=teacher_text(req.user_id, "session_already_completed"))
         cur.execute("UPDATE teacher_participants SET first_name=?, username=?, score=?, total=?, percent=?, finished_at=? WHERE id=?", (*values[:5], values[6], existing_participant[0]))
     else:
         cur.execute("INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?)", (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
