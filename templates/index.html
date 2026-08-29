@@ -1582,7 +1582,7 @@
                 if(data.status==='ok') {
                     const link=`${BASE_URL}/?session=${data.code}`;
                     try { await navigator.clipboard.writeText(link); } catch(e) {}
-                    showAppAlert('🚀', `${langPack[currentLang].teacher_created}\n\n${link}`);
+                    showAppAlert('🚀', langPack[currentLang].teacher_created);
                     loadTeacherSessions();
                 } else showAppAlert('❌', data.detail || data.message || 'Error');
             } catch(e){ showAppAlert('❌', langPack[currentLang].alert_system_err); }
@@ -1615,7 +1615,7 @@
                 let text=`${data.session.quiz_title}\n\n`;
                 if(!data.participants.length) text+=langPack[currentLang].teacher_no_results;
                 data.participants.forEach((p,i)=>{text+=`${i+1}. ${p.first_name||'-'} — ${p.score}/${p.total} (${p.percent}%)\n`;});
-                text+=`\nExcel: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=xlsx\nPDF: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=pdf\nWord: ${BASE_URL}/api/teacher-export?session_id=${sessionId}&user_id=${userId}&format=docx`;
+                
                 showAppAlert('📊',text);
             }catch(e){showAppAlert('❌',langPack[currentLang].alert_system_err);}
         }
@@ -1870,7 +1870,7 @@
                 const data=await teacherFetchJson(`${BASE_URL}/api/teacher/create-session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:q.value,group_id:g.value,duration_minutes:Number(d?.value||30),variant_code:v?.value||''})});
                 const link=`${BASE_URL}/?session=${data.code}`;
                 try{await navigator.clipboard.writeText(link)}catch(e){}
-                showAppAlert('🚀',`${langPack[currentLang].teacher_created}\n\n${link}`);
+                showAppAlert('🚀',langPack[currentLang].teacher_created);
                 await loadTeacherResultsPanel();
             }catch(e){showAppAlert('❌',e.message||langPack[currentLang].teacher_server_error);}
         }
