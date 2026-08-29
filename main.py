@@ -321,7 +321,9 @@ def init_db():
         created_at INTEGER,
         expires_at INTEGER,
         active INTEGER DEFAULT 1,
-        deleted INTEGER DEFAULT 0)""")
+        deleted INTEGER DEFAULT 0,
+        source_type TEXT DEFAULT 'group_test',
+        assignment_id TEXT DEFAULT '')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -372,6 +374,7 @@ def init_db():
         variant_code TEXT DEFAULT '',
         title TEXT DEFAULT '',
         due_at INTEGER DEFAULT 0,
+        duration_minutes INTEGER DEFAULT 30,
         created_at INTEGER NOT NULL,
         active INTEGER DEFAULT 1)""")
 
@@ -384,6 +387,8 @@ def init_db():
             "group_id": "TEXT DEFAULT ''",
             "variant_code": "TEXT DEFAULT ''",
             "deleted": "INTEGER DEFAULT 0",
+            "source_type": "TEXT DEFAULT 'group_test'",
+            "assignment_id": "TEXT DEFAULT ''",
         },
         "teacher_participants": {
             "first_name": "TEXT DEFAULT ''",
@@ -421,6 +426,7 @@ def init_db():
             "variant_code": "TEXT DEFAULT ''",
             "title": "TEXT DEFAULT ''",
             "due_at": "INTEGER DEFAULT 0",
+            "duration_minutes": "INTEGER DEFAULT 30",
             "created_at": "INTEGER DEFAULT 0",
             "active": "INTEGER DEFAULT 1",
         },
@@ -441,8 +447,8 @@ def init_db():
     # Eski yozuvlardagi NULL qiymatlar Teacher endpointlari uchun xavfsiz qiymatga o‘tkaziladi.
     for table_name, updates in {
         "teacher_groups": [("description", "''"), ("active", "1")],
-        "teacher_assignments": [("variant_code", "''"), ("title", "''"), ("due_at", "0"), ("active", "1")],
-        "teacher_sessions": [("group_id", "''"), ("variant_code", "'" + "'" + "'"), ("deleted", "0")],
+        "teacher_assignments": [("variant_code", "''"), ("title", "''"), ("due_at", "0"), ("duration_minutes", "30"), ("active", "1")],
+        "teacher_sessions": [("group_id", "''"), ("variant_code", "'" + "'" + "'"), ("deleted", "0"), ("source_type", "'group_test'"), ("assignment_id", "''")],
     }.items():
         for col, value in updates:
             try:
@@ -1612,6 +1618,7 @@ class TeacherAssignmentCreateRequest(BaseModel):
     variant_code: str = ""
     title: str = ""
     due_at: int = 0
+    duration_minutes: int = 30
 
 
 @app.post("/api/teacher/assignments")
@@ -1621,6 +1628,7 @@ def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
     if not group_id or not quiz_id:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_required"))
     code=(req.variant_code or "").strip().upper()
+    duration = max(5, min(int(req.duration_minutes or 30), 180))
     if code and code not in TEACHER_VARIANT_CODES:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
     if code:
@@ -1635,8 +1643,8 @@ def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
         if not quiz:
             raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "quiz_not_found"))
         aid=f"ta_{uuid.uuid4().hex[:10]}"; now=int(time.time()); title=(req.title or "").strip()[:150] or quiz["title"]; due_at=max(0,int(req.due_at or 0))
-        cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,created_at,active) VALUES (?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,now))
-        return {"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}
+        cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,duration_minutes,created_at,active) VALUES (?,?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,duration,now))
+        return {"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"duration_minutes":duration,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}
     assignment = teacher_db_write(_write)
     return {"status":"ok","assignment":assignment}
 
@@ -1645,7 +1653,7 @@ def teacher_assignments(user_id: int):
     require_teacher(user_id)
     def _read(conn):
         conn.row_factory=sqlite3.Row; cur=conn.cursor()
-        cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,a.created_at,a.active,
+        cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,COALESCE(a.duration_minutes,30) AS duration_minutes,a.created_at,a.active,
                              g.name AS group_name,q.title AS quiz_title
                       FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id
                       LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=? ORDER BY a.created_at DESC LIMIT 100""",(user_id,))
@@ -1777,6 +1785,7 @@ def _ensure_teacher_schema(conn):
             "variant_code": "TEXT",
             "title": "TEXT",
             "due_at": "INTEGER",
+            "duration_minutes": "INTEGER",
             "created_at": "INTEGER",
             "active": "INTEGER",
         },
@@ -1794,6 +1803,8 @@ def _ensure_teacher_schema(conn):
             "group_id": "TEXT",
             "variant_code": "TEXT",
             "deleted": "INTEGER",
+            "source_type": "TEXT",
+            "assignment_id": "TEXT",
         },
         "teacher_participants": {
             "id": "INTEGER",
@@ -1828,13 +1839,14 @@ def _ensure_teacher_schema(conn):
         "teacher_assignments": """CREATE TABLE IF NOT EXISTS teacher_assignments (
             id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, group_id TEXT NOT NULL,
             quiz_id TEXT NOT NULL, variant_code TEXT DEFAULT '', title TEXT DEFAULT '',
-            due_at INTEGER DEFAULT 0, created_at INTEGER NOT NULL,
+            due_at INTEGER DEFAULT 0, duration_minutes INTEGER DEFAULT 30, created_at INTEGER NOT NULL,
             active INTEGER DEFAULT 1)""",
         "teacher_sessions": """CREATE TABLE IF NOT EXISTS teacher_sessions (
             id TEXT PRIMARY KEY, owner_id INTEGER, teacher_id INTEGER, quiz_id TEXT, code TEXT UNIQUE,
             title TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 30, created_at INTEGER,
             expires_at INTEGER, active INTEGER DEFAULT 1,
-            group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '', deleted INTEGER DEFAULT 0)""",
+            group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '', deleted INTEGER DEFAULT 0,
+            source_type TEXT DEFAULT 'group_test', assignment_id TEXT DEFAULT '')""",
         "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
             id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, user_id INTEGER,
             first_name TEXT, username TEXT, score INTEGER DEFAULT 0,
@@ -2134,6 +2146,7 @@ class TeacherSessionCreateRequest(BaseModel):
     duration_minutes: int = 30
     variant_code: str = ""
     group_id: str = ""
+    assignment_id: str = ""
 
 
 @app.post("/api/teacher/create-session")
@@ -2145,6 +2158,7 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
     are populated dynamically, and rare UNIQUE collisions are retried automatically.
     """
     require_teacher(req.user_id)
+    assignment_id = (req.assignment_id or "").strip()
     duration = max(5, min(int(req.duration_minutes or 30), 180))
     variant_code = (req.variant_code or "").strip().upper()
     if variant_code and variant_code not in TEACHER_VARIANT_CODES:
@@ -2153,6 +2167,23 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
     group_id = (req.group_id or "").strip()
     if not group_id:
         raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "select_group"))
+
+    # Assignment sessions inherit their configured test duration and are tagged
+    # so students and teachers can distinguish them from manually started group tests.
+    if assignment_id:
+        def _read_assignment(conn):
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("""SELECT id,group_id,quiz_id,variant_code,title,active,COALESCE(duration_minutes,30) AS duration_minutes
+                                  FROM teacher_assignments WHERE id=? AND owner_id=?""", (assignment_id, req.user_id)).fetchone()
+            return row
+        assignment_row = teacher_db_read(_read_assignment)
+        if not assignment_row or not int(assignment_row["active"] or 0):
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "assignment_not_found"))
+        if str(assignment_row["group_id"] or "") != group_id or str(assignment_row["quiz_id"] or "") != str(req.quiz_id):
+            raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "assignment_not_found"))
+        duration = max(5, min(int(assignment_row["duration_minutes"] or 30), 180))
+        if not variant_code:
+            variant_code = str(assignment_row["variant_code"] or "").strip().upper()
 
     # Validate quiz and group before opening the write transaction.
     quiz_row, _items = _load_quiz_items(req.quiz_id, req.user_id)
@@ -2180,6 +2211,8 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
             raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
 
         session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
+        if assignment_id and assignment_row is not None:
+            session_title = str(assignment_row["title"] or session_title).strip() or session_title
         now = int(time.time())
         expires = now + duration * 60
 
@@ -2212,6 +2245,8 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
                 "group_name": group["name"],
                 "variant_code": variant_code,
                 "deleted": 0,
+                "source_type": "assignment" if assignment_id else "group_test",
+                "assignment_id": assignment_id,
             }
 
             insert_columns, insert_values = [], []
@@ -2249,6 +2284,8 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
                     "variant_code": variant_code,
                     "group_id": group_id,
                     "group_name": group["name"],
+                    "source_type": "assignment" if assignment_id else "group_test",
+                    "assignment_id": assignment_id,
                 }
             except sqlite3.IntegrityError as e:
                 last_integrity = e
@@ -2267,7 +2304,8 @@ def teacher_sessions(user_id: int):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("""SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,
-                             COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code
+                             COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code,
+                             COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id
                       FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
                       WHERE s.owner_id=? AND COALESCE(s.deleted,0)=0
                       ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
@@ -2337,6 +2375,7 @@ def teacher_group_sessions(user_id: int):
             SELECT DISTINCT s.id, s.code, s.quiz_id, q.title, q.total,
                    s.duration_minutes, s.created_at, s.expires_at, s.group_id,
                    g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code,
+                   COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id,
                    COALESCE(p.finished_at,0) AS finished_at,
                    COALESCE(p.started_at,0) AS started_at,
                    COALESCE(p.score,0) AS student_score,
@@ -2494,7 +2533,7 @@ def teacher_session_results(session_id: str, user_id: int):
     require_teacher(user_id)
     def _read(conn):
         conn.row_factory=sqlite3.Row; cur=conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
         cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
@@ -2502,7 +2541,7 @@ def teacher_session_results(session_id: str, user_id: int):
         completed_students = sum(1 for r in rows if int(r["finished_at"] or 0) > 0)
         return dict(s), rows, active_students, completed_students
     s, rows, active_students, completed_students=teacher_db_read(_read)
-    return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"]}, "active_students":active_students, "completed_students":completed_students, "participants":[dict(r) for r in rows]}
+    return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"],"source_type":s["source_type"],"assignment_id":s["assignment_id"]}, "active_students":active_students, "completed_students":completed_students, "participants":[dict(r) for r in rows]}
 
 def _teacher_export_rows(session_id, owner_id):
     require_teacher(owner_id)
