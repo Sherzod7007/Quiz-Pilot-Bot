@@ -146,6 +146,7 @@ MESSAGES = {
         "support_reply_btn": "✉️ Javob berish",
         "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
         "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
+        "support_admin_reply": "💬 Admin javobi:",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
@@ -175,6 +176,7 @@ MESSAGES = {
         "support_reply_btn": "✉️ Ответить",
         "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
         "support_reply_sent": "✅ Ответ отправлен пользователю.",
+        "support_admin_reply": "💬 Ответ администратора:",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
@@ -204,6 +206,7 @@ MESSAGES = {
         "support_reply_btn": "✉️ Reply",
         "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
         "support_reply_sent": "✅ Reply sent to the user.",
+        "support_admin_reply": "💬 Admin reply:",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
     }
@@ -650,7 +653,9 @@ def handle_support_text(message):
     if ADMIN_ID and user_id == ADMIN_ID and user_id in support_reply_targets:
         target_user_id = support_reply_targets.pop(user_id)
         try:
-            bot.send_message(target_user_id, f"💬 Admin javobi:\n\n{message.text}")
+            target_lang = get_user_lang(target_user_id)
+            reply_title = MESSAGES.get(target_lang, MESSAGES["uz"]).get("support_admin_reply", MESSAGES["uz"]["support_admin_reply"])
+            bot.send_message(target_user_id, f"{reply_title}\n\n{message.text}")
             bot.send_message(user_id, MESSAGES.get(get_user_lang(user_id), MESSAGES["uz"])["support_reply_sent"])
         except Exception as e:
             logging.error(f"Admin javobini yuborishda xato: {e}")
