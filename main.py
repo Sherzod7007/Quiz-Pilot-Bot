@@ -1190,6 +1190,31 @@ CRITICAL RULES:
     return None
 
 
+@app.post("/api/contact-admin")
+async def api_contact_admin(request: Request):
+    """Mini App ichidan Admin bilan bog'lanish oqimini boshlaydi.
+
+    tg.sendData() faqat ayrim Telegram Web App launch usullarida ishlaydi.
+    Shu sababli kontakt tugmasi uchun backend API orqali botga murojaat
+    holatini o'rnatamiz; keyin Mini App yopilganda foydalanuvchi bot chatiga
+    qaytadi va yozgan xabarini shu yerga yubora oladi.
+    """
+    try:
+        data = await request.json()
+        user_id = int(data.get("user_id") or 0)
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id required")
+
+        user_lang = get_user_lang(user_id)
+        support_waiting_users.add(user_id)
+        bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Admin bilan bog'lanish API xatosi: {e}")
+        raise HTTPException(status_code=500, detail="contact_admin_failed")
+
 @app.get("/api/heartbeat")
 def user_heartbeat(user_id: int):
     add_user_to_db(user_id)
