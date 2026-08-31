@@ -1027,17 +1027,24 @@
             updateVibrationToggle();
         }
 
-        function contactAdmin() {
-            const payload = { action: 'contact_admin', user_id: userId };
+        async function contactAdmin() {
+            // tg.sendData() barcha Telegram Web App ishga tushirish usullarida
+            // ishonchli ishlamaydi. Admin bilan bog'lanishni backend orqali
+            // boshlaymiz va muvaffaqiyatli bo'lgach bot chatiga qaytamiz.
             try {
-                if (tg && typeof tg.sendData === 'function') {
-                    tg.sendData(JSON.stringify(payload));
-                    setTimeout(() => { try { tg.close(); } catch (_) {} }, 200);
-                } else {
-                    showAppAlert('💬', langPack[currentLang].contact_admin_desc);
+                const response = await fetch(`${BASE_URL}/api/contact-admin`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || data.status !== 'ok') {
+                    throw new Error(data.detail || 'contact_admin_failed');
                 }
+                try { tg.close(); } catch (_) {}
             } catch (e) {
                 console.log("Admin bilan bog'lanish xatosi:", e);
+                showAppAlert('💬', langPack[currentLang].contact_admin_desc);
             }
         }
 
