@@ -146,7 +146,7 @@ MESSAGES = {
         "support_reply_btn": "✉️ Javob berish",
         "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
         "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
-        "support_admin_reply": "💬 Admin javobi:",
+        "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
@@ -176,7 +176,7 @@ MESSAGES = {
         "support_reply_btn": "✉️ Ответить",
         "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
         "support_reply_sent": "✅ Ответ отправлен пользователю.",
-        "support_admin_reply": "💬 Ответ администратора:",
+        "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
@@ -206,7 +206,7 @@ MESSAGES = {
         "support_reply_btn": "✉️ Reply",
         "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
         "support_reply_sent": "✅ Reply sent to the user.",
-        "support_admin_reply": "💬 Admin reply:",
+        "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
     }
@@ -654,9 +654,10 @@ def handle_support_text(message):
         target_user_id = support_reply_targets.pop(user_id)
         try:
             target_lang = get_user_lang(target_user_id)
-            reply_title = MESSAGES.get(target_lang, MESSAGES["uz"]).get("support_admin_reply", MESSAGES["uz"]["support_admin_reply"])
-            bot.send_message(target_user_id, f"{reply_title}\n\n{message.text}")
-            bot.send_message(user_id, MESSAGES.get(get_user_lang(user_id), MESSAGES["uz"])["support_reply_sent"])
+            target_messages = MESSAGES.get(target_lang, MESSAGES["uz"])
+            bot.send_message(target_user_id, f"💬 {target_messages.get('support_admin_reply_title', 'Admin javobi')}:\n\n{message.text}")
+            # Admin tomondagi texnik tasdiq doim O'zbek tilida qoladi.
+            bot.send_message(user_id, MESSAGES["uz"]["support_reply_sent"])
         except Exception as e:
             logging.error(f"Admin javobini yuborishda xato: {e}")
             bot.send_message(user_id, "❌ Javobni yuborishda xatolik yuz berdi.")
@@ -667,8 +668,8 @@ def handle_support_text(message):
         username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
         first_name = message.from_user.first_name or "Mavjud emas"
         markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(telebot.types.InlineKeyboardButton(MESSAGES[user_lang]["support_reply_btn"], callback_data=f"support_reply:{user_id}"))
-        text = (f"{MESSAGES[user_lang]['support_admin_title']}\n\n"
+        markup.add(telebot.types.InlineKeyboardButton(MESSAGES["uz"]["support_reply_btn"], callback_data=f"support_reply:{user_id}"))
+        text = (f"{MESSAGES['uz']['support_admin_title']}\n\n"
                 f"👤 {first_name}\n🔗 Username: {username}\n🆔 Telegram ID: {user_id}\n🌐 Til: {user_lang.upper()}\n\n💬 {message.text}")
         try:
             if not ADMIN_ID:
@@ -690,7 +691,7 @@ def handle_support_reply_callback(call):
         target_user_id = int(call.data.split(":", 1)[1])
         support_reply_targets[call.from_user.id] = target_user_id
         bot.answer_callback_query(call.id)
-        bot.send_message(call.from_user.id, MESSAGES.get(get_user_lang(call.from_user.id), MESSAGES["uz"])["support_reply_prompt"])
+        bot.send_message(call.from_user.id, MESSAGES["uz"]["support_reply_prompt"])
     except Exception as e:
         logging.error(f"Admin reply callback xatosi: {e}")
         bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
