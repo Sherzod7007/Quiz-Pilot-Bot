@@ -1028,30 +1028,31 @@
         }
 
         async function contactAdmin() {
-            // Admin bilan bog'lanish tg.sendData() ga bog'lanmaydi.
-            // Backend murojaat rejimini o'rnatadi va botning o'z chatiga
-            // Telegram deep-link qaytaradi. Shu sababli Menu Button/WebApp,
-            // inline WebApp va boshqa ochilish usullarida ham bir xil ishlaydi.
+            // Avval backend foydalanuvchining support rejimini yoqadi va
+            // bot chatiga yozish uchun xabar yuboradi. Shundan keyin Mini App
+            // yopiladi. Deep-link orqali qayta ochish ishlatilmaydi.
             try {
                 const response = await fetch(`${BASE_URL}/api/contact-admin`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: userId })
                 });
+
                 const data = await response.json().catch(() => ({}));
-                if (!response.ok || data.status !== 'ok' || !data.bot_url) {
+                if (!response.ok || data.status !== 'ok') {
                     throw new Error(data.detail || 'contact_admin_failed');
                 }
 
-                // Telegram ichida to'g'ridan-to'g'ri bot chatini ochamiz.
-                if (tg && typeof tg.openTelegramLink === 'function') {
-                    tg.openTelegramLink(data.bot_url);
+                // Mini App qaysi usulda ochilganidan qat'i nazar, Telegram
+                // uni yopib foydalanuvchini bot chatiga qaytaradi.
+                if (tg && typeof tg.close === 'function') {
+                    tg.close();
                 } else {
-                    window.location.href = data.bot_url;
+                    showAppAlert('💬', langPack[currentLang].contact_admin_desc);
                 }
             } catch (e) {
                 console.log("Admin bilan bog'lanish xatosi:", e);
-                showAppAlert('💬', langPack[currentLang].contact_admin_desc);
+                showAppAlert('❌', langPack[currentLang].contact_admin_desc);
             }
         }
 
