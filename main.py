@@ -142,6 +142,7 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
         "support_prompt": "💬 Admin bilan bog'lanish. Savolingiz yoki muammoingizni shu yerga yozing. Xabaringiz administratorga yuboriladi.",
         "support_sent": "✅ Murojaatingiz administratorga yuborildi. Javob kelishini kuting.",
+        "support_continue_btn": "💬 Admin bilan bog'lanish",
         "support_admin_title": "📩 Yangi murojaat",
         "support_reply_btn": "✉️ Javob berish",
         "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
@@ -172,6 +173,7 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
         "support_prompt": "💬 Связаться с администратором. Напишите ваш вопрос или проблему здесь. Сообщение будет отправлено администратору.",
         "support_sent": "✅ Ваше обращение отправлено администратору. Ожидайте ответа.",
+        "support_continue_btn": "💬 Связаться с администратором",
         "support_admin_title": "📩 Новое обращение",
         "support_reply_btn": "✉️ Ответить",
         "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
@@ -202,6 +204,7 @@ MESSAGES = {
         "flashcard_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
         "support_prompt": "💬 Contact Admin. Write your question or problem here. Your message will be sent to the administrator.",
         "support_sent": "✅ Your message has been sent to the administrator. Please wait for a reply.",
+        "support_continue_btn": "💬 Contact Admin",
         "support_admin_title": "📩 New support request",
         "support_reply_btn": "✉️ Reply",
         "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
@@ -646,6 +649,16 @@ def handle_webapp_data(message):
         logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
 
+# --- ADMIN SUPPORT: foydalanuvchi suhbatini davom ettirish tugmasi ---
+def support_continue_markup(lang: str):
+    lang = lang if lang in MESSAGES else "uz"
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(telebot.types.InlineKeyboardButton(
+        MESSAGES[lang]["support_continue_btn"],
+        callback_data="support_continue"
+    ))
+    return markup
+
 # --- ADMIN SUPPORT: murojaat va javob ---
 @bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
 def handle_support_text(message):
@@ -655,7 +668,11 @@ def handle_support_text(message):
         try:
             target_lang = get_user_lang(target_user_id)
             target_messages = MESSAGES.get(target_lang, MESSAGES["uz"])
-            bot.send_message(target_user_id, f"💬 {target_messages.get('support_admin_reply_title', 'Admin javobi')}:\n\n{message.text}")
+            bot.send_message(
+                target_user_id,
+                f"💬 {target_messages.get('support_admin_reply_title', 'Admin javobi')}:\n\n{message.text}",
+                reply_markup=support_continue_markup(target_lang)
+            )
             # Admin tomondagi texnik tasdiq doim O'zbek tilida qoladi.
             bot.send_message(user_id, MESSAGES["uz"]["support_reply_sent"])
         except Exception as e:
@@ -676,11 +693,37 @@ def handle_support_text(message):
                 bot.send_message(user_id, MESSAGES[user_lang]["support_config_error"])
                 return
             bot.send_message(ADMIN_ID, text, reply_markup=markup)
-            bot.send_message(user_id, MESSAGES[user_lang]["support_sent"])
+            bot.send_message(
+                user_id,
+                MESSAGES[user_lang]["support_sent"],
+                reply_markup=support_continue_markup(user_lang)
+            )
         except Exception as e:
             logging.error(f"Admin murojaatini yuborishda xato: {e}")
             bot.send_message(user_id, "❌ Murojaatni yuborishda xatolik yuz berdi.")
         return
+
+@bot.callback_query_handler(func=lambda call: call.data == "support_continue")
+def handle_support_continue_callback(call):
+    """Allow the user to continue the same admin-support conversation from Telegram."""
+    if ADMIN_ID and call.from_user.id == ADMIN_ID:
+        bot.answer_callback_query(call.id, "Bu tugma foydalanuvchi uchun.", show_alert=True)
+        return
+    try:
+        user_id = call.from_user.id
+        add_user_to_db(user_id)
+        user_lang = get_user_lang(user_id)
+        if not ADMIN_ID:
+            bot.answer_callback_query(call.id)
+            bot.send_message(user_id, MESSAGES[user_lang]["support_config_error"])
+            return
+        support_waiting_users.add(user_id)
+        bot.answer_callback_query(call.id)
+        bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
+        logging.info(f"Admin support davom ettirildi: user_id={user_id}, admin_id={ADMIN_ID}")
+    except Exception as e:
+        logging.error(f"Admin support davom ettirish callback xatosi: {e}")
+        bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("support_reply:"))
 def handle_support_reply_callback(call):
