@@ -1204,11 +1204,13 @@ CRITICAL RULES:
 
 @app.post("/api/contact-admin")
 async def api_contact_admin(request: Request):
-    """Mini App ichidan Admin bilan bog'lanishni ishonchli boshlaydi.
+    """Mini App ichidan Admin bilan bog'lanishni boshlash.
 
-    tg.sendData() Telegram Web App qaysi usulda ochilganiga qarab ishlamasligi
-    mumkin. Shuning uchun foydalanuvchini botning o'z chatiga Telegram deep-link
-    orqali qaytaramiz. Murojaat rejimi serverda oldindan belgilanadi.
+    Mini App foydalanuvchini o'zi ochilgan Telegram chatiga qaytaradi.
+    Avval serverda support rejimi belgilanadi va foydalanuvchining bot chatiga
+    murojaat yozish uchun xabar yuboriladi. Keyin frontend tg.close() orqali
+    Mini App'ni yopadi. Bu usul Menu Button, inline WebApp va boshqa WebApp
+    ochilish usullarida deep-link navigatsiyasiga bog'lanib qolmaydi.
     """
     try:
         data = await request.json()
@@ -1219,17 +1221,16 @@ async def api_contact_admin(request: Request):
         user_lang = get_user_lang(user_id)
         support_waiting_users.add(user_id)
 
-        # Foydalanuvchiga promptni hozir yuboramiz. Deep-linkdagi /start support
-        # kelganda start handler support_waiting_users sababli uni takrorlamaydi.
-        bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
+        # Xabarni serverdan yuboramiz: foydalanuvchi Mini App yopilgach
+        # aynan shu bot chatida xabar yozishni boshlashi mumkin.
+        sent = bot.send_message(
+            user_id,
+            MESSAGES[user_lang]["support_prompt"],
+        )
+        if not sent:
+            raise RuntimeError("Support prompt yuborilmadi")
 
-        bot_info = bot.get_me()
-        bot_username = getattr(bot_info, "username", None)
-        if not bot_username:
-            raise RuntimeError("Bot username aniqlanmadi")
-
-        bot_url = f"https://t.me/{bot_username}?start=support"
-        return {"status": "ok", "bot_url": bot_url}
+        return {"status": "ok", "close_app": True}
     except HTTPException:
         raise
     except Exception as e:
