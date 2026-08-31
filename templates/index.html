@@ -1028,9 +1028,10 @@
         }
 
         async function contactAdmin() {
-            // tg.sendData() barcha Telegram Web App ishga tushirish usullarida
-            // ishonchli ishlamaydi. Admin bilan bog'lanishni backend orqali
-            // boshlaymiz va muvaffaqiyatli bo'lgach bot chatiga qaytamiz.
+            // Admin bilan bog'lanish tg.sendData() ga bog'lanmaydi.
+            // Backend murojaat rejimini o'rnatadi va botning o'z chatiga
+            // Telegram deep-link qaytaradi. Shu sababli Menu Button/WebApp,
+            // inline WebApp va boshqa ochilish usullarida ham bir xil ishlaydi.
             try {
                 const response = await fetch(`${BASE_URL}/api/contact-admin`, {
                     method: 'POST',
@@ -1038,10 +1039,16 @@
                     body: JSON.stringify({ user_id: userId })
                 });
                 const data = await response.json().catch(() => ({}));
-                if (!response.ok || data.status !== 'ok') {
+                if (!response.ok || data.status !== 'ok' || !data.bot_url) {
                     throw new Error(data.detail || 'contact_admin_failed');
                 }
-                try { tg.close(); } catch (_) {}
+
+                // Telegram ichida to'g'ridan-to'g'ri bot chatini ochamiz.
+                if (tg && typeof tg.openTelegramLink === 'function') {
+                    tg.openTelegramLink(data.bot_url);
+                } else {
+                    window.location.href = data.bot_url;
+                }
             } catch (e) {
                 console.log("Admin bilan bog'lanish xatosi:", e);
                 showAppAlert('💬', langPack[currentLang].contact_admin_desc);
