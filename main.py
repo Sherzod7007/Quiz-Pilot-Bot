@@ -605,6 +605,18 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
+    # Admin bilan bog'lanish uchun Telegram deep-link orqali qaytilganda
+    # /start support keladi. Bu holatda oddiy salomlashuvni yubormaymiz.
+    command_parts = (message.text or "").split(maxsplit=1)
+    start_payload = command_parts[1].strip().lower() if len(command_parts) > 1 else ""
+    if start_payload == "support":
+        # /api/contact-admin allaqachon holatni o'rnatgan bo'lsa, prompt
+        # takror yuborilmaydi. Oddiy deep-link orqali kelinsa esa holat o'rnatiladi.
+        if user_id not in support_waiting_users:
+            support_waiting_users.add(user_id)
+            bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
+        return
+
     welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -1164,7 +1176,7 @@ CRITICAL RULES:
             try:
                 client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash",
+                    model="gemini-2.5-flash",
                     contents=extracted_text[:80000],
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
@@ -1192,12 +1204,11 @@ CRITICAL RULES:
 
 @app.post("/api/contact-admin")
 async def api_contact_admin(request: Request):
-    """Mini App ichidan Admin bilan bog'lanish oqimini boshlaydi.
+    """Mini App ichidan Admin bilan bog'lanishni ishonchli boshlaydi.
 
-    tg.sendData() faqat ayrim Telegram Web App launch usullarida ishlaydi.
-    Shu sababli kontakt tugmasi uchun backend API orqali botga murojaat
-    holatini o'rnatamiz; keyin Mini App yopilganda foydalanuvchi bot chatiga
-    qaytadi va yozgan xabarini shu yerga yubora oladi.
+    tg.sendData() Telegram Web App qaysi usulda ochilganiga qarab ishlamasligi
+    mumkin. Shuning uchun foydalanuvchini botning o'z chatiga Telegram deep-link
+    orqali qaytaramiz. Murojaat rejimi serverda oldindan belgilanadi.
     """
     try:
         data = await request.json()
@@ -1207,12 +1218,22 @@ async def api_contact_admin(request: Request):
 
         user_lang = get_user_lang(user_id)
         support_waiting_users.add(user_id)
+
+        # Foydalanuvchiga promptni hozir yuboramiz. Deep-linkdagi /start support
+        # kelganda start handler support_waiting_users sababli uni takrorlamaydi.
         bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
-        return {"status": "ok"}
+
+        bot_info = bot.get_me()
+        bot_username = getattr(bot_info, "username", None)
+        if not bot_username:
+            raise RuntimeError("Bot username aniqlanmadi")
+
+        bot_url = f"https://t.me/{bot_username}?start=support"
+        return {"status": "ok", "bot_url": bot_url}
     except HTTPException:
         raise
     except Exception as e:
-        logging.error(f"Admin bilan bog'lanish API xatosi: {e}")
+        logging.exception(f"Admin bilan bog'lanish API xatosi: {e}")
         raise HTTPException(status_code=500, detail="contact_admin_failed")
 
 @app.get("/api/heartbeat")
