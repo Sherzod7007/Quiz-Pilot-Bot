@@ -119,12 +119,6 @@ def localized_tariff_name(plan_key: str, lang: str) -> str:
 
 # --- MULTILINGUAL (3 TILDAGI BILDIRISHNOMALAR) ---
 MESSAGES = {
-        "support_prompt": "💬 Admin bilan bog'lanish. Savolingiz yoki muammoingizni shu yerga yozing. Xabaringiz administratorga yuboriladi.",
-        "support_sent": "✅ Murojaatingiz administratorga yuborildi. Javob kelishini kuting.",
-        "support_admin_title": "📩 Yangi murojaat",
-        "support_reply_btn": "✉️ Javob berish",
-        "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
-        "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
     "uz": {
         "welcome": (
             "👋 Salom, {name}! Quiz Pilot Super Mini App tizimiga xush kelibsiz.\n\n"
@@ -146,14 +140,15 @@ MESSAGES = {
         "quiz_limit_reached": "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
         "public_limit_reached": "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
         "flashcard_limit_reached": "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
+        "support_prompt": "💬 Admin bilan bog'lanish. Savolingiz yoki muammoingizni shu yerga yozing. Xabaringiz administratorga yuboriladi.",
+        "support_sent": "✅ Murojaatingiz administratorga yuborildi. Javob kelishini kuting.",
+        "support_admin_title": "📩 Yangi murojaat",
+        "support_reply_btn": "✉️ Javob berish",
+        "support_reply_prompt": "✍️ Javobingizni yozing. U foydalanuvchiga yuboriladi.",
+        "support_reply_sent": "✅ Javob foydalanuvchiga yuborildi.",
+        "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
     },
-        "support_prompt": "💬 Связаться с администратором. Напишите ваш вопрос или проблему здесь. Сообщение будет отправлено администратору.",
-        "support_sent": "✅ Ваше обращение отправлено администратору. Ожидайте ответа.",
-        "support_admin_title": "📩 Новое обращение",
-        "support_reply_btn": "✉️ Ответить",
-        "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
-        "support_reply_sent": "✅ Ответ отправлен пользователю.",
     "ru": {
         "welcome": (
             "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
@@ -174,14 +169,15 @@ MESSAGES = {
         "quiz_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать тесты, перейдите на Premium тариф. 👑",
         "public_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
         "flashcard_limit_reached": "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
+        "support_prompt": "💬 Связаться с администратором. Напишите ваш вопрос или проблему здесь. Сообщение будет отправлено администратору.",
+        "support_sent": "✅ Ваше обращение отправлено администратору. Ожидайте ответа.",
+        "support_admin_title": "📩 Новое обращение",
+        "support_reply_btn": "✉️ Ответить",
+        "support_reply_prompt": "✍️ Напишите ответ. Он будет отправлен пользователю.",
+        "support_reply_sent": "✅ Ответ отправлен пользователю.",
+        "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
     },
-        "support_prompt": "💬 Contact Admin. Write your question or problem here. Your message will be sent to the administrator.",
-        "support_sent": "✅ Your message has been sent to the administrator. Please wait for a reply.",
-        "support_admin_title": "📩 New support request",
-        "support_reply_btn": "✉️ Reply",
-        "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
-        "support_reply_sent": "✅ Reply sent to the user.",
     "en": {
         "welcome": (
             "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
@@ -202,6 +198,13 @@ MESSAGES = {
         "quiz_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating quizzes. 👑",
         "public_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
         "flashcard_limit_reached": "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
+        "support_prompt": "💬 Contact Admin. Write your question or problem here. Your message will be sent to the administrator.",
+        "support_sent": "✅ Your message has been sent to the administrator. Please wait for a reply.",
+        "support_admin_title": "📩 New support request",
+        "support_reply_btn": "✉️ Reply",
+        "support_reply_prompt": "✍️ Write your reply. It will be sent to the user.",
+        "support_reply_sent": "✅ Reply sent to the user.",
+        "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
     }
 }
@@ -605,18 +608,6 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    # Admin bilan bog'lanish uchun Telegram deep-link orqali qaytilganda
-    # /start support keladi. Bu holatda oddiy salomlashuvni yubormaymiz.
-    command_parts = (message.text or "").split(maxsplit=1)
-    start_payload = command_parts[1].strip().lower() if len(command_parts) > 1 else ""
-    if start_payload == "support":
-        # /api/contact-admin allaqachon holatni o'rnatgan bo'lsa, prompt
-        # takror yuborilmaydi. Oddiy deep-link orqali kelinsa esa holat o'rnatiladi.
-        if user_id not in support_waiting_users:
-            support_waiting_users.add(user_id)
-            bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
-        return
-
     welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -635,6 +626,9 @@ def handle_webapp_data(message):
         if data.get("action") == "contact_admin":
             user_id = int(data.get("user_id") or message.from_user.id)
             user_lang = get_user_lang(user_id)
+            if not ADMIN_ID:
+                bot.send_message(user_id, MESSAGES[user_lang]["support_config_error"])
+                return
             support_waiting_users.add(user_id)
             bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
             return
@@ -672,8 +666,10 @@ def handle_support_text(message):
         text = (f"{MESSAGES[user_lang]['support_admin_title']}\n\n"
                 f"👤 {first_name}\n🔗 Username: {username}\n🆔 Telegram ID: {user_id}\n🌐 Til: {user_lang.upper()}\n\n💬 {message.text}")
         try:
-            target_admin = ADMIN_ID if ADMIN_ID else user_id
-            bot.send_message(target_admin, text, reply_markup=markup)
+            if not ADMIN_ID:
+                bot.send_message(user_id, MESSAGES[user_lang]["support_config_error"])
+                return
+            bot.send_message(ADMIN_ID, text, reply_markup=markup)
             bot.send_message(user_id, MESSAGES[user_lang]["support_sent"])
         except Exception as e:
             logging.error(f"Admin murojaatini yuborishda xato: {e}")
@@ -1204,38 +1200,38 @@ CRITICAL RULES:
 
 @app.post("/api/contact-admin")
 async def api_contact_admin(request: Request):
-    """Mini App ichidan Admin bilan bog'lanishni boshlash.
+    """Start an admin-support conversation from the Mini App.
 
-    Mini App foydalanuvchini o'zi ochilgan Telegram chatiga qaytaradi.
-    Avval serverda support rejimi belgilanadi va foydalanuvchining bot chatiga
-    murojaat yozish uchun xabar yuboriladi. Keyin frontend tg.close() orqali
-    Mini App'ni yopadi. Bu usul Menu Button, inline WebApp va boshqa WebApp
-    ochilish usullarida deep-link navigatsiyasiga bog'lanib qolmaydi.
+    The frontend calls this endpoint instead of relying on Telegram
+    WebApp.sendData(), which is not reliable for every Mini App launch mode.
+    The bot sends the support prompt directly to the user's private chat;
+    the next text message is then forwarded to ADMIN_ID by the existing
+    support handler.
     """
     try:
         data = await request.json()
         user_id = int(data.get("user_id") or 0)
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id required")
+        if not ADMIN_ID:
+            user_lang = get_user_lang(user_id)
+            return JSONResponse(
+                status_code=503,
+                content={"status": "error", "message": MESSAGES[user_lang]["support_config_error"]},
+            )
 
+        add_user_to_db(user_id)
         user_lang = get_user_lang(user_id)
         support_waiting_users.add(user_id)
-
-        # Xabarni serverdan yuboramiz: foydalanuvchi Mini App yopilgach
-        # aynan shu bot chatida xabar yozishni boshlashi mumkin.
-        sent = bot.send_message(
-            user_id,
-            MESSAGES[user_lang]["support_prompt"],
-        )
-        if not sent:
-            raise RuntimeError("Support prompt yuborilmadi")
-
-        return {"status": "ok", "close_app": True}
+        bot.send_message(user_id, MESSAGES[user_lang]["support_prompt"])
+        logging.info(f"Admin support boshlandi: user_id={user_id}, admin_id={ADMIN_ID}")
+        return {"status": "ok"}
     except HTTPException:
         raise
     except Exception as e:
         logging.exception(f"Admin bilan bog'lanish API xatosi: {e}")
         raise HTTPException(status_code=500, detail="contact_admin_failed")
+
 
 @app.get("/api/heartbeat")
 def user_heartbeat(user_id: int):
