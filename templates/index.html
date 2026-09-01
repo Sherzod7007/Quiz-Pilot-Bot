@@ -1854,6 +1854,10 @@
         async function loadTeacherResultsPanel(){
             const sel=document.getElementById('teacher-results-session'),box=document.getElementById('teacher-results-panel-list');
             if(!sel||!box)return;
+            // Natijalar bo‘limi ochilganda Faol va oldingi sessiyalar kartochkalari
+            // ham darhol yuklansin. Oldingi versiyada bu chaqiruv qolib ketgani
+            // sababli kartochkalar "Yuklanmoqda..." holatida qolib ketardi.
+            await loadTeacherSessionsPro();
             try{
                 const previousId=sel.value||'';
                 const d=await teacherFetchJson(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`);
