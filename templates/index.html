@@ -206,61 +206,27 @@
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); transition: transform 0.2s ease; }
 
 
-        /* Yaratish bo‘limi: yuqorida aylanuvchi promo/imkoniyatlar kartochkasi.
-           Keyinchalik shu blokka reklama yoki boshqa bannerlarni qo‘shish mumkin. */
-        .create-promo-carousel {
-            position: relative;
-            height: 112px;
-            margin: 0 0 14px 0;
-            overflow: hidden;
-            border-radius: 12px;
-        }
-        .create-promo-slide {
-            position: absolute;
-            inset: 0;
-            padding: 14px 16px;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            opacity: 0;
-            transform: translateX(18px);
-            transition: opacity .45s ease, transform .45s ease;
-            pointer-events: none;
-            background: linear-gradient(135deg, rgba(0,153,255,.16), rgba(255,255,255,.055));
-            border: 1px solid rgba(0,210,255,.32);
-            box-shadow: 0 5px 18px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.18);
-        }
-        .create-promo-slide.active { opacity: 1; transform: translateX(0); }
-        .create-promo-title { font-size: 16px; font-weight: 800; line-height: 1.25; margin-bottom: 5px; color:#fff; }
-        .create-promo-desc { font-size: 12px; line-height: 1.35; color: var(--text-hint); }
-        .create-promo-dots {
-            position: absolute; left: 0; right: 0; bottom: 7px;
-            display: flex; justify-content: center; gap: 5px; z-index: 3;
-        }
-        .create-promo-dot {
-            width: 5px; height: 5px; border-radius: 50%;
-            background: rgba(255,255,255,.35); transition: all .25s ease;
-        }
-        .create-promo-dot.active { width: 15px; border-radius: 5px; background: #00d2ff; box-shadow: 0 0 7px rgba(0,210,255,.65); }
-        .create-form-content {
-            padding-bottom: 6px;
-            display: flex;
-            flex-direction: column;
-            min-height: calc(100vh - 95px - 185px);
-        }
-        #create-screen .create-action-wrap {
-            margin-top: auto;
-            padding-top: 10px;
-            padding-bottom: 4px;
-        }
-        #create-screen .create-action-wrap .submit-btn { margin-bottom: 0; }
-        @media (max-height: 720px) {
-            .create-promo-carousel { height: 96px; }
-            #create-screen .input-title { margin-bottom: 10px; }
-            #create-screen .upload-box { padding: 18px 14px; margin-bottom: 10px; }
-            #create-screen .input-text { margin-bottom: 12px; }
-        }
+        /* Yaratish: kattaroq promo slayder va mavzuga mos fon rasmlari. */
+        .create-promo-carousel { position:relative; height:158px; margin:0 0 8px 0; overflow:hidden; border-radius:14px; }
+        .create-promo-slide { position:absolute; inset:0; padding:18px 20px 22px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; opacity:0; transform:translateX(18px); transition:opacity .45s ease,transform .45s ease; pointer-events:none; background-position:center; background-size:cover; background-repeat:no-repeat; border:1px solid rgba(0,210,255,.42); box-shadow:0 6px 20px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.18); text-shadow:0 2px 4px rgba(0,0,0,.75); }
+        .create-promo-slide:nth-child(1) { background-image:linear-gradient(90deg,rgba(3,16,32,.94) 0%,rgba(3,16,32,.72) 46%,rgba(3,16,32,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWEzNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA2MmM1NSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkzMCIgY3k9IjI0MCIgcj0iMjIwIiBmaWxsPSIjMDBjZmZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjExMCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSIyMzAiIHJ4PSI0NSIgZmlsbD0iIzEwMmI0YiIgc3Ryb2tlPSIjNTVlYWZmIiBzdHJva2Utd2lkdGg9IjYiLz48cmVjdCB4PSI3NjUiIHk9IjE1NSIgd2lkdGg9IjIxMCIgaGVpZ2h0PSIxMjAiIHJ4PSIyMCIgZmlsbD0iIzA0MTcyZSIgc3Ryb2tlPSIjMDBjZmZmIiBzdHJva2Utd2lkdGg9IjUiLz48Y2lyY2xlIGN4PSI4MjUiIGN5PSIyMTAiIHI9IjEzIiBmaWxsPSIjNTVlYWZmIi8+PGNpcmNsZSBjeD0iOTE1IiBjeT0iMjEwIiByPSIxMyIgZmlsbD0iIzU1ZWFmZiIvPjxwYXRoIGQ9Ik04MjAgMjQ1aDEwMCIgc3Ryb2tlPSIjNTVlYWZmIiBzdHJva2Utd2lkdGg9IjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxwYXRoIGQ9Ik04NzAgMTEwVjcwIiBzdHJva2U9IiM1NWVhZmYiIHN0cm9rZS13aWR0aD0iNiIvPjxjaXJjbGUgY3g9Ijg3MCIgY3k9IjYyIiByPSIxMSIgZmlsbD0iI2ZmZDM0ZCIvPjwvc3ZnPg=="); }
+        .create-promo-slide:nth-child(2) { background-image:linear-gradient(90deg,rgba(5,23,30,.94) 0%,rgba(5,23,30,.72) 46%,rgba(5,23,30,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MjUyYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA2M2U0NSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkzMCIgY3k9IjI1MCIgcj0iMjMwIiBmaWxsPSIjMmJlMGM0IiBvcGFjaXR5PSIuMTgiLz48cGF0aCBkPSJNNzMwIDEyMGwyMTAgNzAtMjEwIDcwLTE3MC03MHoiIGZpbGw9IiMyMGNiYjQiIHN0cm9rZT0iI2I0ZmZmNSIgc3Ryb2tlLXdpZHRoPSI1Ii8+PGNpcmNsZSBjeD0iODEwIiBjeT0iMjUwIiByPSI0OCIgZmlsbD0iI2YyYzlhNSIvPjxwYXRoIGQ9Ik03NTUgMjQwYzEwLTY1IDEwMC03MCAxMTUgMC0zNS0yMC03NS0yMC0xMTUgMHoiIGZpbGw9IiMyNTMxNGIiLz48cGF0aCBkPSJNNzcwIDMxNWg5MGw0NSAxMDBINzI1eiIgZmlsbD0iIzJhYTlhMCIvPjwvc3ZnPg=="); }
+        .create-promo-slide:nth-child(3) { background-image:linear-gradient(90deg,rgba(38,20,5,.94) 0%,rgba(38,20,5,.72) 46%,rgba(38,20,5,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzM1MWIwNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzVhMjYwNiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkzMCIgY3k9IjI1MCIgcj0iMjMwIiBmaWxsPSIjZmY5ZDI4IiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3NDAiIHk9IjkwIiB3aWR0aD0iMjUwIiBoZWlnaHQ9IjMyMCIgcng9IjI1IiBmaWxsPSIjNDIyODE3IiBzdHJva2U9IiNmZmQyN2EiIHN0cm9rZS13aWR0aD0iNyIvPjxwYXRoIGQ9Ik03OTUgMTc1aDE0ME03OTUgMjMwaDE0ME03OTUgMjg1aDk1IiBzdHJva2U9IiNmZmQyN2EiIHN0cm9rZS13aWR0aD0iOCIvPjxwYXRoIGQ9Ik05MDAgMzQ1bDM1IDM1IDY1LTgwIiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyN2EiIHN0cm9rZS13aWR0aD0iMTAiLz48L3N2Zz4="); }
+        .create-promo-slide:nth-child(4) { background-image:linear-gradient(90deg,rgba(4,18,40,.94) 0%,rgba(4,18,40,.72) 46%,rgba(4,18,40,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWMzYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMWI0MCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI2MCIgcj0iMjQwIiBmaWxsPSIjMDBiOGZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjI1MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjEzMCIgcng9IjgiIGZpbGw9IiMzOWI3ZmYiLz48cmVjdCB4PSI4MDUiIHk9IjE5MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjE5MCIgcng9IjgiIGZpbGw9IiM2MmQ4YjUiLz48cmVjdCB4PSI4OTAiIHk9IjEwNSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjI3NSIgcng9IjgiIGZpbGw9IiNmZmQzNGQiLz48cGF0aCBkPSJNNzAwIDE0MGM4MCA1MCAxNTAtNDUgMjcwIDEwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3Y2U5ZmYiIHN0cm9rZS13aWR0aD0iOCIvPjwvc3ZnPg=="); }
+        .create-promo-slide:nth-child(5) { background-image:linear-gradient(90deg,rgba(25,11,48,.94) 0%,rgba(25,11,48,.72) 46%,rgba(25,11,48,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzIwMTA0NCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzQwMTU2YiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI1MCIgcj0iMjQwIiBmaWxsPSIjYjA2Y2ZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MDAiIHk9IjEyMCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjZDk1NzdjIiBzdHJva2U9IiNmZmIyYzUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDE1NSkiLz48cmVjdCB4PSI3MDAiIHk9IjE5MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjNGY4ZmU4IiBzdHJva2U9IiNhOWQ0ZmYiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDIyNSkiLz48cmVjdCB4PSI3MTUiIHk9IjI2MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjMzZiODhmIiBzdHJva2U9IiNhOGZmZTUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODQ1IDI5NSkiLz48L3N2Zz4="); }
+        .create-promo-slide.active { opacity:1; transform:translateX(0); }
+        .create-promo-title { font-size:19px; font-weight:800; line-height:1.25; margin-bottom:7px; color:#fff; max-width:58%; }
+        .create-promo-desc { font-size:13px; line-height:1.4; color:#d8e7f5; max-width:58%; }
+        .create-promo-dots { position:absolute; left:0; right:0; bottom:8px; display:flex; justify-content:center; gap:6px; z-index:3; }
+        .create-promo-dot { width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.42); transition:all .25s ease; }
+        .create-promo-dot.active { width:17px; border-radius:5px; background:#00d2ff; box-shadow:0 0 8px rgba(0,210,255,.7); }
+        .create-form-content { padding-bottom:6px; display:flex; flex-direction:column; min-height:calc(100vh - 95px - 185px); }
+        #create-screen .create-action-wrap { margin-top:auto; padding-top:10px; padding-bottom:4px; }
+        #create-screen .create-action-wrap .submit-btn { margin-bottom:0; }
+        #create-screen .input-title { margin-bottom:9px; }
+        #create-screen .upload-box { padding:18px 14px; margin-bottom:8px; }
+        #create-screen .input-text { margin-bottom:10px; }
+        @media (max-height:720px) { .create-promo-carousel{height:145px;} #create-screen .input-title{margin-bottom:8px;} #create-screen .upload-box{padding:15px 12px;margin-bottom:7px;} #create-screen .input-text{margin-bottom:9px;} .create-promo-title{font-size:18px;} .create-promo-desc{font-size:12.5px;} }
 
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: #00d2ff; font-weight: bold; text-shadow: 0 0 8px rgba(0, 210, 255, 0.5); }
         
