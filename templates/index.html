@@ -564,8 +564,8 @@
                     <div class="teacher-section-title"><span data-lang="teacher_sessions_title">📚 Faol va oldingi sessiyalar</span></div>
                     <div id="teacher-sessions-pro"><div class="teacher-empty" data-lang="teacher_loading">Yuklanmoqda...</div></div>
                 </div>
-                <select id="teacher-results-session" class="input-card"></select>
-                <button class="submit-btn" onclick="loadTeacherResultsPanel()" data-lang="teacher_show_results">📊 Natijalarni ko‘rsatish</button>
+                <select id="teacher-results-session" class="input-card" style="margin-top:14px;"></select>
+                <button type="button" class="submit-btn" style="margin-top:10px;" onclick="showSelectedTeacherResults()" data-lang="teacher_show_results">📊 Natijalarni ko‘rsatish</button>
                 <div id="teacher-results-panel-list" style="margin-top:12px;"></div>
             </div>
         </div>
@@ -1855,20 +1855,34 @@
             const sel=document.getElementById('teacher-results-session'),box=document.getElementById('teacher-results-panel-list');
             if(!sel||!box)return;
             try{
-                await loadTeacherSessionsPro();
+                const previousId=sel.value||'';
                 const d=await teacherFetchJson(`${BASE_URL}/api/teacher-sessions?user_id=${userId}&_t=${Date.now()}`);
                 const ss=d.sessions||[];
-                sel.innerHTML=ss.map(s=>`<option value="${s.id}">${escapeHtml(s.title)} — ${s.code}</option>`).join('')||`<option value="">${langPack[currentLang].teacher_no_sessions}</option>`;
+                sel.innerHTML=ss.map(s=>`<option value="${escapeHtml(s.id)}">${escapeHtml(s.title)} — ${escapeHtml(s.code)}</option>`).join('')||`<option value="">${langPack[currentLang].teacher_no_sessions}</option>`;
+                if(previousId && ss.some(s=>String(s.id)===String(previousId))) sel.value=previousId;
                 if(!ss.length){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].teacher_no_student_results}</div>`;return;}
-                const sessionId=sel.value||ss[0].id;
-                const r=await teacherFetchJson(`${BASE_URL}/api/teacher-session-results?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}`);
-                const resultTypeLabel=r.session.source_type==='assignment'?langPack[currentLang].teacher_assignment_type:langPack[currentLang].teacher_group_test_type;
-                let html=`<div class="teacher-chip-row"><span class="teacher-chip">🏷️ ${escapeHtml(resultTypeLabel)}</span><span class="teacher-chip">🔑 ${escapeHtml(r.session.code)}</span><span class="teacher-chip">📝 ${escapeHtml(r.session.quiz_title)}</span><span class="teacher-chip">👨‍🎓 ${r.participants.length} ${langPack[currentLang].teacher_members}</span><span class="teacher-chip">🟢 ${Number(r.active_students||0)} ${langPack[currentLang].student_active_students}</span><span class="teacher-chip">✅ ${Number(r.completed_students||0)} ${langPack[currentLang].student_completed_students}</span></div>`;
-                if(!r.participants.length) html+=`<div class="teacher-empty">${langPack[currentLang].teacher_no_student_results}</div>`;
-                else html+=`<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><tr><th style="text-align:left;padding:7px;">№</th><th style="text-align:left;padding:7px;">${langPack[currentLang].teacher_student}</th><th style="padding:7px;">${langPack[currentLang].teacher_score}</th><th style="padding:7px;">%</th></tr>${r.participants.map((p,i)=>`<tr><td style="padding:7px;">${i+1}</td><td style="padding:7px;">${escapeHtml(p.first_name||'-')}</td><td style="text-align:center;padding:7px;">${p.score}/${p.total}</td><td style="text-align:center;padding:7px;">${p.percent}%</td></tr>`).join('')}</table></div>`;
-                html+=`<div class="teacher-export-row"><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','pdf')">${langPack[currentLang].teacher_pdf}</button><button class="teacher-mini-btn" onclick="downloadTeacherExport('${sessionId}','docx')">${langPack[currentLang].teacher_word}</button></div>`;
-                box.innerHTML=html;
+                await renderTeacherResultsForSession(sel.value||ss[0].id,box);
             }catch(e){box.innerHTML=`<div class="teacher-empty">❌ ${escapeHtml(e.message||langPack[currentLang].teacher_server_error)}</div>`;}
+        }
+
+        async function showSelectedTeacherResults(){
+            const sel=document.getElementById('teacher-results-session'),box=document.getElementById('teacher-results-panel-list');
+            if(!sel||!box)return;
+            const sessionId=sel.value;
+            if(!sessionId){box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].teacher_no_sessions}</div>`;return;}
+            box.innerHTML=`<div class="teacher-empty">${langPack[currentLang].teacher_loading}</div>`;
+            try{ await renderTeacherResultsForSession(sessionId,box); }
+            catch(e){ box.innerHTML=`<div class="teacher-empty">❌ ${escapeHtml(e.message||langPack[currentLang].teacher_server_error)}</div>`; }
+        }
+
+        async function renderTeacherResultsForSession(sessionId,box){
+            const r=await teacherFetchJson(`${BASE_URL}/api/teacher-session-results?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&_t=${Date.now()}`);
+            const resultTypeLabel=r.session.source_type==='assignment'?langPack[currentLang].teacher_assignment_type:langPack[currentLang].teacher_group_test_type;
+            let html=`<div class="teacher-chip-row"><span class="teacher-chip">🏷️ ${escapeHtml(resultTypeLabel)}</span><span class="teacher-chip">🔑 ${escapeHtml(r.session.code)}</span><span class="teacher-chip">📝 ${escapeHtml(r.session.quiz_title)}</span><span class="teacher-chip">👨‍🎓 ${r.participants.length} ${langPack[currentLang].teacher_members}</span><span class="teacher-chip">🟢 ${Number(r.active_students||0)} ${langPack[currentLang].student_active_students}</span><span class="teacher-chip">✅ ${Number(r.completed_students||0)} ${langPack[currentLang].student_completed_students}</span></div>`;
+            if(!r.participants.length) html+=`<div class="teacher-empty">${langPack[currentLang].teacher_no_student_results}</div>`;
+            else html+=`<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><tr><th style="text-align:left;padding:7px;">№</th><th style="text-align:left;padding:7px;">${langPack[currentLang].teacher_student}</th><th style="padding:7px;">${langPack[currentLang].teacher_score}</th><th style="padding:7px;">%</th></tr>${r.participants.map((p,i)=>`<tr><td style="padding:7px;">${i+1}</td><td style="padding:7px;">${escapeHtml(p.first_name||'-')}</td><td style="text-align:center;padding:7px;">${p.score}/${p.total}</td><td style="text-align:center;padding:7px;">${p.percent}%</td></tr>`).join('')}</table></div>`;
+            html+=`<div class="teacher-export-row"><button type="button" class="teacher-mini-btn" onclick="downloadTeacherExport('${escapeHtml(sessionId)}','pdf')">${langPack[currentLang].teacher_pdf}</button><button type="button" class="teacher-mini-btn" onclick="downloadTeacherExport('${escapeHtml(sessionId)}','docx')">${langPack[currentLang].teacher_word}</button></div>`;
+            box.innerHTML=html;
         }
 
         async function loadTeacherCenter(){await loadTeacherPanel();}
