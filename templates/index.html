@@ -205,6 +205,63 @@
         .nav-item.active .nav-icon { transform: translateY(-2px); filter: drop-shadow(0 0 5px #00d2ff); }
         .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); transition: transform 0.2s ease; }
 
+
+        /* Yaratish bo‘limi: yuqorida aylanuvchi promo/imkoniyatlar kartochkasi.
+           Keyinchalik shu blokka reklama yoki boshqa bannerlarni qo‘shish mumkin. */
+        .create-promo-carousel {
+            position: relative;
+            height: 112px;
+            margin: 0 0 14px 0;
+            overflow: hidden;
+            border-radius: 12px;
+        }
+        .create-promo-slide {
+            position: absolute;
+            inset: 0;
+            padding: 14px 16px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            opacity: 0;
+            transform: translateX(18px);
+            transition: opacity .45s ease, transform .45s ease;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(0,153,255,.16), rgba(255,255,255,.055));
+            border: 1px solid rgba(0,210,255,.32);
+            box-shadow: 0 5px 18px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.18);
+        }
+        .create-promo-slide.active { opacity: 1; transform: translateX(0); }
+        .create-promo-title { font-size: 16px; font-weight: 800; line-height: 1.25; margin-bottom: 5px; color:#fff; }
+        .create-promo-desc { font-size: 12px; line-height: 1.35; color: var(--text-hint); }
+        .create-promo-dots {
+            position: absolute; left: 0; right: 0; bottom: 7px;
+            display: flex; justify-content: center; gap: 5px; z-index: 3;
+        }
+        .create-promo-dot {
+            width: 5px; height: 5px; border-radius: 50%;
+            background: rgba(255,255,255,.35); transition: all .25s ease;
+        }
+        .create-promo-dot.active { width: 15px; border-radius: 5px; background: #00d2ff; box-shadow: 0 0 7px rgba(0,210,255,.65); }
+        .create-form-content {
+            padding-bottom: 6px;
+            display: flex;
+            flex-direction: column;
+            min-height: calc(100vh - 95px - 185px);
+        }
+        #create-screen .create-action-wrap {
+            margin-top: auto;
+            padding-top: 10px;
+            padding-bottom: 4px;
+        }
+        #create-screen .create-action-wrap .submit-btn { margin-bottom: 0; }
+        @media (max-height: 720px) {
+            .create-promo-carousel { height: 96px; }
+            #create-screen .input-title { margin-bottom: 10px; }
+            #create-screen .upload-box { padding: 18px 14px; margin-bottom: 10px; }
+            #create-screen .input-text { margin-bottom: 12px; }
+        }
+
         .loader { display: none; text-align: center; padding: 20px; font-size: 16px; color: #00d2ff; font-weight: bold; text-shadow: 0 0 8px rgba(0, 210, 255, 0.5); }
         
         .settings-box { 
@@ -442,16 +499,47 @@
 
     <div id="create-screen" class="screen">
         <div class="header"><h1 data-lang="nav_create">Yangi Test</h1></div>
-        <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
-        <div class="upload-box" onclick="document.getElementById('file-input').click()">
-            <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
-            <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
-            <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+
+        <div id="create-promo-carousel" class="create-promo-carousel" aria-label="Quiz Pilot imkoniyatlari">
+            <div class="create-promo-slide glass-panel active">
+                <div class="create-promo-title" data-lang="promo_1_title">🤖 AI yordamida test yaratish</div>
+                <div class="create-promo-desc" data-lang="promo_1_desc">Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.</div>
+            </div>
+            <div class="create-promo-slide glass-panel">
+                <div class="create-promo-title" data-lang="promo_2_title">👨‍🏫 Professional O‘qituvchi</div>
+                <div class="create-promo-desc" data-lang="promo_2_desc">Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.</div>
+            </div>
+            <div class="create-promo-slide glass-panel">
+                <div class="create-promo-title" data-lang="promo_3_title">📝 Topshiriq va guruh testlari</div>
+                <div class="create-promo-desc" data-lang="promo_3_desc">O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.</div>
+            </div>
+            <div class="create-promo-slide glass-panel">
+                <div class="create-promo-title" data-lang="promo_4_title">📊 Natijalar va 4 xil variant</div>
+                <div class="create-promo-desc" data-lang="promo_4_desc">A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.</div>
+            </div>
+            <div class="create-promo-slide glass-panel">
+                <div class="create-promo-title" data-lang="promo_5_title">📚 Kutubxona va guruhga qo‘shilish</div>
+                <div class="create-promo-desc" data-lang="promo_5_desc">Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.</div>
+            </div>
+            <div class="create-promo-dots" aria-hidden="true">
+                <span class="create-promo-dot active"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span>
+            </div>
         </div>
-        <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
-        <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
-        <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
-        <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
+
+        <div class="create-form-content">
+            <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
+            <div class="upload-box" onclick="document.getElementById('file-input').click()">
+                <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
+                <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
+                <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+            </div>
+            <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
+            <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
+            <div class="create-action-wrap">
+                <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
+            </div>
+            <div id="loading-status" class="loader" data-lang="loading_status">⏳ AI test tayyorlamoqda, iltimos kuting...</div>
+        </div>
     </div>
 
     <div id="library-screen" class="screen active">
@@ -714,7 +802,7 @@
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", or_text: "yoki matn kiriting:",
-                btn_generate: "AI yordamida yaratish 🚀", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
+                btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", loading_status: "⏳ AI test tayyorlamoqda, iltimos kuting...",
                 select_lang: "Tizim tilini tanlang:", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
@@ -744,7 +832,7 @@
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.", student_active_tests: "🚀 Активные тесты", student_no_active_tests: "Активных тестов пока нет. Когда учитель запустит тест, он появится здесь.", student_test_start: "🚀 Начать тест", student_test_info: "📝 {total} вопросов · ⏱️ {duration} мин.", student_test_remaining: "Осталось: {time}", student_new_test: "🔔 Новый тест начался", student_session_expired: "⏰ Эта сессия теста завершена.", student_session_access: "Чтобы войти в групповой тест, сначала присоединитесь к группе.", student_active_students: "Активные ученики", student_completed_students: "Завершили", student_time_up: "⏰ Время вышло.", student_test_completed: "✅ Тест завершён", student_test_result: "Ваш результат: {score}/{total} ({percent}%)",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", or_text: "или введите текст:",
-                btn_generate: "Создать с помощью ИИ 🚀", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
+                btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", loading_status: "⏳ ИИ готовит тест, пожалуйста подождите...",
                 select_lang: "Выберите язык системы:", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
@@ -774,7 +862,7 @@
                 tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.", student_active_tests: "🚀 Active tests", student_no_active_tests: "No active tests yet. It will appear here when the teacher starts a test.", student_test_start: "🚀 Start test", student_test_info: "📝 {total} questions · ⏱️ {duration} min", student_test_remaining: "Time left: {time}", student_new_test: "🔔 New test started", student_session_expired: "⏰ This test session has ended.", student_session_access: "Join the group first to enter this group test.", student_active_students: "Active students", student_completed_students: "Completed", student_time_up: "⏰ Time is up.", student_test_completed: "✅ Test completed", student_test_result: "Your result: {score}/{total} ({percent}%)",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", or_text: "or enter text:",
-                btn_generate: "Generate with AI 🚀", loading_status: "⏳ AI is preparing the quiz, please wait...",
+                btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", loading_status: "⏳ AI is preparing the quiz, please wait...",
                 select_lang: "Select system language:", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
@@ -1092,6 +1180,30 @@
             document.querySelectorAll('#lang-uz, #lang-ru, #lang-en').forEach(b => b.classList.remove('active'));
             const activeBtn = document.getElementById(`lang-${currentLang}`);
             if(activeBtn) activeBtn.classList.add('active');
+        }
+
+        let createPromoIndex = 0;
+        let createPromoTimer = null;
+
+        function initCreatePromoCarousel() {
+            const carousel = document.getElementById('create-promo-carousel');
+            if (!carousel || carousel.dataset.ready === '1') return;
+            carousel.dataset.ready = '1';
+            const slides = Array.from(carousel.querySelectorAll('.create-promo-slide'));
+            const dots = Array.from(carousel.querySelectorAll('.create-promo-dot'));
+            const showSlide = (index) => {
+                if (!slides.length) return;
+                createPromoIndex = (index + slides.length) % slides.length;
+                slides.forEach((slide, i) => slide.classList.toggle('active', i === createPromoIndex));
+                dots.forEach((dot, i) => dot.classList.toggle('active', i === createPromoIndex));
+            };
+            dots.forEach((dot, i) => dot.addEventListener('click', () => showSlide(i)));
+            showSlide(0);
+            if (createPromoTimer) clearInterval(createPromoTimer);
+            createPromoTimer = setInterval(() => {
+                const screen = document.getElementById('create-screen');
+                if (screen && screen.classList.contains('active')) showSlide(createPromoIndex + 1);
+            }, 4500);
         }
 
         function switchScreen(screenName) {
@@ -1943,6 +2055,7 @@
 
         window.onload = function() {
             applyLocalization();
+            initCreatePromoCarousel();
             setupVibration();
             updateSoundToggle();
 
