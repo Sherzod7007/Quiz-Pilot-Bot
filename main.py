@@ -768,12 +768,16 @@ def handle_receipt_photo(message):
     btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p_rej_{tx_id}_{user_id}")
     admin_markup.row(btn_approve, btn_reject)
 
+    # Admin uchun tarif nomi foydalanuvchi tilidan qat'i nazar doim O'zbek tilida ko'rsatiladi.
+    plan_key = get_plan_key(tariff_name)
+    admin_tariff_name = localized_tariff_name(plan_key, "uz") if plan_key else tariff_name
+
     admin_text = (
         f"💰 YANGI TO'LOV SO'ROVI!\n\n"
         f"👤 Foydalanuvchi: {first_name} ({username})\n"
         f"🆔 Telegram ID: {user_id}\n"
         f"🌐 Til kodi: {user_lang.upper()}\n"
-        f"📦 Tanlangan Tarif: {tariff_name}\n"
+        f"📦 Tanlangan Tarif: {admin_tariff_name}\n"
         f"💵 To'lov Summasi: {tariff_price}\n"
         f"🧩 Tranzaksiya ID: {tx_id}\n\n"
         f"Chek to'g'riligini tekshiring va pastdagi tugmalardan birini bosing."
