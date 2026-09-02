@@ -1153,6 +1153,14 @@ async def create_quiz_web(
                 "message": "AI savollar ro'yxatini bo'sh qaytardi.",
             }
 
+        # AI ba'zan to'g'ri javobni ketma-ket A/A/A yoki C/C/C kabi bir xil
+        # pozitsiyada joylashtirib qo'yishi mumkin. Test qiziqarli va adolatli
+        # bo'lishi uchun variantlar server tomonda qayta aralashtiriladi.
+        # To'g'ri javob matni o'zgarmaydi, faqat A/B/C/D dagi joylashuvi
+        # tasodifiy va muvozanatli tarzda almashtiriladi.
+        _randomize_quiz_answer_positions(items)
+        quiz_json_raw = json.dumps(quiz_data, ensure_ascii=False)
+
         quiz_id = f"q_{uuid.uuid4().hex}"
         final_title = (
             quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
@@ -1190,6 +1198,50 @@ async def create_quiz_web(
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def _randomize_quiz_answer_positions(items):
+    """AI bergan to'g'ri javoblarni A/B/C/D bo'yicha tasodifiy aralashtiradi.
+
+    Har bir savolda to'g'ri javobning o'zi saqlanadi, faqat uning pozitsiyasi
+    o'zgaradi. Pozitsiyalar 0..3 bo'yicha oldindan muvozanatlashtirilib, keyin
+    tasodifiy aralashtiriladi; shu sababli katta testlarda ham A yoki C ga
+    yopishib qolish ehtimoli keskin kamayadi.
+    """
+    if not items:
+        return
+
+    rng = random.SystemRandom()
+    positions = [i % 4 for i in range(len(items))]
+    rng.shuffle(positions)
+
+    for item, target_correct in zip(items, positions):
+        options = item.get("options")
+        if not isinstance(options, list) or len(options) != 4:
+            continue
+
+        try:
+            correct_index = int(item.get("correct_index", 0))
+        except (TypeError, ValueError):
+            correct_index = 0
+        if not 0 <= correct_index < 4:
+            correct_index = 0
+
+        # To'g'ri javob va qolgan 3 ta variantni ajratamiz.
+        correct_option = options[correct_index]
+        wrong_options = [opt for i, opt in enumerate(options) if i != correct_index]
+        rng.shuffle(wrong_options)
+
+        # Tanlangan target_correct joyiga to'g'ri javobni qo'yamiz.
+        new_options = [None] * 4
+        new_options[target_correct] = correct_option
+        wrong_iter = iter(wrong_options)
+        for i in range(4):
+            if new_options[i] is None:
+                new_options[i] = next(wrong_iter)
+
+        item["options"] = new_options
+        item["correct_index"] = target_correct
 
 
 def generate_quiz_from_gemini(extracted_text):
