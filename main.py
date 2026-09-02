@@ -1226,12 +1226,12 @@ CRITICAL RULES:
                 client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
                     model="gemini-1.5-flash",
-                    contents=extracted_text[:80000],
+                    contents=extracted_text[:15000],
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json",
                         response_schema=QuizResponse,
-                        temperature=0.2,
+                        temperature=0.7,
                     ),
                 )
 
