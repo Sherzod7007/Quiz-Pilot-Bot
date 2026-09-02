@@ -1013,6 +1013,119 @@ def get_premium_status(user_id: int):
     }
 
 
+# --- AI QUIZ GENERATION: tezlik, barqarorlik va javoblarni muvozanatlash ---
+# Juda katta matn Gemini javobini sekinlashtirishi mumkin. 60 ming belgi
+# ko'pchilik darsliklar uchun yetarli va so'rovni ancha yengillashtiradi.
+MAX_AI_INPUT_CHARS = 60000
+MAX_LONG_TEXT_QUESTIONS = 30
+
+
+def _restore_free_quiz_slot(user_id: int):
+    """Failed generation bo'lsa, oldindan band qilingan bepul limitni qaytaradi."""
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE users SET free_used = CASE WHEN COALESCE(free_used,0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?",
+            (user_id,),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Bepul limitni qaytarishda xato: {e}")
+
+
+def _randomize_quiz_answer_positions(items):
+    """Har bir savoldagi 4 variantni aralashtiradi va A/B/C/D kalitlarini muvozanatlaydi.
+
+    AI A yoki B ni ketma-ket to'g'ri javob qilib yuborsa ham, server buni
+    foydalanuvchiga saqlashdan oldin tuzatadi. Variant matnlari o'zgarmaydi,
+    faqat ularning joylashuvi va correct_index birgalikda almashtiriladi.
+    """
+    prepared = []
+    counts = [0, 0, 0, 0]
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        options = item.get("options")
+        try:
+            correct = int(item.get("correct_index", 0))
+        except (TypeError, ValueError):
+            correct = 0
+        if not isinstance(options, list) or len(options) != 4 or not (0 <= correct < 4):
+            continue
+        if any(not isinstance(x, str) or not x.strip() for x in options):
+            continue
+        prepared.append((item, list(options), correct))
+
+    if not prepared:
+        return items
+
+    # Har bir savol uchun eng kam ishlatilgan A/B/C/D pozitsiyalaridan birini
+    # tanlaymiz. Teng holatlarda random tanlov qilinadi.
+    random.shuffle(prepared)
+    for item, options, correct in prepared:
+        min_count = min(counts)
+        candidates = [i for i, c in enumerate(counts) if c == min_count]
+        target = random.choice(candidates)
+
+        # Noto'g'ri variantlar ham tasodifiy joylashsin.
+        wrong_positions = [i for i in range(4) if i != target]
+        wrong_indices = [i for i in range(4) if i != correct]
+        random.shuffle(wrong_indices)
+        positions = [None] * 4
+        positions[target] = correct
+        for pos, old_idx in zip(wrong_positions, wrong_indices):
+            positions[pos] = old_idx
+
+        new_options = [options[old_idx] for old_idx in positions]
+        item["options"] = new_options
+        item["correct_index"] = target
+        counts[target] += 1
+
+    return items
+
+
+def _normalize_generated_quiz(quiz_data):
+    """Gemini javobini tekshiradi, ortiqcha savollarni kesadi va javob kalitini aralashtiradi."""
+    if not isinstance(quiz_data, dict):
+        raise ValueError("AI javobi JSON obyekt emas")
+    items = quiz_data.get("quizzes")
+    if not isinstance(items, list) or not items:
+        raise ValueError("AI savollar ro'yxatini bo'sh qaytardi")
+
+    valid_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        options = item.get("options")
+        explanation = str(item.get("explanation", "")).strip()
+        try:
+            correct = int(item.get("correct_index", 0))
+        except (TypeError, ValueError):
+            continue
+        if not question or not isinstance(options, list) or len(options) != 4:
+            continue
+        options = [str(x).strip() for x in options]
+        if any(not x for x in options) or not (0 <= correct < 4):
+            continue
+        valid_items.append({
+            "question": question,
+            "options": options,
+            "correct_index": correct,
+            "explanation": explanation,
+        })
+
+    if not valid_items:
+        raise ValueError("AI yaroqli test savollarini qaytarmadi")
+
+    _randomize_quiz_answer_positions(valid_items)
+    quiz_data["quizzes"] = valid_items
+    return quiz_data
+
+
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1023,6 +1136,9 @@ async def create_quiz_web(
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
+    # Limitni Gemini chaqiruvidan oldin tekshiramiz, lekin slotni matn/fayl
+    # haqiqatan o'qilgandan keyin band qilamiz. Shunda noto'g'ri fayl yoki
+    # bo'sh matn bepul limitni bekorga kamaytirmaydi.
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
@@ -1031,61 +1147,27 @@ async def create_quiz_web(
         (user_id,),
     )
     user_row = cursor_check.fetchone()
+    current_status = (user_row["status"] if user_row else "Oddiy foydalanuvchi") or "Oddiy foydalanuvchi"
+    premium_until = (user_row["premium_until"] if user_row else 0) or 0
+    created_at = (user_row["created_at"] if user_row else int(time.time())) or int(time.time())
+    current_now = int(time.time())
 
-    if user_row:
-        current_status = user_row["status"] or "Oddiy foydalanuvchi"
-        premium_until = user_row["premium_until"] or 0
-        free_used = user_row["free_used"] if user_row["free_used"] is not None else 0
-        created_at = user_row["created_at"] or int(time.time())
-        current_now = int(time.time())
+    if current_now - created_at >= 30 * 24 * 3600:
+        cursor_check.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (current_now, user_id),
+        )
+        conn_check.commit()
 
-        thirty_days_sec = 30 * 24 * 3600
-        if current_now - created_at >= thirty_days_sec:
-            cursor_check.execute(
-                "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
-                (current_now, user_id),
-            )
-            conn_check.commit()
-            free_used = 0
-
-        if (
-            "PRO" in current_status
-            and premium_until > 0
-            and current_now > premium_until
-        ):
-            cursor_check.execute(
-                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
-                (user_id,),
-            )
-            conn_check.commit()
-            current_status = "Oddiy foydalanuvchi"
-
-        # 30 kunlik bepul limit: faqat 1 ta.
-        # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
-        # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
-        # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
-        if "PRO" not in current_status:
-            cursor_check.execute(
-                "UPDATE users "
-                "SET free_used = COALESCE(free_used, 0) + 1 "
-                "WHERE user_id = ? AND COALESCE(free_used, 0) < ?",
-                (user_id, FREE_QUIZ_LIMIT),
-            )
-            if cursor_check.rowcount != 1:
-                conn_check.close()
-                return {
-                    "status": "error",
-                    "error_code": "free_limit",
-                    "message": MESSAGES[user_lang]["quiz_limit_reached"],
-                }
-            conn_check.commit()
-            free_slot_reserved = True
-        else:
-            free_slot_reserved = False
-    else:
-        free_slot_reserved = False
-
+    if "PRO" in current_status and premium_until > 0 and current_now > premium_until:
+        cursor_check.execute(
+            "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
+            (user_id,),
+        )
+        conn_check.commit()
+        current_status = "Oddiy foydalanuvchi"
     conn_check.close()
+    free_slot_reserved = False
 
     raw_text = ""
     auto_title = "Matnli Test"
@@ -1123,35 +1205,43 @@ async def create_quiz_web(
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
+    # Juda katta PDF/DOCX yoki matn Gemini'ni ortiqcha uzoq ushlab qolmasligi uchun
+    # kirishni xavfsiz hajmga qisqartiramiz.
+    if len(raw_text) > MAX_AI_INPUT_CHARS:
+        raw_text = raw_text[:MAX_AI_INPUT_CHARS]
+        logging.info(f"AI input qisqartirildi: {MAX_AI_INPUT_CHARS} belgi")
+
+    # Endi, input haqiqatan tayyor bo'lgach, bepul slotni atomik band qilamiz.
+    if "PRO" not in current_status:
+        conn_reserve = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cur_reserve = conn_reserve.cursor()
+        cur_reserve.execute(
+            "UPDATE users SET free_used = COALESCE(free_used, 0) + 1 WHERE user_id = ? AND COALESCE(free_used, 0) < ?",
+            (user_id, FREE_QUIZ_LIMIT),
+        )
+        if cur_reserve.rowcount != 1:
+            conn_reserve.close()
+            return {"status": "error", "error_code": "free_limit", "message": MESSAGES[user_lang]["quiz_limit_reached"]}
+        conn_reserve.commit()
+        conn_reserve.close()
+        free_slot_reserved = True
+
     # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
     # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
     quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
-                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
-                cur_restore = conn_restore.cursor()
-                cur_restore.execute(
-                    "UPDATE users "
-                    "SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 "
-                    "THEN free_used - 1 ELSE 0 END "
-                    "WHERE user_id = ?",
-                    (user_id,),
-                )
-                conn_restore.commit()
-                conn_restore.close()
+                _restore_free_quiz_slot(user_id)
             except Exception as e:
                 logging.error(f"Bepul limitni qaytarishda xato: {e}")
         return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
-        items = quiz_data.get("quizzes", [])
-        if not items:
-            return {
-                "status": "error",
-                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
-            }
+        quiz_data = _normalize_generated_quiz(quiz_data)
+        items = quiz_data["quizzes"]
+        quiz_json_final = json.dumps(quiz_data, ensure_ascii=False)
 
         quiz_id = f"q_{uuid.uuid4().hex}"
         final_title = (
@@ -1170,7 +1260,7 @@ async def create_quiz_web(
                 final_title[:30],
                 len(items),
                 0,
-                quiz_json_raw,
+                quiz_json_final,
                 int(time.time()),
                 -1,
                 -1,
@@ -1189,7 +1279,10 @@ async def create_quiz_web(
             logging.error(f"Telegram xabari yuborilmadi: {e}")
         return {"status": "ok"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logging.exception(f"AI testni yakunlashda xato: {e}")
+        if free_slot_reserved:
+            _restore_free_quiz_slot(user_id)
+        return {"status": "error", "message": "AI testini tayyorlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring."}
 
 
 def generate_quiz_from_gemini(extracted_text):
@@ -1202,7 +1295,9 @@ def generate_quiz_from_gemini(extracted_text):
     system_instruction = """You are an advanced AI quiz generator.
 CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
+2. QUESTION COUNT RULE: If the user supplied an explicit list of questions, preserve those questions and format them. For normal notes/textbooks, generate a concise set of high-quality questions and NEVER exceed 30 questions.
+3. OPTION RULE: Every question MUST have exactly 4 distinct options. The correct_index MUST identify the correct option (0=A, 1=B, 2=C, 3=D).
+4. ANSWER DISTRIBUTION RULE: Do NOT make the correct answer always A, B, C, or another fixed position. Distribute correct_index across 0,1,2,3 as evenly as practical and avoid long consecutive runs of the same index. The server will also randomize the final positions."""
 
     total_keys = len(GOOGLE_API_KEYS)
 
@@ -1225,13 +1320,14 @@ CRITICAL RULES:
             try:
                 client = genai.Client(api_key=api_key)
                 response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=extracted_text[:80000],
+                    model="gemini-2.5-flash",
+                    contents=extracted_text[:MAX_AI_INPUT_CHARS],
                     config=genai_types.GenerateContentConfig(
                         system_instruction=system_instruction,
                         response_mime_type="application/json",
                         response_schema=QuizResponse,
-                        temperature=0.2,
+                        temperature=0.4,
+                        max_output_tokens=12000,
                     ),
                 )
 
