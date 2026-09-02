@@ -63,10 +63,6 @@ key_lock = threading.Lock()
 # Bir vaqtning o'zida Gemini'ga juda ko'p so'rov yuborilib ketmasligi uchun.
 # 7 ta key mavjud bo'lgani sababli 7 ta parallel Gemini requestga ruxsat beriladi.
 gemini_semaphore = threading.Semaphore(max(1, min(7, len(GOOGLE_API_KEYS))))
-# Gemini modeli: avval 3.6 Flash, zarurat bo'lsa 2.5 Flash zaxira model sifatida ishlatiladi.
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
-GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
-GEMINI_TIMEOUT_MS = 20000
 
 DOWNLOADS_DIR = "downloads"
 DB_PATH = (
@@ -496,64 +492,6 @@ class QuizItem(BaseModel):
 
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
-
-
-def randomize_quiz_answers(quiz_data):
-    """Gemini qaytargan A-A-A-A kabi kalitlarni server darajasida yo'q qiladi.
-
-    Har bir savolda variantlar aralashtiriladi va to'g'ri javob indekslari
-    A/B/C/D bo'yicha imkon qadar teng taqsimlanadi. To'g'ri javobning
-    mazmuni o'zgarmaydi, faqat uning pozitsiyasi almashtiriladi.
-    """
-    if not isinstance(quiz_data, dict) or not isinstance(quiz_data.get("quizzes"), list):
-        raise ValueError("AI javobi quizzes ro'yxatini o'z ichiga olishi kerak")
-
-    items = quiz_data["quizzes"]
-    if not items:
-        raise ValueError("AI savollar ro'yxatini bo'sh qaytardi")
-
-    valid_items = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        options = item.get("options")
-        correct_index = item.get("correct_index")
-        if not isinstance(options, list) or len(options) != 4:
-            continue
-        if not isinstance(correct_index, int) or not 0 <= correct_index < 4:
-            continue
-        clean_options = [str(x).strip() for x in options]
-        if any(not x for x in clean_options) or len(set(clean_options)) != 4:
-            continue
-
-        # To'g'ri javobni avval alohida olib, qolgan 3 variantni aralashtiramiz.
-        correct_value = clean_options[correct_index]
-        wrong_values = [v for i, v in enumerate(clean_options) if i != correct_index]
-        secrets.SystemRandom().shuffle(wrong_values)
-
-        valid_items.append({
-            "item": item,
-            "correct_value": correct_value,
-            "wrong_values": wrong_values,
-        })
-
-    if not valid_items:
-        raise ValueError("AI 4 ta yaroqli variantli savollar qaytarmadi")
-
-    # A/B/C/D pozitsiyalarini sikl bo'yicha tenglashtirib, keyin tasodifiy qilamiz.
-    target_positions = [i % 4 for i in range(len(valid_items))]
-    secrets.SystemRandom().shuffle(target_positions)
-
-    result = []
-    for record, target in zip(valid_items, target_positions):
-        choices = list(record["wrong_values"])
-        choices.insert(target, record["correct_value"])
-        item = dict(record["item"])
-        item["options"] = choices
-        item["correct_index"] = target
-        result.append(item)
-
-    return {"quizzes": result}
 
 
 class ProgressUpdateRequest(BaseModel):
@@ -1185,21 +1123,9 @@ async def create_quiz_web(
     if not raw_text.strip():
         return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
 
-    # Gemini SDK sinxron bo'lgani uchun alohida threadda ishlaydi.
-    # AI so'rovi ichida timeout va zaxira model mavjud, shuning uchun loader
-    # cheksiz osilib qolmaydi.
-    try:
-        quiz_json_raw = await asyncio.wait_for(
-            asyncio.to_thread(generate_quiz_from_gemini, raw_text),
-            timeout=95,
-        )
-    except asyncio.TimeoutError:
-        logging.error("AI test yaratish umumiy timeoutga tushdi")
-        quiz_json_raw = None
-    except Exception as e:
-        logging.exception("AI test yaratishda kutilmagan xato: %s", e)
-        quiz_json_raw = None
-
+    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
+    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
+    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
@@ -1220,13 +1146,12 @@ async def create_quiz_web(
 
     try:
         quiz_data = json.loads(quiz_json_raw)
-        # Muhim: javob variantlarini Gemini emas, serverning o'zi random qiladi.
-        # Shu bilan A-A-A-A yoki B-B-B-B kabi javob kalitlari paydo bo'lmaydi.
-        quiz_data = randomize_quiz_answers(quiz_data)
         items = quiz_data.get("quizzes", [])
         if not items:
-            raise ValueError("AI savollar ro'yxatini bo'sh qaytardi")
-        quiz_json_raw = json.dumps(quiz_data, ensure_ascii=False)
+            return {
+                "status": "error",
+                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
+            }
 
         quiz_id = f"q_{uuid.uuid4().hex}"
         final_title = (
@@ -1264,20 +1189,7 @@ async def create_quiz_web(
             logging.error(f"Telegram xabari yuborilmadi: {e}")
         return {"status": "ok"}
     except Exception as e:
-        if free_slot_reserved:
-            try:
-                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
-                cur_restore = conn_restore.cursor()
-                cur_restore.execute(
-                    "UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?",
-                    (user_id,),
-                )
-                conn_restore.commit()
-                conn_restore.close()
-            except Exception as restore_error:
-                logging.error("Bepul limitni qaytarishda xato: %s", restore_error)
-        logging.exception("Yaratilgan testni saqlash/parslashda xato: %s", e)
-        return {"status": "error", "message": "Testni tayyorlashda xatolik yuz berdi. Iltimos, qayta urinib ko'ring."}
+        return {"status": "error", "message": str(e)}
 
 
 def generate_quiz_from_gemini(extracted_text):
@@ -1287,74 +1199,55 @@ def generate_quiz_from_gemini(extracted_text):
         logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
         return None
 
-    # Qisqa materialda AI ortiqcha savollar o'ylab topmasligi uchun aniq qoida.
-    # Raqamlangan/savol belgisi bilan berilgan savollar bo'lsa, aynan shular saqlanadi.
-    system_instruction = """You are an advanced, reliable AI quiz generator.
+    system_instruction = """You are an advanced AI quiz generator.
 CRITICAL RULES:
-1. LANGUAGE: Generate questions, choices, and explanations in the EXACT SAME language as the source text.
-2. SOURCE QUESTIONS: If the user provides explicit questions (numbered lines or lines ending with ?), preserve exactly those questions and do NOT invent additional questions.
-3. SHORT INPUT: If the source is short and contains only a few questions, return only those questions. Do not expand a 5-question input into 20 questions.
-4. OPTIONS: Every question MUST have exactly 4 distinct answer choices.
-5. CORRECT ANSWER: correct_index must point to the exact correct choice (0=A, 1=B, 2=C, 3=D).
-6. OUTPUT: Return valid JSON matching the required schema only.
-7. QUALITY: Avoid duplicate choices, ambiguous answers, and unsupported facts. Keep explanations concise so the test is generated quickly."""
+1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
+2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
 
     total_keys = len(GOOGLE_API_KEYS)
+
+    # Har bir yangi test yaratish jarayoniga navbatdagi key beriladi.
+    # Lock parallel requestlar bir xil start_index olishini oldini oladi.
     with key_lock:
         start_index = current_key_index
         current_key_index = (current_key_index + 1) % total_keys
 
-    # Bir vaqtning o'zida 7 tagacha requestga ruxsat. Har bir requestning
-    # o'z HTTP timeouti bor, shuning uchun bitta osilgan key butun ilovani ushlab turmaydi.
+    # 7 ta key bo'lsa, bir vaqtning o'zida maksimal 7 ta Gemini request.
+    # Qolgan requestlar navbat kutadi va serverni birdaniga bosib yubormaydi.
     with gemini_semaphore:
         for i in range(total_keys):
             key_idx = (start_index + i) % total_keys
             api_key = GOOGLE_API_KEYS[key_idx].strip()
+
             if not api_key:
                 continue
 
-            models_to_try = [GEMINI_MODEL]
-            if GEMINI_FALLBACK_MODEL and GEMINI_FALLBACK_MODEL not in models_to_try:
-                models_to_try.append(GEMINI_FALLBACK_MODEL)
+            try:
+                client = genai.Client(api_key=api_key)
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=extracted_text[:80000],
+                    config=genai_types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=QuizResponse,
+                        temperature=0.2,
+                    ),
+                )
 
-            for model_name in models_to_try:
-                try:
-                    try:
-                        http_options = genai_types.HttpOptions(timeout=GEMINI_TIMEOUT_MS)
-                        client = genai.Client(api_key=api_key, http_options=http_options)
-                    except Exception:
-                        # Eski google-genai SDK versiyalarida HttpOptions bo'lmasligi mumkin.
-                        client = genai.Client(api_key=api_key)
-
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=extracted_text[:60000],
-                        config=genai_types.GenerateContentConfig(
-                            system_instruction=system_instruction,
-                            response_mime_type="application/json",
-                            response_schema=QuizResponse,
-                            temperature=0.15,
-                            max_output_tokens=10000,
-                        ),
+                if response and response.text:
+                    logging.info(
+                        f"Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi: [{key_idx}]"
                     )
+                    return response.text
 
-                    if response and response.text:
-                        logging.info(
-                            "AI test muvaffaqiyatli yaratildi: key=[%s], model=%s",
-                            key_idx, model_name,
-                        )
-                        return response.text
+            except Exception as e:
+                logging.warning(
+                    f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. "
+                    f"Xatolik: {e}. Keyingi kalitga o'tilmoqda..."
+                )
 
-                except Exception as e:
-                    logging.warning(
-                        "Gemini key [%s], model [%s] xatosi: %s",
-                        key_idx, model_name, e,
-                    )
-                    # 3.6 model vaqtincha ishlamasa, shu keyda darhol 2.5 Flash
-                    # zaxirasiga o'tamiz; keyin boshqa API key tekshiriladi.
-                    continue
-
-    logging.error("Barcha Gemini API kalit/model urinishlari muvaffaqiyatsiz bo'ldi.")
+    logging.error("Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi.")
     return None
 
 
