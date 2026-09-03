@@ -1428,14 +1428,14 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
             }
         conn.commit()
 
-    cursor.execute("SELECT quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
+    cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
 
     if not row or row["is_public"] != 1:
         raise HTTPException(status_code=404, detail=teacher_text(owner_id, "quiz_not_found"))
 
-    return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+    return {"status": "ok", "title": row["title"] or "Test", "quiz_json": json.loads(row["quiz_json"])}
 
 
 @app.post("/api/toggle-public")
@@ -2571,7 +2571,7 @@ def teacher_session_start(session_id: str, user_id: int):
 @app.get("/api/teacher-session-quiz")
 def teacher_session_quiz(session_id: str, user_id: int):
     conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND COALESCE(s.deleted,0)=0", (session_id,))
+    cur.execute("SELECT s.quiz_id, q.title, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND COALESCE(s.deleted,0)=0", (session_id,))
     row=cur.fetchone()
     if not row: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     access = _student_can_access_session(conn, session_id, user_id)
@@ -2582,7 +2582,7 @@ def teacher_session_quiz(session_id: str, user_id: int):
         payload = _get_teacher_variant(row["quiz_id"], _session_owner_id(session_id, user_id), row["variant_code"])
     else:
         payload = json.loads(row["quiz_json"])
-    return {"status":"ok", "quiz_id":row["quiz_id"], "quiz_json":payload, "variant_code":row["variant_code"]}
+    return {"status":"ok", "quiz_id":row["quiz_id"], "title":row["title"] or "Test", "quiz_json":payload, "variant_code":row["variant_code"]}
 
 
 class TeacherSubmitRequest(BaseModel):
@@ -2790,11 +2790,11 @@ def get_quiz_detail(quiz_id: str):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    cursor.execute("SELECT title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {"status": "ok", "quiz_json": json.loads(row["quiz_json"])}
+        return {"status": "ok", "title": row["title"] or "Test", "quiz_json": json.loads(row["quiz_json"])}
     raise HTTPException(status_code=404, detail="Test topilmadi")
 
 
