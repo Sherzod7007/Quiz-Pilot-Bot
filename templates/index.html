@@ -1574,6 +1574,9 @@
                     currentQuizQuestions = data.quiz_json.quizzes;
                     currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
                     currentTeacherSessionId=sessionId||null;
+                    const gameTitle = data.title || (sessionStart && sessionStart.title) || 'Test';
+                    const gameTitleEl = document.getElementById('game-title');
+                    if (gameTitleEl) gameTitleEl.textContent = gameTitle;
                     document.getElementById('game-screen').style.display = 'block';
                     if(sessionId && sessionStart){
                         startTeacherSessionTimer(sessionStart.expires_at, sessionStart.title, sessionStart.total);
