@@ -64,6 +64,13 @@ key_lock = threading.Lock()
 # 7 ta key mavjud bo'lgani sababli 7 ta parallel Gemini requestga ruxsat beriladi.
 gemini_semaphore = threading.Semaphore(max(1, min(7, len(GOOGLE_API_KEYS))))
 
+# --- AI GENERATION PERFORMANCE ---
+# Model va timeoutlarni Railway Variables orqali ham boshqarish mumkin.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_HTTP_TIMEOUT_MS = int(os.getenv("GEMINI_HTTP_TIMEOUT_MS", "12000"))
+GEMINI_MAX_KEY_ATTEMPTS = max(1, min(3, int(os.getenv("GEMINI_MAX_KEY_ATTEMPTS", "2"))))
+
 DOWNLOADS_DIR = "downloads"
 DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
@@ -1013,6 +1020,57 @@ def get_premium_status(user_id: int):
     }
 
 
+def _normalize_and_randomize_quiz(quiz_data):
+    """Validate AI output and distribute correct answers across A/B/C/D.
+
+    The correct option is kept intact; only option order is changed. This
+    prevents Gemini from clustering correct answers in the same position.
+    """
+    items = quiz_data.get("quizzes", []) if isinstance(quiz_data, dict) else []
+    if not isinstance(items, list):
+        raise ValueError("AI savollar formati noto'g'ri.")
+
+    normalized = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        options = item.get("options")
+        try:
+            correct_index = int(item.get("correct_index", -1))
+        except Exception:
+            correct_index = -1
+        explanation = str(item.get("explanation", "")).strip()
+
+        if not question or not isinstance(options, list) or len(options) != 4:
+            continue
+        options = [str(x).strip() for x in options]
+        if any(not x for x in options) or len(set(options)) != 4:
+            continue
+        if correct_index < 0 or correct_index >= 4:
+            continue
+
+        correct_answer = options[correct_index]
+        wrong_answers = [options[i] for i in range(4) if i != correct_index]
+        random.shuffle(wrong_answers)
+
+        # Evenly rotate the correct answer position A/B/C/D.
+        target_index = len(normalized) % 4
+        new_options = wrong_answers[:]
+        new_options.insert(target_index, correct_answer)
+        normalized.append({
+            "question": question,
+            "options": new_options,
+            "correct_index": target_index,
+            "explanation": explanation,
+        })
+
+    if not normalized:
+        raise ValueError("AI savollarni tekshirishdan o'tkaza olmadi.")
+    quiz_data["quizzes"] = normalized
+    return quiz_data
+
+
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1146,12 +1204,8 @@ async def create_quiz_web(
 
     try:
         quiz_data = json.loads(quiz_json_raw)
+        quiz_data = _normalize_and_randomize_quiz(quiz_data)
         items = quiz_data.get("quizzes", [])
-        if not items:
-            return {
-                "status": "error",
-                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
-            }
 
         quiz_id = f"q_{uuid.uuid4().hex}"
         final_title = (
@@ -1170,7 +1224,7 @@ async def create_quiz_web(
                 final_title[:30],
                 len(items),
                 0,
-                quiz_json_raw,
+                json.dumps(quiz_data, ensure_ascii=False),
                 int(time.time()),
                 -1,
                 -1,
@@ -1199,55 +1253,75 @@ def generate_quiz_from_gemini(extracted_text):
         logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
         return None
 
-    system_instruction = """You are an advanced AI quiz generator.
+    # Juda katta hujjat Gemini'ga ortiqcha token va vaqt sarflamasligi uchun
+    # foydali qism bilan cheklanadi.
+    source_text = (extracted_text or "").strip()[:60000]
+    system_instruction = """You are a professional AI quiz generator.
 CRITICAL RULES:
-1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
+1. LANGUAGE: Detect the input language and generate every question, option, and explanation in EXACTLY the same language.
+2. If the input contains explicit questions, preserve those questions and only format them.
+3. If the input is continuous educational material, generate relevant questions from the material.
+4. Each question MUST have exactly 4 distinct answer options.
+5. correct_index MUST be 0, 1, 2, or 3 and must point to the truly correct option.
+6. Keep explanations concise and factual.
+7. Return JSON only according to the provided schema.
+8. For long material, generate no more than 40 questions."""
 
     total_keys = len(GOOGLE_API_KEYS)
-
-    # Har bir yangi test yaratish jarayoniga navbatdagi key beriladi.
-    # Lock parallel requestlar bir xil start_index olishini oldini oladi.
     with key_lock:
         start_index = current_key_index
         current_key_index = (current_key_index + 1) % total_keys
 
-    # 7 ta key bo'lsa, bir vaqtning o'zida maksimal 7 ta Gemini request.
-    # Qolgan requestlar navbat kutadi va serverni birdaniga bosib yubormaydi.
+    # Har bir request event-loopni bloklamaydi; semaphore esa serverni himoya qiladi.
     with gemini_semaphore:
-        for i in range(total_keys):
-            key_idx = (start_index + i) % total_keys
+        attempts = 0
+        for offset in range(total_keys):
+            if attempts >= GEMINI_MAX_KEY_ATTEMPTS:
+                break
+            key_idx = (start_index + offset) % total_keys
             api_key = GOOGLE_API_KEYS[key_idx].strip()
-
             if not api_key:
                 continue
+            attempts += 1
 
-            try:
-                client = genai.Client(api_key=api_key)
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=extracted_text[:80000],
-                    config=genai_types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json",
-                        response_schema=QuizResponse,
-                        temperature=0.2,
-                    ),
-                )
+            models_to_try = [GEMINI_MODEL]
+            if GEMINI_FALLBACK_MODEL and GEMINI_FALLBACK_MODEL != GEMINI_MODEL:
+                models_to_try.append(GEMINI_FALLBACK_MODEL)
 
-                if response and response.text:
-                    logging.info(
-                        f"Muvaffaqiyatli AI so'rovi! Ishlatilgan kalit indeksi: [{key_idx}]"
+            for model_name in models_to_try:
+                try:
+                    try:
+                        client = genai.Client(
+                            api_key=api_key,
+                            http_options=genai_types.HttpOptions(timeout=GEMINI_HTTP_TIMEOUT_MS),
+                        )
+                    except Exception:
+                        # Eski google-genai SDK versiyalariga moslik.
+                        client = genai.Client(api_key=api_key)
+
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=source_text,
+                        config=genai_types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_mime_type="application/json",
+                            response_schema=QuizResponse,
+                            temperature=0.2,
+                        ),
                     )
-                    return response.text
 
-            except Exception as e:
-                logging.warning(
-                    f"API kalit [{key_idx}] ishlamadi yoki limit tugadi. "
-                    f"Xatolik: {e}. Keyingi kalitga o'tilmoqda..."
-                )
+                    if response and response.text:
+                        logging.info(
+                            f"AI test muvaffaqiyatli: key=[{key_idx}], model={model_name}"
+                        )
+                        return response.text
 
-    logging.error("Barcha API kalitlar bo'yicha so'rovlar muvaffaqiyatsiz bo'ldi.")
+                except Exception as e:
+                    logging.warning(
+                        f"Gemini key=[{key_idx}], model={model_name} xato berdi: {e}"
+                    )
+
+    logging.error("AI test yaratish uchun mavjud urinishlarning barchasi muvaffaqiyatsiz bo'ldi.")
     return None
 
 
