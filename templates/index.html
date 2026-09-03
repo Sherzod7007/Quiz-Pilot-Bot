@@ -1312,24 +1312,8 @@
             if (fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
             if (quizTitleInput) formData.append('quiz_title', quizTitleInput);
 
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 45000);
-            let loaderTimer = null;
             try {
-                const loadingTexts = {
-                    uz: ['AI savollarni tayyorlamoqda…', 'Savollar tekshirilmoqda…', 'Test deyarli tayyor…'],
-                    ru: ['ИИ готовит вопросы…', 'Проверяем вопросы…', 'Тест почти готов…'],
-                    en: ['AI is preparing questions…', 'Checking the questions…', 'The quiz is almost ready…']
-                };
-                let loadingIndex = 0;
-                const activeTexts = loadingTexts[currentLang] || loadingTexts.uz;
-                loader.textContent = activeTexts[0];
-                loaderTimer = setInterval(() => {
-                    loadingIndex = (loadingIndex + 1) % activeTexts.length;
-                    loader.textContent = activeTexts[loadingIndex];
-                }, 2200);
-
-                const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData, signal: controller.signal });
+                const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData });
                 const data = await response.json();
                 if (data && data.status === "ok") {
                     showAppAlert("🚀", langPack[currentLang].alert_success, () => {
@@ -1346,16 +1330,8 @@
                         showAppAlert("❌", "Xatolik: " + (data.message || "Xatolik"));
                     }
                 }
-            } catch (error) {
-                if (error && error.name === 'AbortError') {
-                    const timeoutMsg = { uz: 'AI javobi juda uzoq cho‘zildi. Iltimos, qayta urinib ko‘ring.', ru: 'Ответ ИИ занял слишком много времени. Попробуйте ещё раз.', en: 'The AI response took too long. Please try again.' };
-                    showAppAlert("⏱️", timeoutMsg[currentLang] || timeoutMsg.uz);
-                } else {
-                    showAppAlert("❌", langPack[currentLang].alert_system_err);
-                }
-            } finally {
-                clearTimeout(timeoutId);
-                if (loaderTimer) clearInterval(loaderTimer);
+            } catch (error) { showAppAlert("❌", langPack[currentLang].alert_system_err); }
+            finally {
                 genBtn.style.display = "block";
                 loader.style.display = "none";
             }
