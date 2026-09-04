@@ -121,10 +121,21 @@ def localized_tariff_name(plan_key: str, lang: str) -> str:
 MESSAGES = {
     "uz": {
         "welcome": (
-            "👋 Salom, {name}! Quiz Pilot Super Mini App tizimiga xush kelibsiz.\n\n"
-            "🚀 Yangi Yangilanish:\n🔒 Bizning aqlli to'lov tizimimiz ishga tushdi. "
-            "Premium rejalarni faollashtirib, cheksiz testlar yarating!\n\n"
-            "👇 Marhamat, pastdagi tugmani bosib ilovani oching!"
+            "👋 *Assalomu alaykum, {name}!*\n"
+            "🎓 *Quiz Pilot Bot* — AI yordamida bilimni tez va qulay tekshirish uchun zamonaviy Mini App.\n\n"
+            "✨ *Ilova imkoniyatlari:*\n"
+            "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish\n"
+            "📚 Testlarni Library bo'limida saqlash va ishlash\n"
+            "🌐 Ommaviy testlardan foydalanish\n"
+            "🧠 Flash Kartochkalar orqali takrorlash\n"
+            "👥 Guruhlarga qo'shilish va guruh testlarida qatnashish\n"
+            "👨‍🏫 O'qituvchilar uchun Professional vositalar\n"
+            "📊 Natijalarni qulay ko'rish va tahlil qilish\n"
+            "🔊 Ovoz va vibratsiya sozlamalari\n"
+            "🌍 O'zbek, Русский va English tillari\n\n"
+            "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
+            "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
+            "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz Pilot Bot imkoniyatlaridan foydalaning!"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -150,13 +161,28 @@ MESSAGES = {
         "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
+        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan 3 ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
+        "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
+        "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
+        "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
     },
     "ru": {
         "welcome": (
-            "👋 Привет, {name}! Добро пожаловать в Quiz Pilot Super Mini App.\n\n"
-            "🚀 Новое обновление:\n🔒 Запущена наша умная система оплаты. "
-            "Активируйте Premium тарифы и создавайте неограниченное количество тестов!\n\n"
-            "👇 Нажмите кнопку ниже, чтобы открыть приложение!"
+            "👋 *Здравствуйте, {name}!*\n"
+            "🎓 *Quiz Pilot Bot* — современный Mini App для быстрой и удобной проверки знаний с помощью ИИ.\n\n"
+            "✨ *Возможности приложения:*\n"
+            "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX\n"
+            "📚 Сохранение и прохождение тестов в разделе «Библиотека»\n"
+            "🌐 Публичные тесты\n"
+            "🧠 Флеш-карточки для повторения материала\n"
+            "👥 Вступление в группы и участие в групповых тестах\n"
+            "👨‍🏫 Профессиональные инструменты для учителей\n"
+            "📊 Удобный просмотр и анализ результатов\n"
+            "🔊 Настройки звука и вибрации\n"
+            "🌍 Узбекский, русский и английский языки\n\n"
+            "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
+            "👑 *Premium:* использование без лимитов.\n\n"
+            "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz Pilot Bot!"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -181,13 +207,28 @@ MESSAGES = {
         "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
+        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все 3 бесплатных AI-теста. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
+        "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали 3 бесплатных публичных теста за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
+        "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали 3 бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
+        "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите новый тариф в разделе Premium.",
     },
     "en": {
         "welcome": (
-            "👋 Hello, {name}! Welcome to Quiz Pilot Super Mini App.\n\n"
-            "🚀 New Update:\n🔒 Our smart payment system is now live. "
-            "Activate Premium plans to generate unlimited quizzes!\n\n"
-            "👇 Tap the button below to open the app!"
+            "👋 *Hello, {name}!*\n"
+            "🎓 *Quiz Pilot Bot* — a modern Mini App for fast and convenient knowledge testing with AI.\n\n"
+            "✨ *App features:*\n"
+            "🤖 Create quizzes with AI from text, PDF or DOCX\n"
+            "📚 Save and take quizzes in the Library\n"
+            "🌐 Public quizzes\n"
+            "🧠 Flashcards for revision\n"
+            "👥 Join groups and participate in group quizzes\n"
+            "👨‍🏫 Professional tools for teachers\n"
+            "📊 Easy results viewing and analysis\n"
+            "🔊 Sound and vibration settings\n"
+            "🌍 Uzbek, Russian and English languages\n\n"
+            "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
+            "👑 *Premium:* unlimited usage.\n\n"
+            "🚀 Tap the button below and start using Quiz Pilot Bot!"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
@@ -212,6 +253,10 @@ MESSAGES = {
         "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
+        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all 3 free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
+        "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your 3 free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
+        "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your 3 free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
+        "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a new plan in the Premium section.",
     }
 }
 
@@ -256,7 +301,11 @@ def init_db():
         public_free_used INTEGER DEFAULT 0,
         flashcard_free_used INTEGER DEFAULT 0,
         premium_until INTEGER DEFAULT 0,
-        last_active INTEGER DEFAULT 0)""")
+        last_active INTEGER DEFAULT 0,
+        last_quiz_free_notice_cycle INTEGER DEFAULT 0,
+        last_public_free_notice_cycle INTEGER DEFAULT 0,
+        last_flashcard_free_notice_cycle INTEGER DEFAULT 0,
+        paid_limit_notice_until INTEGER DEFAULT 0)""")
 
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
@@ -297,6 +346,17 @@ def init_db():
             cursor.execute("ALTER TABLE users ADD COLUMN last_active INTEGER DEFAULT 0;")
         except Exception:
             pass
+    for _col in (
+        "last_quiz_free_notice_cycle",
+        "last_public_free_notice_cycle",
+        "last_flashcard_free_notice_cycle",
+        "paid_limit_notice_until",
+    ):
+        if _col not in columns:
+            try:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {_col} INTEGER DEFAULT 0;")
+            except Exception:
+                pass
 
     # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
     cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
@@ -514,6 +574,103 @@ class PaymentIntentRequest(BaseModel):
     tariff_price: Optional[str] = None
     tariff_key: Optional[str] = None
 
+
+
+def _send_limit_message(user_id: int, message_key: str, **kwargs):
+    """Send a localized Telegram limit notification without affecting app requests."""
+    try:
+        lang = get_user_lang(user_id)
+        text = MESSAGES.get(lang, MESSAGES["uz"])[message_key].format(**kwargs)
+        bot.send_message(user_id, text, parse_mode="Markdown")
+        return True
+    except Exception as e:
+        logging.error(f"Limit Telegram xabari yuborilmadi ({user_id}, {message_key}): {e}")
+        return False
+
+
+def notify_free_limit_reached(user_id: int, kind: str):
+    """Notify once per 30-day free-limit cycle when a free feature is exhausted."""
+    columns = {
+        "quiz": ("free_used", "last_quiz_free_notice_cycle", FREE_QUIZ_LIMIT, "free_quiz_limit_notice"),
+        "public": ("public_free_used", "last_public_free_notice_cycle", FREE_PUBLIC_LIMIT, "free_public_limit_notice"),
+        "flashcard": ("flashcard_free_used", "last_flashcard_free_notice_cycle", FREE_FLASHCARD_LIMIT, "free_flashcard_limit_notice"),
+    }
+    if kind not in columns:
+        return
+    used_col, notice_col, limit, message_key = columns[kind]
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT {used_col}, created_at, {notice_col}, status, premium_until FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row or is_active_paid_status(row["status"] or "", row["premium_until"] or 0):
+            conn.close()
+            return
+        used = row[used_col] or 0
+        cycle = row["created_at"] or 0
+        already = row[notice_col] or 0
+        if used < limit or not cycle or already == cycle:
+            conn.close()
+            return
+        cur.execute(f"UPDATE users SET {notice_col} = ? WHERE user_id = ? AND {notice_col} <> ?", (cycle, user_id, cycle))
+        changed = cur.rowcount == 1
+        conn.commit()
+        conn.close()
+        if changed:
+            _send_limit_message(user_id, message_key)
+    except Exception as e:
+        logging.error(f"Bepul limit notification xatosi ({user_id}, {kind}): {e}")
+
+
+def process_expired_paid_limits():
+    """Expire PRO plans and notify users once exactly when their paid period ends."""
+    now = int(time.time())
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id, status, plan_key, premium_until, paid_limit_notice_until "
+            "FROM users WHERE premium_until > 0 AND premium_until <= ? AND status LIKE '%PRO%'",
+            (now,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            user_id = row["user_id"]
+            expiry = row["premium_until"] or 0
+            if (row["paid_limit_notice_until"] or 0) == expiry:
+                continue
+            plan_key = row["plan_key"] or get_plan_key(row["status"] or "")
+            tariff_name = localized_tariff_name(plan_key, get_user_lang(user_id)) if plan_key else "Premium"
+            cur.execute(
+                "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=? "
+                "WHERE user_id=? AND premium_until=?",
+                (expiry, user_id, expiry),
+            )
+            if cur.rowcount == 1:
+                try:
+                    lang = get_user_lang(user_id)
+                    text = MESSAGES.get(lang, MESSAGES["uz"])["paid_limit_notice"].format(tariff_name=tariff_name)
+                    bot.send_message(user_id, text, parse_mode="Markdown")
+                except Exception as e:
+                    logging.error(f"Premium tugash xabari yuborilmadi ({user_id}): {e}")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Premium limit worker xatosi: {e}")
+
+
+def limit_notification_worker():
+    while True:
+        try:
+            process_expired_paid_limits()
+        except Exception as e:
+            logging.error(f"Limit notification worker xatosi: {e}")
+        time.sleep(30)
 
 def add_user_to_db(user_id: int):
     try:
@@ -1179,6 +1336,9 @@ async def create_quiz_web(
         conn.commit()
         conn.close()
 
+        if free_slot_reserved:
+            notify_free_limit_reached(user_id, "quiz")
+
         try:
             q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
                 title=final_title[:30],
@@ -1427,6 +1587,8 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
                 "message": messages.get(lang, messages["uz"]),
             }
         conn.commit()
+        if not is_paid:
+            notify_free_limit_reached(user_id, "public")
 
     cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
@@ -2768,6 +2930,8 @@ def create_flashcard(req: FlashcardCreateRequest):
     )
     conn.commit()
     conn.close()
+    if not is_paid:
+        notify_free_limit_reached(req.user_id, "flashcard")
     return {"status": "ok"}
 
 
@@ -2853,6 +3017,7 @@ async def api_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     threading.Thread(target=start_bot_polling, daemon=True).start()
+    threading.Thread(target=limit_notification_worker, daemon=True).start()
 
 
 if __name__ == "__main__":
