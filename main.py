@@ -165,6 +165,7 @@ MESSAGES = {
         "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
+        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi yana 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochkadan bepul foydalanishingiz mumkin.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
     },
     "ru": {
         "welcome": (
@@ -211,6 +212,7 @@ MESSAGES = {
         "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали 3 бесплатных публичных теста за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали 3 бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите новый тариф в разделе Premium.",
+        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Теперь вы снова можете бесплатно использовать 3 AI-теста, 3 публичных теста и 3 флеш-карточки.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
     },
     "en": {
         "welcome": (
@@ -257,6 +259,7 @@ MESSAGES = {
         "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your 3 free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your 3 free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a new plan in the Premium section.",
+        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. You can now use 3 AI quizzes, 3 public quizzes, and 3 flashcards for free again.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
     }
 }
 
@@ -305,6 +308,7 @@ def init_db():
         last_quiz_free_notice_cycle INTEGER DEFAULT 0,
         last_public_free_notice_cycle INTEGER DEFAULT 0,
         last_flashcard_free_notice_cycle INTEGER DEFAULT 0,
+        last_free_reset_notice_cycle INTEGER DEFAULT 0,
         paid_limit_notice_until INTEGER DEFAULT 0)""")
 
     cursor.execute("PRAGMA table_info(users);")
@@ -350,6 +354,7 @@ def init_db():
         "last_quiz_free_notice_cycle",
         "last_public_free_notice_cycle",
         "last_flashcard_free_notice_cycle",
+        "last_free_reset_notice_cycle",
         "paid_limit_notice_until",
     ):
         if _col not in columns:
@@ -626,6 +631,55 @@ def notify_free_limit_reached(user_id: int, kind: str):
         logging.error(f"Bepul limit notification xatosi ({user_id}, {kind}): {e}")
 
 
+def process_expired_free_limits():
+    """Reset the 30-day free cycle and notify the user once when free limits return."""
+    now = int(time.time())
+    thirty_days = 30 * 24 * 3600
+    try:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id, created_at, free_used, public_free_used, flashcard_free_used, "
+            "status, premium_until, last_free_reset_notice_cycle "
+            "FROM users WHERE created_at > 0 AND created_at <= ?",
+            (now - thirty_days,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            user_id = row["user_id"]
+            old_cycle = row["created_at"] or 0
+            is_paid = is_active_paid_status(row["status"] or "", row["premium_until"] or 0)
+            # Paid tarif davrida mavjud tizim qoidasi saqlanadi: bepul sikl reset qilinmaydi.
+            if is_paid:
+                continue
+
+            already_notified = row["last_free_reset_notice_cycle"] or 0
+            had_exhausted_limit = (
+                (row["free_used"] or 0) >= FREE_QUIZ_LIMIT
+                or (row["public_free_used"] or 0) >= FREE_PUBLIC_LIMIT
+                or (row["flashcard_free_used"] or 0) >= FREE_FLASHCARD_LIMIT
+            )
+
+            cur.execute(
+                "UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, "
+                "created_at=?, last_free_reset_notice_cycle=? "
+                "WHERE user_id=? AND created_at=?",
+                (now, old_cycle if had_exhausted_limit else already_notified, user_id, old_cycle),
+            )
+            if cur.rowcount == 1 and had_exhausted_limit and already_notified != old_cycle:
+                try:
+                    lang = get_user_lang(user_id)
+                    text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"]
+                    bot.send_message(user_id, text, parse_mode="Markdown")
+                except Exception as e:
+                    logging.error(f"Bepul limit qaytgani haqida xabar yuborilmadi ({user_id}): {e}")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Bepul limit reset worker xatosi: {e}")
+
+
 def process_expired_paid_limits():
     """Expire PRO plans and notify users once exactly when their paid period ends."""
     now = int(time.time())
@@ -668,6 +722,7 @@ def limit_notification_worker():
     while True:
         try:
             process_expired_paid_limits()
+            process_expired_free_limits()
         except Exception as e:
             logging.error(f"Limit notification worker xatosi: {e}")
         time.sleep(30)
