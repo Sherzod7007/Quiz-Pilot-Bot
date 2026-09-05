@@ -124,25 +124,23 @@
 
         .screen { display: none; }
         .screen.active { display: block; }
-        /* Windows 7 Aero: ultra-fast main-section swipe. */
+        /* Windows 7 Aero: tez + kuchli, GPU-ga mos swipe. Blur olib tashlandi — qotishning oldini oladi. */
         .screen.swipe-enter-left, .screen.swipe-enter-right {
             will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
             transform: translateZ(0);
         }
-        .screen.swipe-enter-left { animation: aeroSwipeInLeft .11s cubic-bezier(.16,.86,.22,1); }
-        .screen.swipe-enter-right { animation: aeroSwipeInRight .11s cubic-bezier(.16,.86,.22,1); }
+        .screen.swipe-enter-left { animation: aeroSwipeInLeft .13s cubic-bezier(.12,.82,.2,1); }
+        .screen.swipe-enter-right { animation: aeroSwipeInRight .13s cubic-bezier(.12,.82,.2,1); }
         @keyframes aeroSwipeInLeft {
-            from { opacity: .82; transform: translate3d(28px,0,0) scale(.998); }
+            from { opacity: .72; transform: translate3d(42px,0,0) scale(.996); }
             to { opacity: 1; transform: translate3d(0,0,0) scale(1); }
         }
         @keyframes aeroSwipeInRight {
-            from { opacity: .82; transform: translate3d(-28px,0,0) scale(.998); }
+            from { opacity: .72; transform: translate3d(-42px,0,0) scale(.996); }
             to { opacity: 1; transform: translate3d(0,0,0) scale(1); }
         }
-        @media (prefers-reduced-motion: reduce) { .screen.swipe-enter-left,.screen.swipe-enter-right { animation:none!important; } }
-
         .upload-box { 
             border: 2px dashed rgba(255, 255, 255, 0.3); border-radius: 14px; padding: 30px 20px; 
             text-align: center; cursor: pointer; background: var(--aero-glass); 
@@ -1307,8 +1305,6 @@
             nextScreen.classList.add('active');
             if (swipeDirection === 'left' || swipeDirection === 'right') {
                 nextScreen.classList.add(swipeDirection === 'left' ? 'swipe-enter-left' : 'swipe-enter-right');
-                const glow=document.getElementById('aero-swipe-glow');
-                if(glow){ glow.classList.remove('show'); void glow.offsetWidth; glow.classList.add('show'); setTimeout(()=>glow.classList.remove('show'),340); }
                 setTimeout(()=>nextScreen.classList.remove('swipe-enter-left','swipe-enter-right'),260);
             }
             const nav=document.getElementById(`nav-${screenName}`);
@@ -1393,9 +1389,9 @@
             }
         }
 
-        // ===== Aero Swipe Navigation (MAIN 5 sections only) =====
-        // Right = next section, Left = previous section.
+        // ===== Aero Swipe Navigation =====
         const aeroMainScreens = ['create','library','teacher','settings','premium'];
+        const aeroLibraryTabs = ['personal','public','cards','group_join'];
         let aeroTouchStartX = 0, aeroTouchStartY = 0, aeroTouchActive = false;
         function aeroVisibleMainScreens(){
             const teacherNav=document.getElementById('nav-teacher');
@@ -1408,17 +1404,22 @@
             const name=active.id.replace(/-screen$/,'');
             return aeroVisibleMainScreens().includes(name) ? name : null;
         }
+        // UX convention: swipe RIGHT = previous section, swipe LEFT = next section.
         function aeroSwipeTarget(deltaX){
             const main=aeroCurrentMainScreen();
             if(!main) return;
             const screens=aeroVisibleMainScreens();
             const currentIdx=screens.indexOf(main);
             if(currentIdx<0) return;
-            // Finger moves right -> next; finger moves left -> previous.
-            const direction = deltaX > 0 ? 1 : -1;
+            const direction = deltaX > 0 ? -1 : 1;
             const target=currentIdx + direction;
             if(target<0 || target>=screens.length) return;
             switchScreen(screens[target], deltaX > 0 ? 'right' : 'left');
+        }
+        // Kutubxona ichidagi Testlar/Ommaviy/Kartochkalar/Guruhga qo'shilish
+        // bo'limlarida Swipe o'chirilgan: bu yerda faqat tugmalar ishlaydi.
+        function aeroLibrarySwipe(deltaX){
+            return false;
         }
         function initAeroSwipe(){
             const area=document.body;
@@ -1433,15 +1434,12 @@
                 if(!aeroTouchActive || !e.changedTouches.length) return;
                 aeroTouchActive=false;
                 const t=e.changedTouches[0], dx=t.clientX-aeroTouchStartX, dy=t.clientY-aeroTouchStartY;
-                if(Math.abs(dx)<18 || Math.abs(dx)<Math.abs(dy)*1.08) return;
+                if(Math.abs(dx)<24 || Math.abs(dx)<Math.abs(dy)*1.05) return;
                 const target=e.target;
                 if(target && target.closest && (target.closest('input,textarea,select,button,a,[contenteditable="true"]') || target.closest('#game-screen') || target.closest('.modal-overlay') || target.closest('.app-dialog-overlay'))) return;
-                // Swipe is intentionally disabled inside Library tabs/content.
-                const main=aeroCurrentMainScreen();
-                if(main==='library'){
-                    // No library-internal swipe and no edge swipe.
-                    return;
-                }
+                // Kutubxona ichida ikki tomonga Swipe butunlay o'chirilgan.
+                // Faqat asosiy 5 bo'limda Swipe ishlaydi.
+                if(aeroCurrentMainScreen()==='library') return;
                 aeroSwipeTarget(dx);
             }, {passive:true});
         }
@@ -2127,7 +2125,25 @@
             if(!quiz||!codes.length){showAppAlert('⚠️',langPack[currentLang].teacher_select_quiz_variant);return;}
             try{const d=await teacherFetchJson(`${BASE_URL}/api/teacher/generate-variants`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,quiz_id:quiz,variants:codes})});document.getElementById('teacher-variants-result').innerText=`✅ ${codes.join(', ')} ${langPack[currentLang].teacher_variants_ready}`;}catch(e){showAppAlert('❌',e.message||langPack[currentLang].teacher_server_error);}
         }
-        function exportTeacherQuiz(fmt){const quiz=document.getElementById('teacher-variant-quiz').value,active=[...document.querySelectorAll('#teacher-feature-variants .variant-btn.active')].map(b=>b.innerText.trim().toUpperCase());if(!quiz||!active.length){showAppAlert('⚠️',langPack[currentLang].teacher_select_quiz_variant);return;}const allFour=TEACHER_VARIANT_CODES.every(c=>active.includes(c))&&active.length===4;const url=allFour?`${BASE_URL}/api/teacher/export-quiz?quiz_id=${encodeURIComponent(quiz)}&user_id=${userId}&format=${fmt}&variant=A&all_variants=1`:`${BASE_URL}/api/teacher/export-quiz?quiz_id=${encodeURIComponent(quiz)}&user_id=${userId}&format=${fmt}&variant=${encodeURIComponent(active[0])}&all_variants=0`;window.open(url,'_blank');}
+        function exportTeacherQuiz(fmt){
+            const quiz=document.getElementById('teacher-variant-quiz').value;
+            const active=[...document.querySelectorAll('#teacher-feature-variants .variant-btn.active')]
+                .map(b=>b.innerText.trim().toUpperCase())
+                .filter(v=>['A','B','C','D'].includes(v));
+            if(!quiz||!active.length){
+                showAppAlert('⚠️',langPack[currentLang].teacher_select_quiz_variant);
+                return;
+            }
+            const allSelected=['A','B','C','D'].every(v=>active.includes(v));
+            const params=new URLSearchParams({
+                quiz_id:quiz,
+                user_id:String(userId),
+                format:fmt,
+                variant:active[0],
+                all_variants:allSelected?'1':'0'
+            });
+            window.open(`${BASE_URL}/api/teacher/export-quiz?${params.toString()}`,'_blank');
+        }
         async function loadTeacherResultsPanel(){
             const sel=document.getElementById('teacher-results-session'),box=document.getElementById('teacher-results-panel-list');
             if(!sel||!box)return;
