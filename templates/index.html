@@ -1434,12 +1434,11 @@
                 if(!aeroTouchActive || !e.changedTouches.length) return;
                 aeroTouchActive=false;
                 const t=e.changedTouches[0], dx=t.clientX-aeroTouchStartX, dy=t.clientY-aeroTouchStartY;
-                if(Math.abs(dx)<24 || Math.abs(dx)<Math.abs(dy)*1.05) return;
+                if(Math.abs(dx)<12 || Math.abs(dx)<Math.abs(dy)*1.02) return;
                 const target=e.target;
                 if(target && target.closest && (target.closest('input,textarea,select,button,a,[contenteditable="true"]') || target.closest('#game-screen') || target.closest('.modal-overlay') || target.closest('.app-dialog-overlay'))) return;
-                // Kutubxona ichida ikki tomonga Swipe butunlay o'chirilgan.
-                // Faqat asosiy 5 bo'limda Swipe ishlaydi.
-                if(aeroCurrentMainScreen()==='library') return;
+                // Kutubxona ichidagi ichki tablar Swipe qilinmaydi.
+                // Ammo Kutubxonaning o'zidan asosiy bo'limlar orasida Swipe ishlaydi.
                 aeroSwipeTarget(dx);
             }, {passive:true});
         }
