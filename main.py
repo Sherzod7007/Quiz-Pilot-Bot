@@ -122,7 +122,7 @@ MESSAGES = {
     "uz": {
         "welcome": (
             "👋 *Assalomu alaykum, {name}!*\n"
-            "🎓 *Quiz Pilot Bot* — AI yordamida bilimni tez va qulay tekshirish uchun zamonaviy Mini App.\n\n"
+            "🎓 *Quiz AI* — AI yordamida bilimni tez va qulay tekshirish uchun zamonaviy App.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
             "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish\n"
             "📚 Testlarni Library bo'limida saqlash va ishlash\n"
@@ -170,7 +170,7 @@ MESSAGES = {
     "ru": {
         "welcome": (
             "👋 *Здравствуйте, {name}!*\n"
-            "🎓 *Quiz Pilot Bot* — современный Mini App для быстрой и удобной проверки знаний с помощью ИИ.\n\n"
+            "🎓 *Quiz AI* — современный App для быстрой и удобной проверки знаний с помощью ИИ.\n\n"
             "✨ *Возможности приложения:*\n"
             "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX\n"
             "📚 Сохранение и прохождение тестов в разделе «Библиотека»\n"
@@ -217,7 +217,7 @@ MESSAGES = {
     "en": {
         "welcome": (
             "👋 *Hello, {name}!*\n"
-            "🎓 *Quiz Pilot Bot* — a modern Mini App for fast and convenient knowledge testing with AI.\n\n"
+            "🎓 *Quiz AI* — a modern App for fast and convenient knowledge testing with AI.\n\n"
             "✨ *App features:*\n"
             "🤖 Create quizzes with AI from text, PDF or DOCX\n"
             "📚 Save and take quizzes in the Library\n"
