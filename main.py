@@ -121,7 +121,7 @@ def localized_tariff_name(plan_key: str, lang: str) -> str:
 MESSAGES = {
     "uz": {
         "welcome": (
-            "👋 *Assalomu alaykum, {name}!*\n"
+            "👋 *Salom, {name}!*\n"
             "🎓 *Quiz AI* — AI yordamida bilimni tez va qulay tekshirish uchun zamonaviy App.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
             "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish\n"
@@ -169,7 +169,7 @@ MESSAGES = {
     },
     "ru": {
         "welcome": (
-            "👋 *Здравствуйте, {name}!*\n"
+            "👋 *Привет, {name}!*\n"
             "🎓 *Quiz AI* — современный App для быстрой и удобной проверки знаний с помощью ИИ.\n\n"
             "✨ *Возможности приложения:*\n"
             "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX\n"
