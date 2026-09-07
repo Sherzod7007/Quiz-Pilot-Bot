@@ -1362,6 +1362,10 @@ async def create_quiz_web(
     try:
         quiz_data = json.loads(quiz_json_raw)
         items = quiz_data.get("quizzes", [])
+        # Gemini qanday joylashtirishidan qat'i nazar, javob variantlari shu yerda
+        # xavfsiz va muvozanatli random qilinadi.
+        items = randomize_quiz_answer_positions(items)
+        quiz_data["quizzes"] = items
         if not items:
             return {
                 "status": "error",
@@ -1409,6 +1413,46 @@ async def create_quiz_web(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+
+def randomize_quiz_answer_positions(items):
+    """
+    AI tomonidan berilgan variantlarni xavfsiz aralashtiradi va correct_index ni
+    yangi joylashuvga moslaydi. To'g'ri javob mazmuni o'zgarmaydi.
+    Savollar ko'p bo'lsa A/B/C/D pozitsiyalari muvozanatli taqsimlanadi.
+    """
+    if not isinstance(items, list) or not items:
+        return items
+
+    positions = [i % 4 for i in range(len(items))]
+    secrets.SystemRandom().shuffle(positions)
+
+    for item, target_index in zip(items, positions):
+        if not isinstance(item, dict):
+            continue
+        options = list(item.get("options") or [])
+        if len(options) < 2:
+            continue
+        options = options[:4]
+        try:
+            correct_index = int(item.get("correct_index", 0))
+        except (TypeError, ValueError):
+            correct_index = 0
+        if correct_index < 0 or correct_index >= len(options):
+            correct_index = 0
+
+        # Indeks bilan ishlash bir xil matnli variantlarda ham to'g'ri javobni saqlaydi.
+        correct_pair = (correct_index, options[correct_index])
+        other_pairs = [(i, value) for i, value in enumerate(options) if i != correct_index]
+        secrets.SystemRandom().shuffle(other_pairs)
+        new_pairs = other_pairs[:]
+        insert_at = min(target_index, len(new_pairs))
+        new_pairs.insert(insert_at, correct_pair)
+
+        item["options"] = [value for _, value in new_pairs]
+        item["correct_index"] = next(i for i, pair in enumerate(new_pairs) if pair[0] == correct_index)
+
+    return items
 
 def generate_quiz_from_gemini(extracted_text):
     global current_key_index
