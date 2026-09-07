@@ -136,6 +136,7 @@ MESSAGES = {
             "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
+            "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz Pilot Bot imkoniyatlaridan foydalaning!"
         ),
         "open_app": "Ilovani ochish 📱",
@@ -185,6 +186,7 @@ MESSAGES = {
             "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* При нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
+            "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz Pilot Bot!"
         ),
         "open_app": "Открыть приложение 📱",
@@ -233,6 +235,7 @@ MESSAGES = {
             "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* Clicking the «Activate plans» button will open a new window. Press the «Send receipt» button in that window — this will return you to the bot. Then, send the payment receipt as a photo or screenshot.\n\n"
+            "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Tap the button below and start using Quiz Pilot Bot!"
         ),
         "open_app": "Open App 📱",
