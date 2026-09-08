@@ -1462,7 +1462,16 @@
             const formData = new FormData();
             formData.append('user_id', userId);
             if (textInput) formData.append('text', textInput);
-            if (fileInput.files.length > 0) formData.append('file', fileInput.files[0]);
+            if (fileInput.files.length > 0) {
+            const selectedFile = fileInput.files[0];
+            if (selectedFile.size > 10 * 1024 * 1024) { // 10 MB limit
+                showAppAlert("⚠️", "Fayl hajmi 10 MB dan oshmasligi kerak!");
+                genBtn.style.display = "block";
+                loader.style.display = "none";
+                return;
+            }
+            formData.append('file', selectedFile);
+        }
             if (quizTitleInput) formData.append('quiz_title', quizTitleInput);
 
             try {
