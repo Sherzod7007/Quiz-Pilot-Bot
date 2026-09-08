@@ -1300,10 +1300,10 @@ async def create_quiz_web(
         while chunk := await file.read(chunk_size):
             file_bytes.extend(chunk)
             if len(file_bytes) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413, 
-                detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
-            )
+                raise HTTPException(
+                    status_code=413, 
+                    detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
+                )
                  await file.seek(0)
 
 
