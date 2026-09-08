@@ -26,7 +26,6 @@ import sqlite3
 import telebot
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import List, Optional
 import uvicorn
 import uuid
@@ -61,17 +60,25 @@ GOOGLE_API_KEYS = (
 )
 current_key_index = 0
 key_lock = threading.Lock()
-# --- PROFESSIONAL AI QUEUE + CONCURRENCY PROTECTION ---
+
+# --- PROFESSIONAL AI QUEUE + RETRY + TIMEOUT + CONCURRENCY PROTECTION ---
+# Free API Key Rotation saqlanadi. Katta (100-500 savolli) so'rovlarni
+# sun'iy 90 soniya / 5 daqiqalik limit bilan kesib tashlamaymiz.
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", str(min(7, max(1, len(GOOGLE_API_KEYS)))))))
-AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "60")))
-AI_REQUEST_TIMEOUT = max(15, int(os.getenv("AI_REQUEST_TIMEOUT", "90")))
-AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "300")))
+AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "150")))
+AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
+AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
+
+# Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
+# AI so'rovlar sonini cheklaydi. 150 ta foydalanuvchi birdan so'rov yuborsa
+# ortiqcha so'rovlar xavfsiz kutadi, API birdaniga bosib yuborilmaydi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
-ai_executor = ThreadPoolExecutor(max_workers=AI_MAX_CONCURRENT, thread_name_prefix="gemini-ai")
-logging.info("AI Queue initialized | concurrent=%s | queue=%s | request_timeout=%ss | total_timeout=%ss",
-             AI_MAX_CONCURRENT, AI_MAX_QUEUE, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT)
+logging.info(
+    "AI protection initialized | concurrent=%s | queue=%s | request_timeout=%ss | total_timeout=%ss",
+    AI_MAX_CONCURRENT, AI_MAX_QUEUE, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
+)
 
 DOWNLOADS_DIR = "downloads"
 DB_PATH = (
@@ -1467,8 +1474,16 @@ def randomize_quiz_answer_positions(items):
     return items
 
 def generate_quiz_from_gemini(extracted_text):
-    """Professional AI Queue + Retry + Timeout, API Key Rotation saqlanadi."""
+    """
+    Professional AI Queue + Retry + Timeout + Concurrency Protection.
+    API Key Rotation va Gemini 2.5 Flash saqlanadi.
+
+    Muhim: katta testlarni avvalgi 203 savolli ishlagan versiyadek yaratish
+    uchun request 90 soniyada majburan to'xtatilmaydi. Timeout nazorati
+    umumiy jarayonni kuzatadi va katta so'rovlar uchun yetarli vaqt beradi.
+    """
     global current_key_index
+
     if not GOOGLE_API_KEYS:
         logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
         return None
@@ -1478,9 +1493,12 @@ CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
 2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
 
+    # Queue: 150 tagacha bir vaqtning o'zida kelgan foydalanuvchi so'rovini
+    # xavfsiz boshqaradi. Katta test uchun kutish vaqti umumiy timeoutga mos.
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
         logging.error("AI Queue kutish vaqti tugadi")
         return None
+
     try:
         total_keys = len(GOOGLE_API_KEYS)
         with key_lock:
@@ -1489,19 +1507,34 @@ CRITICAL RULES:
 
         deadline = time.monotonic() + AI_TOTAL_TIMEOUT
         last_error = None
+
+        # Har bir key bo'yicha retry qilinadi, keylar esa eski versiyadagi
+        # kabi ketma-ket fallback sifatida sinab ko'riladi.
         for retry_round in range(AI_RETRY_PER_KEY):
             for offset in range(total_keys):
                 if time.monotonic() >= deadline:
                     logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
                     return None
+
                 key_idx = (start_index + offset) % total_keys
                 api_key = GOOGLE_API_KEYS[key_idx].strip()
                 if not api_key:
                     continue
 
-                def _call_gemini(key=api_key):
-                    client = genai.Client(api_key=key)
-                    return client.models.generate_content(
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+
+                # Faqat haqiqiy Gemini chaqiruvi concurrent limit ostida.
+                # Queue slot esa butun foydalanuvchi jarayonini boshqaradi.
+                if not gemini_semaphore.acquire(timeout=remaining):
+                    last_error = "Gemini concurrency kutish vaqti tugadi"
+                    continue
+
+                started = time.monotonic()
+                try:
+                    client = genai.Client(api_key=api_key)
+                    response = client.models.generate_content(
                         model="gemini-2.5-flash",
                         contents=extracted_text[:80000],
                         config=genai_types.GenerateContentConfig(
@@ -1511,38 +1544,41 @@ CRITICAL RULES:
                             temperature=0.2,
                         ),
                     )
+                    elapsed = time.monotonic() - started
+                    if elapsed > AI_REQUEST_TIMEOUT:
+                        logging.warning(
+                            "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo muvaffaqiyatli yakunlandi",
+                            elapsed, AI_REQUEST_TIMEOUT
+                        )
 
-                remaining = max(1, deadline - time.monotonic())
-                request_timeout = min(AI_REQUEST_TIMEOUT, remaining)
-                if not gemini_semaphore.acquire(timeout=remaining):
-                    return None
-                future = ai_executor.submit(_call_gemini)
-                release_by_callback = False
-                try:
-                    response = future.result(timeout=request_timeout)
                     if response and response.text:
-                        logging.info("AI muvaffaqiyatli | key=%s | retry=%s", key_idx, retry_round + 1)
+                        logging.info(
+                            "AI muvaffaqiyatli | key=%s | retry=%s | %.1fs",
+                            key_idx, retry_round + 1, elapsed
+                        )
                         return response.text
+
                     last_error = "Gemini bo'sh javob qaytardi"
-                except FutureTimeoutError:
-                    last_error = f"Gemini request timeout ({int(request_timeout)}s)"
-                    logging.warning("Key [%s] timeout. Keyingi key/retry sinovdan o'tadi.", key_idx)
-                    future.add_done_callback(lambda _f: gemini_semaphore.release())
-                    release_by_callback = True
+
                 except Exception as e:
                     last_error = str(e)
-                    logging.warning("Key [%s] xatolik: %s", key_idx, e)
+                    logging.warning(
+                        "API kalit [%s] ishlamadi yoki vaqtincha xato berdi: %s. Keyingi keyga o'tilmoqda...",
+                        key_idx, e
+                    )
                 finally:
-                    if not release_by_callback:
-                        gemini_semaphore.release()
+                    gemini_semaphore.release()
 
+                # Exponential backoff: faqat xatodan keyin, server/APIga
+                # ortiqcha bosim bermasdan.
                 if time.monotonic() < deadline:
-                    time.sleep(min(4.0, 0.6 * (2 ** retry_round)))
+                    time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
 
         logging.error("Barcha API key/retry urinishlari muvaffaqiyatsiz. Oxirgi xato: %s", last_error)
         return None
     finally:
         ai_queue_slots.release()
+
 
 @app.post("/api/contact-admin")
 async def api_contact_admin(request: Request):
