@@ -1304,7 +1304,7 @@ async def create_quiz_web(
                     status_code=413, 
                     detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
                 )
-                 await file.seek(0)
+        await file.seek(0)
 
 
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
