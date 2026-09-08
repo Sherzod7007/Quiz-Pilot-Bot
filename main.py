@@ -80,6 +80,42 @@ logging.info(
     AI_MAX_CONCURRENT, AI_MAX_QUEUE, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
 )
 
+# --- PROFESSIONAL FILE PROTECTION LAYER ---
+# Katta kitob yoki juda og'ir fayllar server, parser va AI Queue ga
+# ortiqcha yuk bermasligi uchun yuklashdan oldin tekshiriladi.
+MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "20")))
+MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
+MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
+MAX_EXTRACTED_TEXT_CHARS = max(10000, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "300000")))
+ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx"}
+
+FILE_PROTECTION_MESSAGES = {
+    "uz": {
+        "unsupported": "Faqat PDF yoki DOCX fayl yuklash mumkin.",
+        "too_large": f"Fayl hajmi {MAX_UPLOAD_FILE_MB} MB limitdan oshdi. Iltimos, faylni kichikroq qismlarga bo'lib yuboring.",
+        "too_many_pages": f"PDF sahifalari soni {MAX_PDF_PAGES} ta limitdan oshdi. Iltimos, PDF faylni qismlarga bo'ling.",
+        "too_much_text": "Fayldagi matn hajmi juda katta. Iltimos, faylni kichikroq qismlarga bo'lib yuboring.",
+        "unreadable": "Faylni o'qib bo'lmadi. Matnli PDF yoki to'g'ri DOCX fayl yuboring.",
+    },
+    "ru": {
+        "unsupported": "Можно загрузить только файл PDF или DOCX.",
+        "too_large": f"Размер файла превышает лимит {MAX_UPLOAD_FILE_MB} МБ. Пожалуйста, разделите файл на меньшие части.",
+        "too_many_pages": f"Количество страниц PDF превышает лимит {MAX_PDF_PAGES}. Пожалуйста, разделите PDF на части.",
+        "too_much_text": "Объём текста в файле слишком большой. Пожалуйста, разделите файл на меньшие части.",
+        "unreadable": "Не удалось прочитать файл. Отправьте текстовый PDF или корректный DOCX-файл.",
+    },
+    "en": {
+        "unsupported": "Only PDF or DOCX files can be uploaded.",
+        "too_large": f"The file exceeds the {MAX_UPLOAD_FILE_MB} MB limit. Please split it into smaller parts.",
+        "too_many_pages": f"The PDF exceeds the {MAX_PDF_PAGES}-page limit. Please split the PDF into smaller parts.",
+        "too_much_text": "The amount of text in the file is too large. Please split the file into smaller parts.",
+        "unreadable": "The file could not be read. Please upload a text-based PDF or a valid DOCX file.",
+    },
+}
+
+def file_protection_message(lang: str, key: str) -> str:
+    return FILE_PROTECTION_MESSAGES.get(lang, FILE_PROTECTION_MESSAGES["uz"]).get(key, FILE_PROTECTION_MESSAGES["uz"]["unreadable"])
+
 DOWNLOADS_DIR = "downloads"
 DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
@@ -1325,25 +1361,94 @@ async def create_quiz_web(
     auto_title = "Matnli Test"
 
     if file and file.filename and len(file.filename.strip()) > 0:
-        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-        file_path = os.path.join(DOWNLOADS_DIR, file.filename)
+        # Faylni avval xotirada bir marta o'qiymiz va diskka faqat tekshiruvdan
+        # o'tgandan keyin yozamiz. Bu server diskini keraksiz yukdan himoya qiladi.
+        original_name = Path(file.filename).name
+        extension = Path(original_name).suffix.lower()
+        if extension not in ALLOWED_UPLOAD_EXTENSIONS:
+            if free_slot_reserved:
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                cur_restore = conn_restore.cursor()
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                conn_restore.commit(); conn_restore.close()
+            return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
+
         try:
             contents = await file.read()
-            if len(contents) > 0:
+            if len(contents) > MAX_UPLOAD_FILE_BYTES:
+                if free_slot_reserved:
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    cur_restore = conn_restore.cursor()
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                    conn_restore.commit(); conn_restore.close()
+                return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
+
+            if contents:
+                os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+                # Bir xil nomdagi fayllar foydalanuvchilar orasida ustma-ust yozilmasligi uchun unique nom.
+                file_path = os.path.join(DOWNLOADS_DIR, f"upload_{uuid.uuid4().hex}{extension}")
                 with open(file_path, "wb") as f:
                     f.write(contents)
-                if file.filename.endswith(".pdf"):
+
+                if extension == ".pdf":
                     reader = PdfReader(file_path)
-                    raw_text = "".join(
-                        [p.extract_text() + "\n" for p in reader.pages if p.extract_text()]
-                    )
-                    auto_title = file.filename.replace(".pdf", "")
-                elif file.filename.endswith(".docx"):
+                    page_count = len(reader.pages)
+                    if page_count > MAX_PDF_PAGES:
+                        try: os.remove(file_path)
+                        except Exception: pass
+                        if free_slot_reserved:
+                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                            cur_restore = conn_restore.cursor()
+                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                            conn_restore.commit(); conn_restore.close()
+                        return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+                    text_parts = []
+                    text_len = 0
+                    for page in reader.pages:
+                        page_text = page.extract_text() or ""
+                        if page_text:
+                            text_len += len(page_text)
+                            if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                try: os.remove(file_path)
+                                except Exception: pass
+                                if free_slot_reserved:
+                                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                    cur_restore = conn_restore.cursor()
+                                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                    conn_restore.commit(); conn_restore.close()
+                                return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                            text_parts.append(page_text)
+                    raw_text = "\n".join(text_parts)
+                    auto_title = Path(original_name).stem
+                elif extension == ".docx":
                     doc = docx.Document(file_path)
-                    raw_text = "\n".join([p.text for p in doc.paragraphs])
-                    auto_title = file.filename.replace(".docx", "")
+                    text_parts = []
+                    text_len = 0
+                    for paragraph in doc.paragraphs:
+                        part = paragraph.text or ""
+                        text_len += len(part)
+                        if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                            try: os.remove(file_path)
+                            except Exception: pass
+                            if free_slot_reserved:
+                                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                cur_restore = conn_restore.cursor()
+                                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                conn_restore.commit(); conn_restore.close()
+                            return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                        text_parts.append(part)
+                    raw_text = "\n".join(text_parts)
+                    auto_title = Path(original_name).stem
         except Exception as e:
-            logging.error(f"Foydalanuvchi fayl yuklashda xato: {e}")
+            logging.error(f"Professional file protection / parsing error: {e}")
+            if free_slot_reserved:
+                try:
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    cur_restore = conn_restore.cursor()
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                    conn_restore.commit(); conn_restore.close()
+                except Exception: pass
+            return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
     if not raw_text.strip() and text:
         raw_text = text
@@ -1355,7 +1460,14 @@ async def create_quiz_web(
         )
 
     if not raw_text.strip():
-        return {"status": "error", "message": "Matn yoki darslikni o'qib bo'lmadi."}
+        if free_slot_reserved:
+            try:
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                cur_restore = conn_restore.cursor()
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                conn_restore.commit(); conn_restore.close()
+            except Exception: pass
+        return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
     # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
     # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
