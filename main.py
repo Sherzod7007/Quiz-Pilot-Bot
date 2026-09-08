@@ -1295,15 +1295,15 @@ async def create_quiz_web(
 
 # 10 MB Fayl hajmini tekshirish
     if file:
-    file_bytes = bytearray()
-    chunk_size = 1024 * 1024  # 1 MB bo'laklar
-    while chunk := await file.read(chunk_size):
-        file_bytes.extend(chunk)
-        if len(file_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413, 
-            detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
-        )
+        file_bytes = bytearray()
+        chunk_size = 1024 * 1024  # 1 MB bo'laklar
+        while chunk := await file.read(chunk_size):
+            file_bytes.extend(chunk)
+            if len(file_bytes) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413, 
+                detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
+            )
                  await file.seek(0)
 
 
