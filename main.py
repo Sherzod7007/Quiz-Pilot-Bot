@@ -1282,7 +1282,7 @@ def get_premium_status(user_id: int):
         "is_teacher": is_teacher,
     }
 
-
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB (baytlarda)
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1292,6 +1292,20 @@ async def create_quiz_web(
 ):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
+
+# 10 MB Fayl hajmini tekshirish
+    if file:
+    file_bytes = bytearray()
+    chunk_size = 1024 * 1024  # 1 MB bo'laklar
+    while chunk := await file.read(chunk_size):
+        file_bytes.extend(chunk)
+        if len(file_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413, 
+            detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
+        )
+                 await file.seek(0)
+
 
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn_check.row_factory = sqlite3.Row
