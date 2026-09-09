@@ -1465,7 +1465,12 @@
             if (fileInput.files.length > 0) {
             const selectedFile = fileInput.files[0];
             if (selectedFile.size > 10 * 1024 * 1024) { // 10 MB limit
-                showAppAlert("⚠️", "Fayl hajmi 10 MB dan oshmasligi kerak!");
+                const fileLimitAlerts = {
+    uz: "Fayl hajmi 10 MB dan oshmasligi kerak!",
+    ru: "Размер файла не должен превышать 10 МБ!",
+    en: "File size must not exceed 10 MB!"
+};
+showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 genBtn.style.display = "block";
                 loader.style.display = "none";
                 return;
