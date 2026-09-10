@@ -685,6 +685,50 @@
         .game-timer.danger { color:#ff7777; animation:timerPulse 1s infinite; }
         @keyframes timerPulse { 50% { opacity:.55; } }
         @media (max-width:520px) { .group-join-row { flex-direction:column; } .group-join-row .submit-btn { width:100%; } .game-session-bar { align-items:flex-start; } .game-timer { font-size:17px; } }
+		/* Windows 7 Aero Glass uslubidagi Yangiliklar oynasi */
+#newsModal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+#newsModal .modal-card {
+    background: rgba(220, 235, 252, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    border-radius: 10px;
+    width: 100%;
+    max-width: 380px;
+    padding: 16px;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #000;
+}
+
+#newsModal h3 {
+    color: #1e395b !important;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8);
+    font-size: 17px;
+    margin-bottom: 12px;
+}
+
+#newsListContainer {
+    max-height: 60vh;
+    overflow-y: auto;
+}
 </style>
 </head>
 <body>
@@ -2466,8 +2510,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             });
             window.addEventListener('focus', sendActivityHeartbeat);
         };
-		// ===== Yangiliklar (News) oynasini ochish va yuklash =====
-const bellBtn = document.getElementById('bellBtn');
+		const bellBtn = document.getElementById('bellBtn');
 const newsModal = document.getElementById('newsModal');
 const closeNewsBtn = document.getElementById('closeNewsBtn');
 const newsListContainer = document.getElementById('newsListContainer');
@@ -2475,23 +2518,27 @@ const newsListContainer = document.getElementById('newsListContainer');
 if (bellBtn && newsModal) {
     bellBtn.addEventListener('click', async () => {
         newsModal.style.display = 'flex';
-        newsListContainer.innerHTML = 'Yuklanmoqda...';
+        newsListContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
         try {
-            const res = await fetch(`/api/news?lang=${currentLang}`);
+            const res = await fetch('/api/news');
             const result = await res.json();
-            if (result.status === 'success' && result.data && result.data.length > 0) {
-                newsListContainer.innerHTML = result.data.map(item => `
-                    <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <div style="font-weight: bold; margin-bottom: 4px; color: var(--text-main, #fff);">${item.title_uz || item.title_ru || item.title_en || ''}</div>
-                        <div style="font-size: 13px; color: var(--text-hint, #aaa);">${item.content_uz || item.content_ru || item.content_en || ''}</div>
+            
+            // Serverdan kelgan ma'lumot array yoki object ekanligini tekshiramiz
+            const newsArray = Array.isArray(result) ? result : (result.data || []);
+
+            if (newsArray.length > 0) {
+                newsListContainer.innerHTML = newsArray.map(item => `
+                    <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.15);">
+                        <div style="font-weight: bold; margin-bottom: 4px; color: #111;">${item.title_uz || item.title_ru || item.title_en || 'E\'lon'}</div>
+                        <div style="font-size: 13px; color: #333; line-height: 1.4;">${item.content_uz || item.content_ru || item.content_en || ''}</div>
                     </div>
                 `).join('');
             } else {
-                newsListContainer.innerHTML = '<div style="color: var(--text-hint, #aaa);">Hozircha yangiliklar yo\'q.</div>';
+                newsListContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
             }
         } catch (err) {
             console.error('News fetch error:', err);
-            newsListContainer.innerHTML = '<div style="color: #ff6b6b;">Xatolik yuz berdi.</div>';
+            newsListContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
         }
     });
 }
