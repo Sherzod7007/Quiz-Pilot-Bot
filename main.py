@@ -33,6 +33,10 @@ import random
 import secrets
 from copy import deepcopy
 from pathlib import Path
+from deep_translator import GoogleTranslator
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from datetime import datetime
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -3315,6 +3319,108 @@ async def startup_event():
     threading.Thread(target=limit_notification_worker, daemon=True).start()
 
 
-if __name__ == "__main__":
+
+    # ==================================================================
+# YANGILIKLAR TIZIMI VA AVTO-TARJIMA BO'LIMI
+# ==================================================================
+
+# DB Sozlamalari
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if DATABASE_URL.startswith("sqlite"):
+    news_engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    news_engine = create_engine(DATABASE_URL)
+
+NewsSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=news_engine)
+NewsBase = declarative_base()
+
+class News(NewsBase):
+    __tablename__ = "news"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title_uz = Column(String(255), nullable=False)
+    content_uz = Column(Text, nullable=False)
+    title_ru = Column(String(255), nullable=True)
+    content_ru = Column(Text, nullable=True)
+    title_en = Column(String(255), nullable=True)
+    content_en = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+NewsBase.metadata.create_all(bind=news_engine)
+
+def get_news_db():
+    db = NewsSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def translate_to_ru_and_en(text_uz: str):
+    if not text_uz or not text_uz.strip():
+        return "", ""
+    try:
+        text_ru = GoogleTranslator(source='uz', target='ru').translate(text_uz)
+    except Exception as e:
+        print(f"[RU Tarjima Xatosi]: {e}")
+        text_ru = text_uz
+
+    try:
+        text_en = GoogleTranslator(source='uz', target='en').translate(text_uz)
+    except Exception as e:
+        print(f"[EN Tarjima Xatosi]: {e}")
+        text_en = text_uz
+
+    return text_ru, text_en
+
+class NewsCreateSchema(BaseModel):
+    title_uz: str
+    content_uz: str
+
+@app.post("/api/news")
+def create_news_api(news_data: NewsCreateSchema, db: Session = Depends(get_news_db)):
+    title_ru, title_en = translate_to_ru_and_en(news_data.title_uz)
+    content_ru, content_en = translate_to_ru_and_en(news_data.content_uz)
+
+    new_item = News(
+        title_uz=news_data.title_uz,
+        content_uz=news_data.content_uz,
+        title_ru=title_ru,
+        content_ru=content_ru,
+        title_en=title_en,
+        content_en=content_en
+    )
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+    return {"status": "success", "data": new_item}
+
+@app.get("/api/news")
+def get_news_api(lang: str = Query("uz"), db: Session = Depends(get_news_db)):
+    news_list = db.query(News).order_by(News.created_at.desc()).all()
+    result = []
+
+    for item in news_list:
+        if lang == "ru":
+            title = item.title_ru or item.title_uz
+            content = item.content_ru or item.content_uz
+        elif lang == "en":
+            title = item.title_en or item.title_uz
+            content = item.content_en or item.content_uz
+        else:
+            title = item.title_uz
+            content = item.content_uz
+
+        result.append({
+            "id": item.id,
+            "title": title,
+            "content": content,
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else ""
+        })
+
+    return {"status": "success", "data": result}
+    if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run(app, host="0.0.0.0", port=port)
