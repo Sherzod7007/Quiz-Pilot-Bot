@@ -11,3 +11,4 @@ openpyxl
 reportlab
 psycopg2-binary
 deep-translator
+sqlalchemy
