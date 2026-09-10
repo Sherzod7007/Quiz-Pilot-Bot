@@ -2466,6 +2466,41 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             });
             window.addEventListener('focus', sendActivityHeartbeat);
         };
+		// ===== Yangiliklar (News) oynasini ochish va yuklash =====
+const bellBtn = document.getElementById('bellBtn');
+const newsModal = document.getElementById('newsModal');
+const closeNewsBtn = document.getElementById('closeNewsBtn');
+const newsListContainer = document.getElementById('newsListContainer');
+
+if (bellBtn && newsModal) {
+    bellBtn.addEventListener('click', async () => {
+        newsModal.style.display = 'flex';
+        newsListContainer.innerHTML = 'Yuklanmoqda...';
+        try {
+            const res = await fetch(`/api/news?lang=${currentLang}`);
+            const result = await res.json();
+            if (result.status === 'success' && result.data && result.data.length > 0) {
+                newsListContainer.innerHTML = result.data.map(item => `
+                    <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <div style="font-weight: bold; margin-bottom: 4px; color: var(--text-main, #fff);">${item.title_uz || item.title_ru || item.title_en || ''}</div>
+                        <div style="font-size: 13px; color: var(--text-hint, #aaa);">${item.content_uz || item.content_ru || item.content_en || ''}</div>
+                    </div>
+                `).join('');
+            } else {
+                newsListContainer.innerHTML = '<div style="color: var(--text-hint, #aaa);">Hozircha yangiliklar yo\'q.</div>';
+            }
+        } catch (err) {
+            console.error('News fetch error:', err);
+            newsListContainer.innerHTML = '<div style="color: #ff6b6b;">Xatolik yuz berdi.</div>';
+        }
+    });
+}
+
+if (closeNewsBtn && newsModal) {
+    closeNewsBtn.addEventListener('click', () => {
+        newsModal.style.display = 'none';
+    });
+}
     </script>
 </body>
 </html>
