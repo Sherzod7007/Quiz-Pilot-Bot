@@ -3422,5 +3422,5 @@ def get_news_api(lang: str = Query("uz"), db: Session = Depends(get_news_db)):
 
     return {"status": "success", "data": result}
     if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+        port = int(os.environ.get("PORT", 8080))
+        uvicorn.run(app, host="0.0.0.0", port=port)
