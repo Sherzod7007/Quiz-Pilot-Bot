@@ -1480,17 +1480,17 @@ async function loadNews() {
     if (!response.ok) throw new Error('Network response was not ok');
     
     let data = await response.json();
-    
-    // Agar server { news: [...] } ko'rinishida qaytarsa
     if (data && data.news) data = data.news;
 
     if (Array.isArray(data) && data.length > 0) {
       container.innerHTML = data.map(item => {
-        const textContent = typeof item === 'string' ? item : (item.text || item.message || item.content || JSON.stringify(item));
+        const title = item.title_uz || item.title || '';
+        const content = item.content_uz || item.text || item.message || item.content || '';
         return `
           <div style="padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.1); margin-bottom: 8px; text-align: left;">
-            <p style="margin: 0; color: #1e395b; font-size: 14px; line-height: 1.4; word-break: break-word;">
-              ${textContent}
+            ${title ? `<strong style="display:block; color:#1e395b; margin-bottom:4px;">${title}</strong>` : ''}
+            <p style="margin: 0; color: #333; font-size: 14px; line-height: 1.4; word-break: break-word;">
+              ${content}
             </p>
           </div>
         `;
