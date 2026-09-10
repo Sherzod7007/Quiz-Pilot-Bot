@@ -2510,48 +2510,54 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             });
             window.addEventListener('focus', sendActivityHeartbeat);
         };
-		const bellBtn = document.getElementById('bellBtn');
-const newsModal = document.getElementById('newsModal');
-const closeNewsBtn = document.getElementById('closeNewsBtn');
-const newsListContainer = document.getElementById('newsListContainer');
+		(function() {
+    try {
+        const bellBtn = document.getElementById('bellBtn');
+        const newsModal = document.getElementById('newsModal');
+        const closeNewsBtn = document.getElementById('closeNewsBtn');
+        const newsListContainer = document.getElementById('newsListContainer');
 
-if (bellBtn && newsModal) {
-    bellBtn.addEventListener('click', async () => {
-        newsModal.style.display = 'flex';
-        if (newsListContainer) {
-            newsListContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
-        }
-        try {
-            const res = await fetch('/api/news');
-            const result = await res.json();
-            const newsArray = Array.isArray(result) ? result : (result.data || []);
-
-            if (newsListContainer) {
-                if (newsArray.length > 0) {
-                    newsListContainer.innerHTML = newsArray.map(item => `
-                        <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.15);">
-                            <div style="font-weight: bold; margin-bottom: 4px; color: #111;">${item.title_uz || item.title_ru || item.title_en || 'E\'lon'}</div>
-                            <div style="font-size: 13px; color: #333; line-height: 1.4;">${item.content_uz || item.content_ru || item.content_en || ''}</div>
-                        </div>
-                    `).join('');
-                } else {
-                    newsListContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
+        if (bellBtn && newsModal) {
+            bellBtn.addEventListener('click', async () => {
+                newsModal.style.display = 'flex';
+                if (newsListContainer) {
+                    newsListContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
                 }
-            }
-        } catch (err) {
-            console.error('News fetch error:', err);
-            if (newsListContainer) {
-                newsListContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
-            }
-        }
-    });
-}
+                try {
+                    const res = await fetch('/api/news');
+                    const result = await res.json();
+                    const newsArray = Array.isArray(result) ? result : (result.data || []);
 
-if (closeNewsBtn && newsModal) {
-    closeNewsBtn.addEventListener('click', () => {
-        newsModal.style.display = 'none';
-    });
-}
+                    if (newsListContainer) {
+                        if (newsArray.length > 0) {
+                            newsListContainer.innerHTML = newsArray.map(item => `
+                                <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.15);">
+                                    <div style="font-weight: bold; margin-bottom: 4px; color: #111;">${item.title_uz || item.title_ru || item.title_en || "E'lon"}</div>
+                                    <div style="font-size: 13px; color: #333; line-height: 1.4;">${item.content_uz || item.content_ru || item.content_en || ''}</div>
+                                </div>
+                            `).join('');
+                        } else {
+                            newsListContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
+                        }
+                    }
+                } catch (err) {
+                    console.error('News fetch error:', err);
+                    if (newsListContainer) {
+                        newsListContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
+                    }
+                }
+            });
+        }
+
+        if (closeNewsBtn && newsModal) {
+            closeNewsBtn.addEventListener('click', () => {
+                newsModal.style.display = 'none';
+            });
+        }
+    } catch (e) {
+        console.error('News module init error:', e);
+    }
+})();
     </script>
 </body>
 </html>
