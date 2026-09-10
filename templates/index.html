@@ -2442,47 +2442,51 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
         const bellBtn = document.getElementById('bellBtn');
         const newsModal = document.getElementById('newsModal');
         const closeNewsBtn = document.getElementById('closeNewsBtn');
-        const newsListContainer = document.getElementById('newsListContainer');
+        const newsContainer = document.getElementById('newsListContainer');
 
         if (bellBtn && newsModal) {
-            bellBtn.addEventListener('click', async () => {
+            bellBtn.addEventListener('click', async function() {
                 newsModal.style.display = 'flex';
-                if (newsListContainer) {
-                    newsListContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
+                if (newsContainer) {
+                    newsContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
                 }
                 try {
-                    const res = await fetch('/api/news');
-                    const result = await res.json();
-                    const newsArray = Array.isArray(result) ? result : (result.data || []);
+                    const response = await fetch('/api/news');
+                    const data = await response.json();
+                    const list = Array.isArray(data) ? data : (data.data || []);
 
-                    if (newsListContainer) {
-                        if (newsArray.length > 0) {
-                            newsListContainer.innerHTML = newsArray.map(item => `
-                                <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.15);">
-                                    <div style="font-weight: bold; margin-bottom: 4px; color: #111;">${item.title_uz || item.title_ru || item.title_en || "E'lon"}</div>
-                                    <div style="font-size: 13px; color: #333; line-height: 1.4;">${item.content_uz || item.content_ru || item.content_en || ''}</div>
-                                </div>
-                            `).join('');
+                    if (newsContainer) {
+                        if (list.length > 0) {
+                            let html = '';
+                            for (let i = 0; i < list.length; i++) {
+                                let item = list[i];
+                                let t = item.title_uz || item.title_ru || item.title_en || 'E\'lon';
+                                let c = item.content_uz || item.content_ru || item.content_en || '';
+                                html += '<div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.15);">';
+                                html += '<div style="font-weight: bold; margin-bottom: 4px; color: #111;">' + t + '</div>';
+                                html += '<div style="font-size: 13px; color: #333; line-height: 1.4;">' + c + '</div>';
+                                html += '</div>';
+                            }
+                            newsContainer.innerHTML = html;
                         } else {
-                            newsListContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
+                            newsContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
                         }
                     }
-                } catch (err) {
-                    console.error('News fetch error:', err);
-                    if (newsListContainer) {
-                        newsListContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
+                } catch (e) {
+                    if (newsContainer) {
+                        newsContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
                     }
                 }
             });
         }
 
         if (closeNewsBtn && newsModal) {
-            closeNewsBtn.addEventListener('click', () => {
+            closeNewsBtn.addEventListener('click', function() {
                 newsModal.style.display = 'none';
             });
         }
-    } catch (e) {
-        console.error('News module init error:', e);
+    } catch (err) {
+        console.error('Init error:', err);
     }
 })();
     </script>
