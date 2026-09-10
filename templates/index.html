@@ -744,19 +744,27 @@ html, body {
   box-sizing: border-box;
 }
 /* Modal oynani ekranning o'rtasiga to'g'rilash */
+/* Modal overlayning asosiy holati */
 .modal-overlay {
+  display: none; /* Odatiy holatda yashirin bo'ladi */
+  justify-content: center;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 9999;
+  box-sizing: border-box;
+  padding: 16px;
+}
+
+/* Modal ochiq bo'lgandagina ko'rinadi va markazlashadi */
+.modal-overlay.active,
+.modal-overlay[style*="display: block"],
+.modal-overlay[style*="display: flex"] {
   display: flex !important;
-  justify-content: center !important;
-  align-items: center !important;
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  background: rgba(0, 0, 0, 0.7) !important;
-  z-index: 9999 !important;
-  box-sizing: border-box !important;
-  padding: 16px !important;
 }
 
 /* Modal kartochkasining o'lchamini chegaralash */
