@@ -1479,16 +1479,22 @@ async function loadNews() {
     const response = await fetch(`${BASE_URL}/api/news`);
     if (!response.ok) throw new Error('Network response was not ok');
     
-    const data = await response.json();
+    let data = await response.json();
     
+    // Agar server { news: [...] } ko'rinishida qaytarsa
+    if (data && data.news) data = data.news;
+
     if (Array.isArray(data) && data.length > 0) {
-      container.innerHTML = data.map(item => `
-        <div style="padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.1); margin-bottom: 8px;">
-          <p style="margin: 0; color: #1e395b; font-size: 14px; line-height: 1.4; word-break: break-word;">
-            ${item.text || item.message || item.content || ''}
-          </p>
-        </div>
-      `).join('');
+      container.innerHTML = data.map(item => {
+        const textContent = typeof item === 'string' ? item : (item.text || item.message || item.content || JSON.stringify(item));
+        return `
+          <div style="padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.1); margin-bottom: 8px; text-align: left;">
+            <p style="margin: 0; color: #1e395b; font-size: 14px; line-height: 1.4; word-break: break-word;">
+              ${textContent}
+            </p>
+          </div>
+        `;
+      }).join('');
     } else {
       container.innerHTML = '<p style="color: #666; text-align: center; padding: 15px;">Hozircha yangiliklar yo\'q</p>';
     }
@@ -1497,16 +1503,6 @@ async function loadNews() {
     container.innerHTML = '<p style="color: red; text-align: center; padding: 15px;">Xabarlarni yuklab bo\'lmadi</p>';
   }
 }
-
-// Qo'ng'iroqcha tugmasi bosilganda xabarlarni yuklash
-document.getElementById('bellBtn')?.addEventListener('click', () => {
-  const modal = document.getElementById('newsModal');
-  if (modal) {
-    modal.classList.add('active');
-    modal.style.display = 'flex';
-  }
-  loadNews();
-});
 
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
