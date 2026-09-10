@@ -1476,27 +1476,19 @@ async function loadNews() {
   if (!container) return;
 
   try {
-    const response = await fetch(`${BASE_URL}/api/news`);
+    const response = await fetch(`${BASE_URL}/api/news?t=${Date.now()}`);
     if (!response.ok) throw new Error('Network response was not ok');
     
     let result = await response.json();
     
-    // Server qaytarayotgan ma'lumotni to'g'ri ajratib olish
-    let items = [];
-    if (Array.isArray(result)) {
-      items = result;
-    } else if (result && result.data) {
-      items = Array.isArray(result.data) ? result.data : [result.data];
-    } else if (result && result.news) {
-      items = Array.isArray(result.news) ? result.news : [result.news];
-    } else if (result && typeof result === 'object') {
-      items = [result];
-    }
+    // Serverdan kelgan barcha tuzilmalarni qamrab olish
+    let rawData = result.data || result.news || result;
+    let items = Array.isArray(rawData) ? rawData : (rawData ? [rawData] : []);
 
     if (items.length > 0) {
       container.innerHTML = items.map(item => {
-        const title = item.title_uz || item.title || 'Yangilik';
-        const content = item.content_uz || item.content || item.text || item.message || '';
+        const title = item.title_uz || item.title_ru || item.title || 'Yangilik';
+        const content = item.content_uz || item.content_ru || item.content || item.text || item.message || '';
         return `
           <div style="padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.1); margin-bottom: 8px; text-align: left;">
             <strong style="display:block; color:#1e395b; margin-bottom:4px; font-size: 15px;">${title}</strong>
