@@ -3,7 +3,7 @@ import docx
 import asyncio
 import re
 from docx import Document
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -37,6 +37,7 @@ from deep_translator import GoogleTranslator
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime
+from fastapi import Depends, Query
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
