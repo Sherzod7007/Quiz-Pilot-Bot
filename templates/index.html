@@ -2437,79 +2437,51 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 }
             });
             window.addEventListener('focus', sendActivityHeartbeat);
-        };
-		// ===== Yangiliklar (News) oynasini ochish va yuklash =====
-const bellBtn = document.getElementById('bellBtn');
-const newsModal = document.getElementById('newsModal');
-const closeNewsBtn = document.getElementById('closeNewsBtn');
-const newsListContainer = document.getElementById('newsListContainer');
+        // ===== Yangiliklar (News) oynasi xavfsiz skripti =====
+document.addEventListener('DOMContentLoaded', () => {
+    const bellBtn = document.getElementById('bellBtn');
+    const newsModal = document.getElementById('newsModal');
+    const closeNewsBtn = document.getElementById('closeNewsBtn');
+    const newsListContainer = document.getElementById('newsListContainer');
 
-if (bellBtn && newsModal) {
-    bellBtn.addEventListener('click', async () => {
-        newsModal.style.display = 'flex';
-        newsListContainer.innerHTML = 'Yuklanmoqda...';
-        try {
-            const res = await fetch(`/api/news?lang=${currentLang}`);
-            const result = await res.json();
-            if (result.status === 'success' && result.data && result.data.length > 0) {
-                newsListContainer.innerHTML = result.data.map(item => `
-                    <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <div style="font-weight: bold; margin-bottom: 4px; color: var(--text-main, #fff);">${item.title_uz || item.title_ru || item.title_en || ''}</div>
-                        <div style="font-size: 13px; color: var(--text-hint, #aaa);">${item.content_uz || item.content_ru || item.content_en || ''}</div>
-                    </div>
-                `).join('');
-            } else {
-                newsListContainer.innerHTML = '<div style="color: var(--text-hint, #aaa);">Hozircha yangiliklar yo\'q.</div>';
+    if (bellBtn && newsModal) {
+        bellBtn.addEventListener('click', async () => {
+            newsModal.style.display = 'flex';
+            if (newsListContainer) {
+                newsListContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
             }
-        } catch (err) {
-            console.error('News fetch error:', err);
-            newsListContainer.innerHTML = '<div style="color: #ff6b6b;">Xatolik yuz berdi.</div>';
-        }
-    });
-}
+            try {
+                const res = await fetch('/api/news');
+                const result = await res.json();
+                const newsArray = Array.isArray(result) ? result : (result.data || []);
 
-if (closeNewsBtn && newsModal) {
-    closeNewsBtn.addEventListener('click', () => {
-        newsModal.style.display = 'none';
-    });
-}
-const bellBtn = document.getElementById('bellBtn');
-const newsModal = document.getElementById('newsModal');
-const closeNewsBtn = document.getElementById('closeNewsBtn');
-const newsListContainer = document.getElementById('newsListContainer');
-
-if (bellBtn && newsModal) {
-    bellBtn.addEventListener('click', async () => {
-        newsModal.style.display = 'flex';
-        newsListContainer.innerHTML = '<div style="color: #333; text-align: center; padding: 10px;">Yuklanmoqda...</div>';
-        try {
-            const res = await fetch('/api/news');
-            const result = await res.json();
-            
-            const newsArray = Array.isArray(result) ? result : (result.data || []);
-
-            if (newsArray.length > 0) {
-                newsListContainer.innerHTML = newsArray.map(item => `
-                    <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.15);">
-                        <div style="font-weight: bold; margin-bottom: 4px; color: #111;">${item.title_uz || item.title_ru || item.title_en || 'E\'lon'}</div>
-                        <div style="font-size: 13px; color: #333; line-height: 1.4;">${item.content_uz || item.content_ru || item.content_en || ''}</div>
-                    </div>
-                `).join('');
-            } else {
-                newsListContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
+                if (newsListContainer) {
+                    if (newsArray.length > 0) {
+                        newsListContainer.innerHTML = newsArray.map(item => `
+                            <div style="margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.15);">
+                                <div style="font-weight: bold; margin-bottom: 4px; color: #111;">${item.title_uz || item.title_ru || item.title_en || 'E\'lon'}</div>
+                                <div style="font-size: 13px; color: #333; line-height: 1.4;">${item.content_uz || item.content_ru || item.content_en || ''}</div>
+                            </div>
+                        `).join('');
+                    } else {
+                        newsListContainer.innerHTML = '<div style="color: #444; text-align: center; padding: 10px;">Hozircha yangiliklar yo\'q.</div>';
+                    }
+                }
+            } catch (err) {
+                console.error('News fetch error:', err);
+                if (newsListContainer) {
+                    newsListContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
+                }
             }
-        } catch (err) {
-            console.error('News fetch error:', err);
-            newsListContainer.innerHTML = '<div style="color: #d9534f; text-align: center; padding: 10px;">Xatolik yuz berdi.</div>';
-        }
-    });
-}
+        });
+    }
 
-if (closeNewsBtn && newsModal) {
-    closeNewsBtn.addEventListener('click', () => {
-        newsModal.style.display = 'none';
-    });
-}
+    if (closeNewsBtn && newsModal) {
+        closeNewsBtn.addEventListener('click', () => {
+            newsModal.style.display = 'none';
+        });
+    }
+});
     </script>
 </body>
 </html>
