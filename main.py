@@ -1321,44 +1321,7 @@ def _remove_temp_backup(path: str):
     except Exception:
         logging.exception("Temporary SQLite backup cleanup failed")
 
-@app.get("/admin/sqlite-backup")
-def download_sqlite_backup(
-    token: str = Query(..., min_length=16),
-    background_tasks: BackgroundTasks = None,
-):
-    if not SQLITE_BACKUP_TOKEN:
-        raise HTTPException(status_code=503, detail="SQLite backup endpoint is not configured")
-    if not secrets.compare_digest(token, SQLITE_BACKUP_TOKEN):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not os.path.exists(DB_PATH):
-        raise HTTPException(status_code=404, detail="SQLite database file was not found")
 
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"quiz_pilot_sqlite_backup_{stamp}.db")
-
-    try:
-        # sqlite3 backup API creates a consistent snapshot while the app is live.
-        src_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        dst_conn = sqlite3.connect(backup_path, check_same_thread=False)
-        try:
-            src_conn.backup(dst_conn)
-        finally:
-            dst_conn.close()
-            src_conn.close()
-    except Exception:
-        _remove_temp_backup(backup_path)
-        logging.exception("SQLite backup creation failed")
-        raise HTTPException(status_code=500, detail="SQLite backup creation failed")
-
-    tasks = background_tasks or BackgroundTasks()
-    tasks.add_task(_remove_temp_backup, backup_path)
-    return FileResponse(
-        backup_path,
-        media_type="application/octet-stream",
-        filename=os.path.basename(backup_path),
-        background=tasks,
-    )
 
 
 
