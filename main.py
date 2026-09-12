@@ -1956,7 +1956,7 @@ def get_public_quizzes(user_id: int):
         }
         for r in rows
     ]
-    ]
+    
     return {
         "status": "ok",
         "quizzes": quizzes,
