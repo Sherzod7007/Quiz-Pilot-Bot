@@ -81,60 +81,13 @@ from fastapi import Depends, Query
 # ==========================================
 # POSTGRESQL CONTEXT MANAGER (XAVFSIZ ULANISH)
 # ==========================================
-@contextmanager
-def get_db_connection():
-    if not pg_pool:
-        raise Exception("Database connection pool is not initialized")
-    
-    conn = pg_pool.getconn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        # Ulanishni har qanday holatda ham pool'ga qaytaradi
-        pg_pool.putconn(conn)
 
-
-
-# ==========================================
-# LOGGING VA POSTGRESQL CONTEXT MANAGER
-# ==========================================
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-
-@contextmanager
-def get_db_connection():
-    if not pg_pool:
-        raise Exception("Database connection pool is not initialized")
-    
-    conn = pg_pool.getconn()
-    try:
-        yield conn
-        conn.commit()
     # ==========================================
 # POSTGRESQL CONTEXT MANAGER
 # ==========================================
 @contextmanager
 def get_db_connection():
-    if not pg_pool:
-        raise Exception("Database connection pool is not initialized")
     
-    conn = pg_pool.getconn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        pg_pool.putconn(conn)
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
