@@ -3662,16 +3662,11 @@ def create_flashcard(req: FlashcardCreateRequest):
             
             # Premium / Teacher: cheksiz.
             if not is_paid:
-                cur.execute("""
-                    UPDATE users 
-                    SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 
-                    # If rowcount != 1, limit was reached (handled inside _write block or raising error properly)
-            # Let's ensure lang is retrieved or passed correctly. Since lang might come from request, let's check or handle safely.
-            # Wait, looking at lines 3736-3745, 'lang' needs to be defined. Let's see if req has lang or if we can get it.
-            # Assuming req has lang or we use req.lang if available, or fetch user lang. Let's write the robust block:
-            pass
-
-        # Let's write the complete _write function properly:
+        cur.execute("""
+            UPDATE users
+            SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1
+            WHERE id = %s
+        """, (user_id,))
     return {"status": "ok"}
 
 
