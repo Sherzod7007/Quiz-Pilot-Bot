@@ -709,9 +709,11 @@ def process_expired_free_limits():
                 except Exception as e:
                     logging.error(f"Bepul limit qaytgani haqida xabar yuborilmadi ({user_id}): {e}")
         conn.commit()
-        conn.close()
     except Exception as e:
         logging.error(f"Bepul limit reset worker xatosi: {e}")
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
 
 def process_expired_paid_limits():
