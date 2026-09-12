@@ -12,3 +12,16 @@ reportlab
 psycopg2-binary
 deep-translator
 sqlalchemy
+fastapi
+uvicorn
+pyTelegramBotAPI
+python-docx
+pypdf
+openpyxl
+reportlab
+google-genai
+deep-translator
+sqlalchemy
+psycopg2-binary
+python-multipart
+jinja2
