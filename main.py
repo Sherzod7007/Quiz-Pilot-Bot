@@ -97,10 +97,7 @@ def get_db_connection():
         # Ulanishni har qanday holatda ham pool'ga qaytaradi
         pg_pool.putconn(conn)
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    from datetime import datetime
-from fastapi import Depends, Query
+
 
 # ==========================================
 # LOGGING VA POSTGRESQL CONTEXT MANAGER
