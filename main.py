@@ -1361,16 +1361,7 @@ def download_sqlite_backup(
     )
 
 
-@app.exception_handler(sqlite3.OperationalError)
-async def teacher_sqlite_operational_error(request: Request, exc: sqlite3.OperationalError):
-    logging.exception("SQLite OperationalError: %s", exc)
-    msg = "__TEACHER_DB_BUSY__" if any(x in str(exc).lower() for x in ("locked", "busy", "readonly")) else "__TEACHER_SERVER_ERROR__"
-    return JSONResponse(status_code=500, content={"status": "error", "detail": msg})
 
-@app.exception_handler(sqlite3.IntegrityError)
-async def teacher_sqlite_integrity_error(request: Request, exc: sqlite3.IntegrityError):
-    logging.exception("SQLite IntegrityError: %s", exc)
-    return JSONResponse(status_code=500, content={"status": "error", "detail": "__TEACHER_SERVER_ERROR__"})
 
 app.add_middleware(
     CORSMiddleware,
