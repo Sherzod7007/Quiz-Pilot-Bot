@@ -3,7 +3,7 @@ import docx
 import asyncio
 import re
 from docx import Document
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -22,8 +22,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import db_postgres as sqlite3
 import telebot
 import threading
 import time
@@ -34,6 +33,11 @@ import random
 import secrets
 from copy import deepcopy
 from pathlib import Path
+from deep_translator import GoogleTranslator
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from datetime import datetime
+from fastapi import Depends, Query
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -175,22 +179,22 @@ MESSAGES = {
     "uz": {
         "welcome": (
             "👋 *Salom, {name}!*\n"
-            "🎓 *Quiz AI* — AI yordamida bilimni tez va qulay tekshirish uchun zamonaviy App.\n\n"
+            "🎓 *Quiz AI* — AI yordamida savollarni tez va qulay testga aylantiruvchi ilova.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
-            "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish\n"
-            "📚 Testlarni Library bo'limida saqlash va ishlash\n"
-            "🌐 Ommaviy testlardan foydalanish\n"
-            "🧠 Flash Kartochkalar orqali takrorlash\n"
-            "👥 Guruhlarga qo'shilish va guruh testlarida qatnashish\n"
-            "👨‍🏫 O'qituvchilar uchun Professional vositalar\n"
-            "📊 Natijalarni qulay ko'rish va tahlil qilish\n"
-            "🔊 Ovoz va vibratsiya sozlamalari\n"
-            "🌍 O'zbek, Русский va English tillari\n\n"
+            "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish.\n"
+            "📚 Testlarni Kutubxona bo'limida saqlash va ishlash.\n"
+            "🌐 Ommaviy testlardan foydalanish.\n"
+            "🧠 Flash Kartochkalar orqali takrorlash.\n"
+            "👥 Guruhlarga qo'shilish va guruh testlarida qatnashish.\n"
+            "👨‍🏫 O'qituvchilar uchun Professional vositalar.\n"
+            "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
+            "🔊 Ovoz va vibratsiya sozlamalari.\n"
+            "🌍 O'zbek, Русский va English tillari.\n"
             "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
-            "📌 *Eslatma:* «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
+            "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz Pilot Bot imkoniyatlaridan foydalaning!"
+            "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz AI imkoniyatlaridan foydalaning!"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -225,22 +229,22 @@ MESSAGES = {
     "ru": {
         "welcome": (
             "👋 *Привет, {name}!*\n"
-            "🎓 *Quiz AI* — современный App для быстрой и удобной проверки знаний с помощью ИИ.\n\n"
+            "🎓 *Quiz AI* — Приложение, которое с помощью ИИ быстро и удобно превращает вопросы в тесты.\n\n"
             "✨ *Возможности приложения:*\n"
-            "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX\n"
-            "📚 Сохранение и прохождение тестов в разделе «Библиотека»\n"
-            "🌐 Публичные тесты\n"
-            "🧠 Флеш-карточки для повторения материала\n"
-            "👥 Вступление в группы и участие в групповых тестах\n"
-            "👨‍🏫 Профессиональные инструменты для учителей\n"
-            "📊 Удобный просмотр и анализ результатов\n"
-            "🔊 Настройки звука и вибрации\n"
-            "🌍 Узбекский, русский и английский языки\n\n"
+            "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX.\n"
+            "📚 Сохранение и прохождение тестов в разделе «Библиотека».\n"
+            "🌐 Публичные тесты.\n"
+            "🧠 Флеш-карточки для повторения материала.\n"
+            "👥 Вступление в группы и участие в групповых тестах.\n"
+            "👨‍🏫 Профессиональные инструменты для учителей.\n"
+            "📊 Удобный просмотр и анализ результатов.\n"
+            "🔊 Настройки звука и вибрации.\n"
+            "🌍 Узбекский, русский и английский языки.\n"
             "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
-            "📌 *Примечание:* При нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
+            "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
-            "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz Pilot Bot!"
+            "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz AI!"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -274,22 +278,22 @@ MESSAGES = {
     "en": {
         "welcome": (
             "👋 *Hello, {name}!*\n"
-            "🎓 *Quiz AI* — a modern App for fast and convenient knowledge testing with AI.\n\n"
+            "🎓 *Quiz AI* — An application that uses AI to quickly and conveniently turn questions into tests.\n\n"
             "✨ *App features:*\n"
-            "🤖 Create quizzes with AI from text, PDF or DOCX\n"
-            "📚 Save and take quizzes in the Library\n"
-            "🌐 Public quizzes\n"
-            "🧠 Flashcards for revision\n"
-            "👥 Join groups and participate in group quizzes\n"
-            "👨‍🏫 Professional tools for teachers\n"
-            "📊 Easy results viewing and analysis\n"
-            "🔊 Sound and vibration settings\n"
-            "🌍 Uzbek, Russian and English languages\n\n"
+            "🤖 Create quizzes with AI from text, PDF or DOCX.\n"
+            "📚 Save and take quizzes in the Library.\n"
+            "🌐 Public quizzes.\n"
+            "🧠 Flashcards for revision.\n"
+            "👥 Join groups and participate in group quizzes.\n"
+            "👨‍🏫 Professional tools for teachers.\n"
+            "📊 Easy results viewing and analysis.\n"
+            "🔊 Sound and vibration settings.\n"
+            "🌍 Uzbek, Russian and English languages.\n"
             "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
-            "📌 *Note:* Clicking the «Activate plans» button will open a new window. Press the «Send receipt» button in that window — this will return you to the bot. Then, send the payment receipt as a photo or screenshot.\n\n"
+            "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "🚀 Tap the button below and start using Quiz Pilot Bot!"
+            "🚀 Tap the button below and start using Quiz AI!"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
@@ -322,19 +326,11 @@ MESSAGES = {
     }
 }
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-def get_db_connection():
-    db_url = DATABASE_URL
-    if db_url and db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-    return psycopg2.connect(db_url)
-
 def get_user_lang(user_id: int) -> str:
     try:
-        conn = get_db_connection()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
-        cursor.execute("SELECT language FROM users WHERE user_id = %s", (user_id,))
+        cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         conn.close()
         if row and row[0] in MESSAGES:
@@ -345,47 +341,41 @@ def get_user_lang(user_id: int) -> str:
 
 
 def init_db():
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
- 
+    cursor.execute("PRAGMA journal_mode=WAL;")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS quizzes (
         id TEXT PRIMARY KEY,
-        user_id BIGINT,
+        user_id INTEGER,
         title TEXT,
         total INTEGER,
         answered INTEGER,
         quiz_json TEXT,
-        created_at BIGINT,
+        created_at INTEGER,
         last_score INTEGER DEFAULT -1,
         last_percent INTEGER DEFAULT -1,
-        is_public INTEGER DEFAULT 0
-    );""")
+        is_public INTEGER DEFAULT 0)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY,
-        created_at BIGINT,
+        user_id INTEGER PRIMARY KEY,
+        created_at INTEGER,
         language TEXT DEFAULT 'uz',
         status TEXT DEFAULT 'Oddiy foydalanuvchi',
         plan_key TEXT DEFAULT '',
         free_used INTEGER DEFAULT 0,
         public_free_used INTEGER DEFAULT 0,
         flashcard_free_used INTEGER DEFAULT 0,
-        premium_until BIGINT DEFAULT 0,
-        last_active BIGINT DEFAULT 0,
+        premium_until INTEGER DEFAULT 0,
+        last_active INTEGER DEFAULT 0,
         last_quiz_free_notice_cycle INTEGER DEFAULT 0,
         last_public_free_notice_cycle INTEGER DEFAULT 0,
         last_flashcard_free_notice_cycle INTEGER DEFAULT 0,
         last_free_reset_notice_cycle INTEGER DEFAULT 0,
-        paid_limit_notice_until BIGINT DEFAULT 0
-    );""")
+        paid_limit_notice_until INTEGER DEFAULT 0)""")
 
-    cursor.execute("""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'users';
-    """)
-    columns = [col[0] for col in cursor.fetchall()]
+    cursor.execute("PRAGMA table_info(users);")
+    columns = [col[1] for col in cursor.fetchall()]
 
     if "status" not in columns:
         try:
@@ -608,9 +598,9 @@ def init_db():
         cursor.execute("SELECT id FROM teacher_groups WHERE COALESCE(join_code,'')='' AND active=1")
         for row in cursor.fetchall():
             code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
-            while cursor.execute("SELECT 1 FROM teacher_groups WHERE join_code=%s LIMIT 1", (code,)).fetchone():
+            while cursor.execute("SELECT 1 FROM teacher_groups WHERE join_code=? LIMIT 1", (code,)).fetchone():
                 code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
-            cursor.execute("UPDATE teacher_groups SET join_code=%s WHERE id=%s", (code, row[0]))
+            cursor.execute("UPDATE teacher_groups SET join_code=? WHERE id=?", (code, row[0]))
     except Exception as e:
         logging.warning("Teacher group code migration: %s", e)
 
@@ -677,10 +667,11 @@ def notify_free_limit_reached(user_id: int, kind: str):
         return
     used_col, notice_col, limit, message_key = columns[kind]
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
         cur.execute(
-            f"SELECT {used_col}, created_at, {notice_col}, status, premium_until FROM users WHERE user_id = %s",
+            f"SELECT {used_col}, created_at, {notice_col}, status, premium_until FROM users WHERE user_id = ?",
             (user_id,),
         )
         row = cur.fetchone()
@@ -693,7 +684,8 @@ def notify_free_limit_reached(user_id: int, kind: str):
         if used < limit or not cycle or already == cycle:
             conn.close()
             return
-        cur.execute(f"UPDATE users SET {notice_col} = %s WHERE user_id = %s AND {notice_col} <> %s", (cycle, user_id, cycle))
+        cur.execute(f"UPDATE users SET {notice_col} = ? WHERE user_id = ? AND {notice_col} <> ?", (cycle, user_id, cycle))
+        changed = cur.rowcount == 1
         conn.commit()
         conn.close()
         if changed:
@@ -707,12 +699,13 @@ def process_expired_free_limits():
     now = int(time.time())
     thirty_days = 30 * 24 * 3600
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
         cur.execute(
             "SELECT user_id, created_at, free_used, public_free_used, flashcard_free_used, "
             "status, premium_until, last_free_reset_notice_cycle "
-            "FROM users WHERE created_at > 0 AND created_at <= %s"
+            "FROM users WHERE created_at > 0 AND created_at <= ?",
             (now - thirty_days,),
         )
         rows = cur.fetchall()
@@ -731,13 +724,11 @@ def process_expired_free_limits():
                 or (row["flashcard_free_used"] or 0) >= FREE_FLASHCARD_LIMIT
             )
 
-            
-                cur.execute(
-            "UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, "
-            "created_at=%s, last_free_reset_notice_cycle=%s "
-            "WHERE user_id=%s AND created_at=%s",
-            (now, old_cycle if had_exhausted_limit else already_notified, user_id, old_cycle),
-        )
+            cur.execute(
+                "UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, "
+                "created_at=?, last_free_reset_notice_cycle=? "
+                "WHERE user_id=? AND created_at=?",
+                (now, old_cycle if had_exhausted_limit else already_notified, user_id, old_cycle),
             )
             if cur.rowcount == 1 and had_exhausted_limit and already_notified != old_cycle:
                 try:
@@ -756,11 +747,12 @@ def process_expired_paid_limits():
     """Expire PRO plans and notify users once exactly when their paid period ends."""
     now = int(time.time())
     try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
         cur.execute(
             "SELECT user_id, status, plan_key, premium_until, paid_limit_notice_until "
-            "FROM users WHERE premium_until > 0 AND premium_until <= %s AND status LIKE '%PRO%'",
+            "FROM users WHERE premium_until > 0 AND premium_until <= ? AND status LIKE '%PRO%'",
             (now,),
         )
         rows = cur.fetchall()
@@ -772,9 +764,9 @@ def process_expired_paid_limits():
             plan_key = row["plan_key"] or get_plan_key(row["status"] or "")
             tariff_name = localized_tariff_name(plan_key, get_user_lang(user_id)) if plan_key else "Premium"
             cur.execute(
-                "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=%s "
-"WHERE user_id=%s AND premium_until=%s",
-(expiry, user_id, expiry),
+                "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=? "
+                "WHERE user_id=? AND premium_until=?",
+                (expiry, user_id, expiry),
             )
             if cur.rowcount == 1:
                 try:
@@ -800,14 +792,13 @@ def limit_notification_worker():
 
 def add_user_to_db(user_id: int):
     try:
-        conn = get_db_connection()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            "INSERT INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until) "
-            "VALUES (%s, %s, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, %s) "
-            "ON CONFLICT (user_id) DO NOTHING",
+            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, last_active) "
+            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0, ?)",
             (user_id, int(time.time()), int(time.time())),
-        )
         )
         conn.commit()
         conn.close()
@@ -817,14 +808,15 @@ def add_user_to_db(user_id: int):
 
 def get_users_count():
     try:
-        conn = get_db_connection()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
         active_since = int(time.time()) - 2 * 60
         cursor.execute(
-        "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= %s",
-        (active_since,),
-    )
+            "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= ?",
+            (active_since,),
+        )
         count = cursor.fetchone()[0]
         conn.close()
         return count
@@ -834,12 +826,12 @@ def get_users_count():
 
 
 def update_user_activity(user_id: int):
-    
     try:
-        conn = get_db_connection()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            "UPDATE users SET last_active = %s WHERE user_id = %s",
+            "UPDATE users SET last_active = ? WHERE user_id = ?",
             (int(time.time()), user_id),
         )
         conn.commit()
@@ -866,13 +858,14 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         tariff_price = TARIFFS[tariff_key]["price"]
         tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
 
-        conn = get_db_connection()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
-        
+        cursor.execute("PRAGMA journal_mode=WAL;")
+
         # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
-        cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = %s AND status = 'pending'", (user_id,))
+        cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
-            "INSERT INTO payments VALUES (%s, %s, %s, %s, 'pending', %s)",
+            "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
             (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
         )
         conn.commit()
@@ -1027,12 +1020,11 @@ def handle_receipt_photo(message):
     user_id = message.from_user.id
     user_lang = get_user_lang(user_id)
 
-    conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = %s AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
-            (user_id,),
-        )
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        (user_id,)
     )
     pending_pay = cursor.fetchone()
     conn.close()
@@ -1094,10 +1086,11 @@ def handle_admin_decision(call):
     user_id = int(parts[3])
     user_lang = get_user_lang(user_id)
 
-    conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = %s", (tx_id,))
-        pay_row = cursor.fetchone()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = ?", (tx_id,))
+    pay_row = cursor.fetchone()
 
     if not pay_row or pay_row[0] != "pending":
         bot.answer_callback_query(call.id, "Bu so'rov allaqachon ko'rib chiqilgan!", show_alert=True)
@@ -1122,11 +1115,11 @@ def handle_admin_decision(call):
                 plan_key = "daily"
         duration = TARIFFS[plan_key]["duration"]
         premium_until_timestamp = current_time + duration
-        cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = %s", (tx_id,))
+        cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
         display_name = localized_tariff_name(plan_key, user_lang)
         cursor.execute(
-            "UPDATE users SET status = %s, plan_key = %s, premium_until = %s WHERE user_id = %s",
-            (f"PRO ({display_name})", plan_key, premium_until_timestamp, user_id),
+            "UPDATE users SET status = ?, plan_key = ?, premium_until = ? WHERE user_id = ?",
+            (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, user_id),
         )
         conn.commit()
 
@@ -1146,7 +1139,7 @@ def handle_admin_decision(call):
             pass
 
     elif action == "rej":
-        cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = %s", (tx_id,))
+        cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = ?", (tx_id,))
         conn.commit()
         bot.answer_callback_query(call.id, "To'lov rad etildi.")
         try:
@@ -1169,12 +1162,70 @@ def handle_admin_decision(call):
 # --- FASTAPI ENDPOINTS ---
 app = FastAPI()
 
-@app.exception_handler(Exception)
-async def teacher_db_error_handler(request: Request, exc: Exception):
-    logging.exception("Database/Server Error: %s", exc)
-    err_str = str(exc).lower()
-    msg = "__TEACHER_DB_BUSY__" if any(x in err_str for x in ("locked", "busy", "readonly", "deadlock")) else "__TEACHER_SERVER_ERROR__"
+# --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
+# Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
+# The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
+# so the live /data database is never moved, renamed or modified.
+SQLITE_BACKUP_TOKEN = os.getenv("SQLITE_BACKUP_TOKEN", "").strip()
+BACKUP_DIR = "/tmp/quiz_pilot_backups"
+
+def _remove_temp_backup(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        logging.exception("Temporary SQLite backup cleanup failed")
+
+@app.get("/admin/sqlite-backup")
+def download_sqlite_backup(
+    token: str = Query(..., min_length=16),
+    background_tasks: BackgroundTasks = None,
+):
+    if not SQLITE_BACKUP_TOKEN:
+        raise HTTPException(status_code=503, detail="SQLite backup endpoint is not configured")
+    if not secrets.compare_digest(token, SQLITE_BACKUP_TOKEN):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="SQLite database file was not found")
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(BACKUP_DIR, f"quiz_pilot_sqlite_backup_{stamp}.db")
+
+    try:
+        # sqlite3 backup API creates a consistent snapshot while the app is live.
+        src_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        dst_conn = sqlite3.connect(backup_path, check_same_thread=False)
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+            src_conn.close()
+    except Exception:
+        _remove_temp_backup(backup_path)
+        logging.exception("SQLite backup creation failed")
+        raise HTTPException(status_code=500, detail="SQLite backup creation failed")
+
+    tasks = background_tasks or BackgroundTasks()
+    tasks.add_task(_remove_temp_backup, backup_path)
+    return FileResponse(
+        backup_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(backup_path),
+        background=tasks,
+    )
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def teacher_sqlite_operational_error(request: Request, exc: sqlite3.OperationalError):
+    logging.exception("SQLite OperationalError: %s", exc)
+    msg = "__TEACHER_DB_BUSY__" if any(x in str(exc).lower() for x in ("locked", "busy", "readonly")) else "__TEACHER_SERVER_ERROR__"
     return JSONResponse(status_code=500, content={"status": "error", "detail": msg})
+
+@app.exception_handler(sqlite3.IntegrityError)
+async def teacher_sqlite_integrity_error(request: Request, exc: sqlite3.IntegrityError):
+    logging.exception("SQLite IntegrityError: %s", exc)
+    return JSONResponse(status_code=500, content={"status": "error", "detail": "__TEACHER_SERVER_ERROR__"})
 
 app.add_middleware(
     CORSMiddleware,
@@ -1212,12 +1263,13 @@ def api_payment_intent(req: PaymentIntentRequest):
 @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
     add_user_to_db(user_id)
-    conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at FROM users WHERE user_id = %s",
-            (user_id,),
-        ),
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at "
+        "FROM users WHERE user_id = ?",
+        (user_id,),
     )
     row = cursor.fetchone()
     if not row:
@@ -1314,10 +1366,11 @@ async def create_quiz_web(
         await file.seek(0)
 
 
-    conn_check = get_db_connection()
-    cursor_check = conn_check.cursor(cursor_factory=RealDictCursor)
+    conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn_check.row_factory = sqlite3.Row
+    cursor_check = conn_check.cursor()
     cursor_check.execute(
-        "SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = %s",
+        "SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     user_row = cursor_check.fetchone()
@@ -1332,9 +1385,10 @@ async def create_quiz_web(
         thirty_days_sec = 30 * 24 * 3600
         if current_now - created_at >= thirty_days_sec:
             cursor_check.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s",
-            (current_now, user_id),
-        )
+                "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+                (current_now, user_id),
+            )
+            conn_check.commit()
             free_used = 0
 
         if (
@@ -1343,9 +1397,11 @@ async def create_quiz_web(
             and current_now > premium_until
         ):
             cursor_check.execute(
-            "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = %s",
-            (user_id,),
-        )
+                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
+                (user_id,),
+            )
+            conn_check.commit()
+            current_status = "Oddiy foydalanuvchi"
 
         # 30 kunlik bepul limit: faqat 1 ta.
         # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
@@ -1384,24 +1440,22 @@ async def create_quiz_web(
         extension = Path(original_name).suffix.lower()
         if extension not in ALLOWED_UPLOAD_EXTENSIONS:
             if free_slot_reserved:
-                if free_slot_reserved:
-                conn_restore = get_db_connection()
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                 cur_restore = conn_restore.cursor()
-                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                conn_restore.commit()
-                conn_restore.close()
-                return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
-            
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                conn_restore.commit(); conn_restore.close()
+            return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
 
         try:
-            if free_slot_reserved:
-                    conn_restore = get_db_connection()
+            contents = await file.read()
+            if len(contents) > MAX_UPLOAD_FILE_BYTES:
+                if free_slot_reserved:
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                     cur_restore = conn_restore.cursor()
-                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                    conn_restore.commit()
-                    conn_restore.close()
-                    return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
-                    
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                    conn_restore.commit(); conn_restore.close()
+                return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
+
             if contents:
                 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
                 # Bir xil nomdagi fayllar foydalanuvchilar orasida ustma-ust yozilmasligi uchun unique nom.
@@ -1416,11 +1470,10 @@ async def create_quiz_web(
                         try: os.remove(file_path)
                         except Exception: pass
                         if free_slot_reserved:
-                            conn_restore = get_db_connection()
-                    cur_restore = conn_restore.cursor()
-                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                    conn_restore.commit()
-                    conn_restore.close()
+                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                            cur_restore = conn_restore.cursor()
+                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                            conn_restore.commit(); conn_restore.close()
                         return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
                     text_parts = []
                     text_len = 0
@@ -1432,11 +1485,10 @@ async def create_quiz_web(
                                 try: os.remove(file_path)
                                 except Exception: pass
                                 if free_slot_reserved:
-                                    conn_restore = get_db_connection()
-                cur_restore = conn_restore.cursor()
-                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                conn_restore.commit()
-                conn_restore.close()
+                                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                    cur_restore = conn_restore.cursor()
+                                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                    conn_restore.commit(); conn_restore.close()
                                 return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
                             text_parts.append(page_text)
                     raw_text = "\n".join(text_parts)
@@ -1452,10 +1504,10 @@ async def create_quiz_web(
                             try: os.remove(file_path)
                             except Exception: pass
                             if free_slot_reserved:
-                                conn_restore = get_db_connection()
-                cur_restore = conn_restore.cursor()
-                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                conn_restore.close()
+                                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                cur_restore = conn_restore.cursor()
+                                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                conn_restore.commit(); conn_restore.close()
                             return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
                         text_parts.append(part)
                     raw_text = "\n".join(text_parts)
@@ -1463,13 +1515,14 @@ async def create_quiz_web(
         except Exception as e:
             logging.error(f"Professional file protection / parsing error: {e}")
             if free_slot_reserved:
-       if free_slot_reserved:
-            conn_restore = get_db_connection()
-            cur_restore = conn_restore.cursor()
-            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-            conn_restore.commit()
-            conn_restore.close()
-        return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
+                try:
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    cur_restore = conn_restore.cursor()
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                    conn_restore.commit(); conn_restore.close()
+                except Exception: pass
+            return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
+
     if not raw_text.strip() and text:
         raw_text = text
         auto_text_clean = text.replace("\n", " ").strip()
@@ -1482,13 +1535,11 @@ async def create_quiz_web(
     if not raw_text.strip():
         if free_slot_reserved:
             try:
-                conn_restore = get_db_connection()
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                 cur_restore = conn_restore.cursor()
-                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                conn_restore.commit()
-                conn_restore.close()
-            except Exception:
-                pass
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                conn_restore.commit(); conn_restore.close()
+            except Exception: pass
         return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
     # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
@@ -1497,67 +1548,75 @@ async def create_quiz_web(
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
-                conn_restore = get_db_connection()
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                 cur_restore = conn_restore.cursor()
-                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
+                cur_restore.execute(
+                    "UPDATE users "
+                    "SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 "
+                    "THEN free_used - 1 ELSE 0 END "
+                    "WHERE user_id = ?",
+                    (user_id,),
+                )
                 conn_restore.commit()
                 conn_restore.close()
-except Exception as e:
-        logging.error(f"Bepul limitni qaytarishda xato: {e}")
-    return {"status": "error", "message": "AI test generatsiya qila olmadi."}
-
-try:
-    quiz_data = json.loads(quiz_json_raw)
-    items = quiz_data.get("quizzes", [])
-    # Gemini qanday joylashtirishidan qat'i nazar, javob variantlari shu yerda
-    # xavfsiz va muvozanatli random qilinadi.
-    items = randomize_quiz_answer_positions(items)
-    quiz_data["quizzes"] = items
-    if not items:
-        return {
-            "status": "error",
-            "message": "AI savollar ro'yxatini bo'sh qaytardi.",
-        }
-
-    quiz_id = f"q_{uuid.uuid4().hex}"
-    final_title = (
-        quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
-    )
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)""",
-        (
-            quiz_id,
-            user_id,
-            final_title[:30],
-            len(items),
-            0,
-            quiz_json_raw,
-            int(time.time()),
-            None,
-            None,
-        )
-    )
-    conn.commit()
-    conn.close()
-
-    if free_slot_reserved:
-        notify_free_limit_reached(user_id, "quiz")
+            except Exception as e:
+                logging.error(f"Bepul limitni qaytarishda xato: {e}")
+        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
 
     try:
-        q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
-            title=final_title[:30],
-            count=len(items)
+        quiz_data = json.loads(quiz_json_raw)
+        items = quiz_data.get("quizzes", [])
+        # Gemini qanday joylashtirishidan qat'i nazar, javob variantlari shu yerda
+        # xavfsiz va muvozanatli random qilinadi.
+        items = randomize_quiz_answer_positions(items)
+        quiz_data["quizzes"] = items
+        if not items:
+            return {
+                "status": "error",
+                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
+            }
+
+        quiz_id = f"q_{uuid.uuid4().hex}"
+        final_title = (
+            quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         )
-        bot.send_message(user_id, q_ready_msg)
+
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute(
+            """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                quiz_id,
+                user_id,
+                final_title[:30],
+                len(items),
+                0,
+                quiz_json_raw,
+                int(time.time()),
+                -1,
+                -1,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        if free_slot_reserved:
+            notify_free_limit_reached(user_id, "quiz")
+
+        try:
+            q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
+                title=final_title[:30],
+                count=len(items)
+            )
+            bot.send_message(user_id, q_ready_msg)
+        except Exception as e:
+            logging.error(f"Telegram xabari yuborilmadi: {e}")
+        return {"status": "ok"}
     except Exception as e:
-        logging.error(f"Telegram xabari yuborilmadi: {e}")
-    return {"status": "ok"}
-except Exception as e:
-    return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e)}
+
 
 
 def randomize_quiz_answer_positions(items):
@@ -1752,29 +1811,30 @@ def user_heartbeat(user_id: int):
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
     total_users = get_users_count()
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        """SELECT id, title, total, answered, created_at, last_score, last_percent, is_public 
-           FROM quizzes WHERE user_id = %s ORDER BY created_at DESC""",
-        (user_id,)
+        "SELECT id, title, total, answered, created_at, last_score, last_percent,"
+        " is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC",
+        (user_id,),
     )
     personal_rows = cursor.fetchall()
-    
-    cursor.execute("SELECT language FROM users WHERE user_id = %s", (user_id,))
+    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
     lang_row = cursor.fetchone()
-    user_lang = lang_row[0] if lang_row and lang_row[0] else "uz"
+    user_lang = lang_row["language"] if lang_row else "uz"
     conn.close()
 
     quizzes = [{
-        "id": r[0],
-        "title": r[1],
-        "total": r[2],
-        "answered": r[3],
-        "created_at": r[4],
-        "last_score": r[5],
-        "last_percent": r[6],
-        "is_public": r[7],
+        "id": r["id"],
+        "title": r["title"],
+        "total": r["total"],
+        "answered": r["answered"],
+        "created_at": r["created_at"],
+        "last_score": r["last_score"],
+        "last_percent": r["last_percent"],
+        "is_public": r["is_public"],
     } for r in personal_rows]
     return {
         "status": "ok",
@@ -1787,47 +1847,41 @@ def get_user_quizzes(user_id: int):
 @app.get("/api/public-quizzes")
 def get_public_quizzes(user_id: int):
     add_user_to_db(user_id)
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = %s",
+        "SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     u = cursor.fetchone()
     now = int(time.time())
-    
-    # psycopg2 da fetchone() tuple qaytaradi: u[0]=status, u[1]=plan_key, u[2]=premium_until, u[3]=public_free_used, u[4]=created_at
-    u_created_at = u[4] if u and u[4] else now
-    u_status = u[0] if u else ""
-    u_premium_until = u[2] if u else 0
-    u_public_free_used = u[3] if u else 0
-
-    if u and (now - u_created_at) >= 30 * 24 * 3600 and not is_active_paid_status(u_status, u_premium_until):
+    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_active_paid_status(u["status"] or "", u["premium_until"] or 0):
         cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s",
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, user_id),
         )
         conn.commit()
         public_free_used = 0
     else:
-        public_free_used = u_public_free_used if u else 0
+        public_free_used = (u["public_free_used"] or 0) if u else 0
 
-    is_paid = bool(u and is_active_paid_status(u_status, u_premium_until))
+    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
     public_remaining = max(0, FREE_PUBLIC_LIMIT - public_free_used)
+
     cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
     rows = cursor.fetchall()
     conn.close()
 
     quizzes = [
         {
-            "id": r[0],
-            "title": r[1],
-            "total": r[2],
-            "created_at": r[3],
+            "id": r["id"],
+            "title": r["title"],
+            "total": r["total"],
+            "created_at": r["created_at"],
             "locked": (not is_paid and public_remaining <= 0),
         }
         for r in rows
-    ]
     ]
     return {
         "status": "ok",
@@ -1839,43 +1893,22 @@ def get_public_quizzes(user_id: int):
     }
 
 
-
 @app.get("/api/public-quiz-detail")
 def get_public_quiz_detail(quiz_id: str, user_id: int):
     add_user_to_db(user_id)
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+
     cursor.execute(
-        "SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = %s",
+        "SELECT status, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     u = cursor.fetchone()
+
     now = int(time.time())
-    
-    u_created_at = u[4] if u and u[4] else now
-    u_status = u[0] if u else ""
-    u_premium_until = u[2] if u else 0
-    u_public_free_used = u[3] if u else 0
+    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
 
-    if u and (now - u_created_at) >= 30 * 24 * 3600 and not is_active_paid_status(u_status, u_premium_until):
-        cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s",
-            (now, user_id),
-        )
-        conn.commit()
-        public_free_used = 0
-    else:
-        public_free_used = u_public_free_used if u else 0
-
-    is_paid = bool(u and is_active_paid_status(u_status, u_premium_until))
-    public_remaining = max(0, FREE_PUBLIC_LIMIT - public_free_used)
-
-    cursor.execute(
-        "SELECT id, user_id, title, total, answered, quiz_json, is_public FROM quizzes WHERE id = %s",
-        (quiz_id,),
-    )
-    q = cursor.fetchone()
-    conn.close()
     # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
     if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
         cursor.execute(
@@ -1910,51 +1943,59 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
         conn.commit()
         if not is_paid:
             notify_free_limit_reached(user_id, "public")
-cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = %s", (quiz_id,))
+
+    cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
 
-    if not row or row[2] != 1:
-        raise HTTPException(status_code=404, detail=teacher_text(user_id, "quiz_not_found"))
-    return {"status": "ok", "title": row[0] or "Test", "quiz_json": json.loads(row[1])}
+    if not row or row["is_public"] != 1:
+        raise HTTPException(status_code=404, detail=teacher_text(owner_id, "quiz_not_found"))
+
+    return {"status": "ok", "title": row["title"] or "Test", "quiz_json": json.loads(row["quiz_json"])}
 
 
 @app.post("/api/toggle-public")
 def toggle_public(quiz_id: str, user_id: int, is_public: int):
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "UPDATE quizzes SET is_public = %s WHERE id = %s AND user_id = %s",
+        "UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?",
         (is_public, quiz_id, user_id),
     )
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
+
 @app.post("/api/set-language")
 def set_language(user_id: int, lang: str):
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        "UPDATE users SET language = %s WHERE user_id = %s", (lang, user_id)
+        "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
     )
     conn.commit()
     conn.close()
     return {"status": "ok"}
 
+
 # --- O'QITUVCHI PROFESSIONAL VOSITALARI ---
 TEACHER_VARIANT_CODES = ("A", "B", "C", "D")
+
 
 def _load_quiz_items(quiz_id: str, owner_id: int):
     def _read(conn):
         cur = conn.cursor()
-        cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = %s AND user_id = %s", (quiz_id, owner_id))
+        cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, owner_id))
         return cur.fetchone()
     row = teacher_db_read(_read)
     if not row:
         raise HTTPException(status_code=404, detail=teacher_text(owner_id, "quiz_not_found"))
     try:
-        data = json.loads(row[2])
+        data = json.loads(row["quiz_json"])
+        items = data.get("quizzes", [])
     except Exception:
         raise HTTPException(status_code=500, detail=teacher_text(owner_id, "quiz_data_broken"))
     if not items:
@@ -2029,37 +2070,31 @@ def teacher_list_variants(user_id: int, quiz_id: str):
     _load_quiz_items(quiz_id, user_id)
     def _read(conn):
         cur = conn.cursor()
-        cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id = %s ORDER BY variant_code", (quiz_id,))
+        cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id=? ORDER BY variant_code", (quiz_id,))
         return cur.fetchall()
     rows = teacher_db_read(_read)
-    return {"status": "ok", "variants": [{"variant_code": r[0], "created_at": r[1]} for r in rows]}
+    return {"status": "ok", "variants": [dict(r) for r in rows]}
 
 def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
     _load_quiz_items(quiz_id, owner_id)
     code = (variant_code or "A").strip().upper()
     if code not in TEACHER_VARIANT_CODES:
         raise HTTPException(status_code=400, detail=teacher_text(owner_id, "variant_required"))
-    
-    def _read_var(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT variant_json FROM teacher_variants WHERE quiz_id = %s AND variant_code = %s", (quiz_id, code))
-        return cur.fetchone()
-    
-    row = teacher_db_read(_read_var)
+    conn = teacher_db_connect()
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT variant_json FROM teacher_variants WHERE quiz_id=? AND variant_code=?", (quiz_id, code))
+    row = cur.fetchone()
+    conn.close()
     if row:
-        return json.loads(row[0])
-    
+        return json.loads(row["variant_json"])
+    # Variant hali yaratilmagan bo'lsa, uni xavfsiz tarzda yaratib olamiz.
     _, items = _load_quiz_items(quiz_id, owner_id)
     variant = _make_variant(items, code)
-    
-    def _write_var(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (%s, %s, %s, %s) ON CONFLICT (quiz_id, variant_code) DO UPDATE SET variant_json = EXCLUDED.variant_json",
-            (quiz_id, code, json.dumps(variant, ensure_ascii=False), int(time.time()))
-        )
-    
-    teacher_db_write(_write_var)
+    conn = teacher_db_connect()
+    conn.execute("INSERT OR REPLACE INTO teacher_variants (quiz_id,variant_code,variant_json,created_at) VALUES (?,?,?,?)",
+                 (quiz_id, code, json.dumps(variant, ensure_ascii=False), int(time.time())))
+    conn.commit(); conn.close()
     return variant
 
 
@@ -2113,123 +2148,80 @@ def teacher_groups(user_id: int):
     def _read(conn):
         cur = conn.cursor()
         cur.execute(
-            "SELECT g.id, g.name, g.description, g.join_code, g.created_at, g.active, COUNT(m.id) AS member_count "
-            "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id = g.id "
-            "WHERE g.owner_id = %s AND g.active = 1 GROUP BY g.id ORDER BY g.created_at DESC",
+            "SELECT g.id,g.name,g.description,g.join_code,g.created_at,g.active,COUNT(m.id) AS member_count "
+            "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id=g.id "
+            "WHERE g.owner_id=? AND g.active=1 GROUP BY g.id ORDER BY g.created_at DESC",
             (user_id,),
         )
         return cur.fetchall()
     rows = teacher_db_read(_read)
-    return {
-        "status": "ok",
-        "groups": [
-            {
-                "id": r[0],
-                "name": r[1],
-                "description": r[2],
-                "join_code": r[3],
-                "created_at": r[4],
-                "active": r[5],
-                "member_count": r[6],
-            }
-            for r in rows
-        ],
-    }
+    return {"status":"ok", "groups":[dict(r) for r in rows]}
 
 @app.post("/api/teacher/groups/join")
-def teacher_join_group(req: TeacherJoinRequest):
+def teacher_join_group(req: TeacherGroupJoinRequest):
     code = (req.join_code or "").strip().upper().replace(" ", "")
     group_id = (req.group_id or "").strip()
-    
     def _write(conn):
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         if code:
-            cur.execute("SELECT id, name, active FROM teacher_groups WHERE join_code = %s", (code,))
+            cur.execute("SELECT id,name,active FROM teacher_groups WHERE join_code=?", (code,))
         elif group_id:
-            cur.execute("SELECT id, name, active FROM teacher_groups WHERE id = %s", (group_id,))
+            cur.execute("SELECT id,name,active FROM teacher_groups WHERE id=?", (group_id,))
         else:
             raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_code_required"))
-        
-        row = cur.fetchone()
-        if not row or not row[2]:
+        group = cur.fetchone()
+        if not group or not group["active"]:
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
-        
-        g_id, g_name = row[0], row[1]
         now = int(time.time())
         cur.execute(
-            "INSERT INTO teacher_group_members (group_id, user_id, first_name, username, joined_at) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (group_id, user_id) DO NOTHING",
-            (g_id, req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
+            "INSERT OR IGNORE INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (?,?,?,?,?)",
+            (group["id"], req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
         )
-        return {"id": g_id, "name": g_name}
-    
-    group_info = teacher_db_write(_write)
-    return {"status": "ok", "group_id": group_info["id"], "group_name": group_info["name"]}
+        return dict(group)
+    group = teacher_db_write(_write)
+    return {"status":"ok", "group_id":group["id"], "group_name":group["name"]}
+
 @app.get("/api/teacher/my-groups")
 def teacher_my_groups(user_id: int):
     def _read(conn):
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
-            "SELECT g.id, g.name, g.description, g.join_code, g.created_at, m.joined_at "
-            "FROM teacher_group_members m JOIN teacher_groups g ON g.id = m.group_id "
-            "WHERE m.user_id = %s AND g.active = 1 ORDER BY m.joined_at DESC",
+            "SELECT g.id,g.name,g.description,g.join_code,g.created_at,m.joined_at "
+            "FROM teacher_group_members m JOIN teacher_groups g ON g.id=m.group_id "
+            "WHERE m.user_id=? AND g.active=1 ORDER BY m.joined_at DESC",
             (user_id,),
         )
         return cur.fetchall()
     rows = teacher_db_read(_read)
-    return {
-        "status": "ok",
-        "groups": [
-            {
-                "id": r[0],
-                "name": r[1],
-                "description": r[2],
-                "join_code": r[3],
-                "created_at": r[4],
-                "joined_at": r[5],
-            }
-            for r in rows
-        ],
-    }
+    return {"status":"ok", "groups":[dict(r) for r in rows]}
 
 @app.get("/api/teacher/group-members")
 def teacher_group_members(group_id: str, user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT g.id, g.name FROM teacher_groups g WHERE g.id = %s AND g.owner_id = %s", (group_id, user_id))
-        g = cur.fetchone()
+        conn.row_factory = sqlite3.Row
+        cur=conn.cursor()
+        cur.execute("SELECT g.id,g.name FROM teacher_groups g WHERE g.id=? AND g.owner_id=?", (group_id,user_id))
+        g=cur.fetchone()
         if not g:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
-        
-        cur.execute("SELECT user_id, first_name, username, joined_at FROM teacher_group_members WHERE group_id = %s ORDER BY joined_at", (group_id,))
-        members = cur.fetchall()
-        return {"id": g[0], "name": g[1]}, members
-    
-    group_info, members = teacher_db_read(_read)
-    return {
-        "status": "ok",
-        "group": {"id": group_info[0], "name": group_info[1]},
-        "members": [
-            {
-                "user_id": m[0],
-                "first_name": m[1],
-                "username": m[2],
-                "joined_at": m[3],
-            }
-            for m in members
-        ],
-    }
+        cur.execute("SELECT user_id,first_name,username,joined_at FROM teacher_group_members WHERE group_id=? ORDER BY joined_at", (group_id,))
+        return dict(g), cur.fetchall()
+    g, rows = teacher_db_read(_read)
+    return {"status":"ok", "group":g, "members":[dict(r) for r in rows]}
 
 @app.delete("/api/teacher/groups/{group_id}")
 def teacher_delete_group(group_id: str, user_id: int):
     require_teacher(user_id)
     def _write(conn):
-        cur = conn.cursor()
-        cur.execute("UPDATE teacher_groups SET active = 0 WHERE id = %s AND owner_id = %s", (group_id, user_id))
+        cur=conn.cursor()
+        cur.execute("UPDATE teacher_groups SET active=0 WHERE id=? AND owner_id=?", (group_id,user_id))
         if cur.rowcount != 1:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
     teacher_db_write(_write)
-    return {"status": "ok"}
+    return {"status":"ok"}
 
 class TeacherAssignmentCreateRequest(BaseModel):
     user_id: int
@@ -2254,94 +2246,55 @@ def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
     if code:
         _get_teacher_variant(quiz_id,req.user_id,code)
     def _write(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT id, name FROM teacher_groups WHERE id = %s AND owner_id = %s AND active = 1", (group_id, req.user_id))
-        group = cur.fetchone()
-        cur.execute("SELECT id, title FROM quizzes WHERE id = %s AND user_id = %s", (quiz_id, req.user_id))
-        quiz = cur.fetchone()
-        
+        conn.row_factory = sqlite3.Row
+        cur=conn.cursor()
+        cur.execute("SELECT id,name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",(group_id,req.user_id)); group=cur.fetchone()
+        cur.execute("SELECT id,title FROM quizzes WHERE id=? AND user_id=?",(quiz_id,req.user_id)); quiz=cur.fetchone()
         if not group:
-            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+            raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "group_not_found"))
         if not quiz:
-            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "quiz_not_found"))
-        
-        aid = f"ta_{uuid.uuid4().hex[:10]}"
-        now = int(time.time())
-        title = (req.title or "").strip()[:150] or quiz[1]
-        due_at = max(0, int(req.due_at or 0))
-        
-        cur.execute(
-            "INSERT INTO teacher_assignments (id, owner_id, group_id, quiz_id, variant_code, title, due_at, duration_minutes, created_at, active) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1)",
-            (aid, req.user_id, group_id, quiz_id, code, title, due_at, duration, now)
-        )
-        return {"id": aid, "group_id": group_id, "quiz_id": quiz_id, "variant_code": code, "title": title, "due_at": due_at, "duration_minutes": duration, "created_at": now}
-    
+            raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "quiz_not_found"))
+        aid=f"ta_{uuid.uuid4().hex[:10]}"; now=int(time.time()); title=(req.title or "").strip()[:150] or quiz["title"]; due_at=max(0,int(req.due_at or 0))
+        cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,duration_minutes,created_at,active) VALUES (?,?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,duration,now))
+        return {"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"duration_minutes":duration,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}
     assignment = teacher_db_write(_write)
-    return {"status": "ok", "assignment": assignment}
+    return {"status":"ok","assignment":assignment}
 
 @app.get("/api/teacher/assignments")
 def teacher_assignments(user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT a.id, a.group_id, a.quiz_id, a.variant_code, a.title, a.due_at, "
-            "COALESCE(a.duration_minutes, 30) AS duration_minutes, a.created_at, "
-            "g.name AS group_name, q.title AS quiz_title "
-            "FROM teacher_assignments a "
-            "JOIN teacher_groups g ON g.id = a.group_id "
-            "JOIN quizzes q ON q.id = a.quiz_id "
-            "WHERE a.owner_id = %s AND a.active = 1 ORDER BY a.created_at DESC",
-            (user_id,)
-        )
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,COALESCE(a.duration_minutes,30) AS duration_minutes,a.created_at,a.active,
+                             g.name AS group_name,q.title AS quiz_title
+                      FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id
+                      LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=? ORDER BY a.created_at DESC LIMIT 100""",(user_id,))
         return cur.fetchall()
+    rows=teacher_db_read(_read)
+    return {"status":"ok","assignments":[dict(r) for r in rows]}
 
-    rows = teacher_db_read(_read)
-    return {
-        "status": "ok",
-        "assignments": [
-            {
-                "id": r[0],
-                "group_id": r[1],
-                "quiz_id": r[2],
-                "variant_code": r[3],
-                "title": r[4],
-                "due_at": r[5],
-                "duration_minutes": r[6],
-                "created_at": r[7],
-                "group_name": r[8],
-                "quiz_title": r[9],
-            }
-            for r in rows
-        ],
-    def teacher_delete_assignment(assignment_id: str, user_id: int):
+@app.delete("/api/teacher/assignments/{assignment_id}")
+def teacher_delete_assignment(assignment_id: str, user_id: int):
     require_teacher(user_id)
     def _write(conn):
-        cur = conn.cursor()
-        cur.execute("UPDATE teacher_assignments SET active = 0 WHERE id = %s AND owner_id = %s", (assignment_id, user_id))
-        if cur.rowcount != 1:
-            raise HTTPException(status_code=404, detail=teacher_text(user_id, "assignment_not_found"))
+        cur=conn.cursor()
+        cur.execute("UPDATE teacher_assignments SET active=0 WHERE id=? AND owner_id=?",(assignment_id,user_id))
+        if cur.rowcount!=1:
+            raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
     teacher_db_write(_write)
-    return {"status": "ok"}
+    return {"status":"ok"}
+
 @app.get("/api/teacher/export-assignment")
 def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
     require_teacher(user_id)
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT a.*, g.name AS group_name, q.title AS quiz_title "
-            "FROM teacher_assignments a "
-            "JOIN teacher_groups g ON g.id = a.group_id "
-            "LEFT JOIN quizzes q ON q.id = a.quiz_id "
-            "WHERE a.id = %s AND a.owner_id = %s",
-            (assignment_id, user_id)
-        )
-        return cur.fetchone()
-    
-    assignment = teacher_db_read(_read)
-    if not assignment:
-        raise HTTPException(status_code=404, detail=teacher_text(user_id, "assignment_not_found"))
-    return teacher_export_quiz(assignment[2], user_id, format, assignment[4] or "A", 0)
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("""SELECT a.*,g.name AS group_name,q.title AS quiz_title FROM teacher_assignments a
+                   LEFT JOIN teacher_groups g ON g.id=a.group_id LEFT JOIN quizzes q ON q.id=a.quiz_id
+                   WHERE a.id=? AND a.owner_id=?""",(assignment_id,user_id))
+    a=cur.fetchone(); conn.close()
+    if not a: raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
+    return teacher_export_quiz(a["quiz_id"],user_id,format,a["variant_code"] or "A",0)
+
 
 @app.get("/api/teacher/export-quiz")
 def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = "A", all_variants: int = 0):
@@ -2518,18 +2471,22 @@ def _ensure_teacher_schema(conn):
 
     # Eski jadvallarga yetishmayotgan ustunlarni qo'shamiz.
     for table, columns in table_defs.items():
-        cur = conn.cursor()
-        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))
-        existing = {r[0] for r in cur.fetchall()}
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         for col, typ in columns.items():
             if col in existing:
                 continue
             try:
-                cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+                # ALTER TABLE ADD COLUMN uchun xavfsiz oddiy tip.
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
                 logging.info("Teacher DB migration: %s.%s qo'shildi", table, col)
-            except Exception as e:
+            except sqlite3.OperationalError as e:
+                # Bir nechta Railway worker bir paytda migration qilsa, keyingi
+                # worker ustun allaqachon qo'shilgan bo'lishi mumkin.
                 logging.warning("Teacher DB migration %s.%s: %s", table, col, e)
 
+    # ID ustuni eski bazada mavjud bo'lmagan bo'lsa, qo'shilgan qiymatlarni
+    # mavjud rowlar uchun ham to'ldiramiz. Yangi yozuvlar endpointlar tomonidan
+    # o'z ID'sini beradi.
     id_prefixes = {
         "teacher_groups": "tg_migrated_",
         "teacher_assignments": "ta_migrated_",
@@ -2537,28 +2494,23 @@ def _ensure_teacher_schema(conn):
     }
     for table, prefix in id_prefixes.items():
         try:
-            cur = conn.cursor()
-            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))
-            cols = {r[0] for r in cur.fetchall()}
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if "id" in cols:
-                cur.execute(
-                    f"UPDATE {table} SET id = %s || rowid::text WHERE id IS NULL OR TRIM(CAST(id AS TEXT)) = ''",
-                    (prefix,)
-                )
-        except Exception as e:
-            logging.warning("ID migration warning for %s: %s", table, e)
+                # PostgreSQL has no SQLite rowid. Production migration preserves existing IDs.
+                pass
+        except sqlite3.OperationalError as e:
+            logging.warning("Teacher DB ID repair %s: %s", table, e)
 
     # Eski Railway bazasida teacher_sessions.teacher_id mavjud bo'lsa,
     # owner_id bilan bir xil qiymatga to'ldiramiz. Bu yangi endpointlar va
     # eski sessiyalarni bir xil sxemada ishlashini ta'minlaydi.
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'teacher_sessions'")
-        session_cols = {r[0] for r in cur.fetchall()}
+        session_cols = {r[1] for r in conn.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
         if "teacher_id" in session_cols and "owner_id" in session_cols:
-            cur.execute("UPDATE teacher_sessions SET teacher_id = owner_id WHERE teacher_id IS NULL")
-    except Exception as e:
+            conn.execute("UPDATE teacher_sessions SET teacher_id=owner_id WHERE teacher_id IS NULL")
+    except sqlite3.OperationalError as e:
         logging.warning("Teacher DB teacher_id repair: %s", e)
+
     # NULL qiymatlar endpointlar ishlashiga xalaqit bermasin.
     null_defaults = {
         "teacher_groups": {"description": "", "active": 1},
@@ -2569,9 +2521,8 @@ def _ensure_teacher_schema(conn):
     for table, values in null_defaults.items():
         for col, value in values.items():
             try:
-                cur = conn.cursor()
-                cur.execute(f"UPDATE {table} SET {col} = %s WHERE {col} IS NULL", (value,))
-            except Exception as e:
+                conn.execute(f"UPDATE {table} SET {col}=? WHERE {col} IS NULL", (value,))
+            except sqlite3.OperationalError as e:
                 logging.warning("Teacher DB default repair %s.%s: %s", table, col, e)
 
     conn.commit()
@@ -2580,10 +2531,18 @@ def _ensure_teacher_schema(conn):
 _teacher_schema_checked = False
 
 def teacher_db_connect():
-    """Teacher uchun PostgreSQL ulanishi."""
+    """Teacher uchun barqaror SQLite ulanishi.
+
+    Muhim: har bir so'rovda PRAGMA journal_mode=WAL ni qayta yoqish SQLite
+    faylini qisqa muddatga lock qilib qo'yishi mumkin. Shu sabab WAL/synchronous
+    rejimi init_db() vaqtida o'rnatiladi, bu yerda esa faqat busy_timeout ishlatiladi.
+    """
     global _teacher_schema_checked
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=20000")
     try:
+        conn.execute("PRAGMA foreign_keys=ON")
         if not _teacher_schema_checked:
             _ensure_teacher_schema(conn)
             conn.commit()
@@ -2596,8 +2555,9 @@ def teacher_db_connect():
         conn.close()
         raise
     return conn
+
 def teacher_db_read(work, attempts=6):
-    """Teacher o'qish so'rovlarini avtomatik qayta urinadi."""
+    """Teacher o'qish so'rovlarini SQLite lock bo'lsa avtomatik qayta urinadi."""
     last_error = None
     for attempt in range(attempts):
         conn = None
@@ -2606,63 +2566,54 @@ def teacher_db_read(work, attempts=6):
             result = work(conn)
             conn.close()
             return result
-        except Exception as e:
+        except sqlite3.OperationalError as e:
             last_error = e
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:
                     pass
-            time.sleep(0.3 * (attempt + 1))
-    raise last_error
-
-def teacher_db_write(work, attempts=6):
-    """Teacher yozish so'rovlarini avtomatik qayta urinadi."""
-    last_error = None
-    for attempt in range(attempts):
-        conn = None
-        try:
-            conn = teacher_db_connect()
-            result = work(conn)
-            conn.commit()
-            conn.close()
-            return result
-        except Exception as e:
-            last_error = e
+            if "locked" in str(e).lower() or "busy" in str(e).lower():
+                time.sleep(0.25 * (attempt + 1))
+                continue
+            raise
+        except Exception:
             if conn is not None:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
                 try:
                     conn.close()
                 except Exception:
-            pass
-        time.sleep(0.4 * (attempt + 1))
-    raise last_error
+                    pass
+            raise
+    raise last_error or sqlite3.OperationalError("SQLite database is busy")
 
 def teacher_db_write(work, attempts=6):
-    """Teacher yozish so'rovlarini avtomatik qayta urinadi."""
     last_error = None
     for attempt in range(attempts):
-        conn = None
+        conn = teacher_db_connect()
         try:
-            conn = teacher_db_connect()
             result = work(conn)
             conn.commit()
             conn.close()
             return result
-        except Exception as e:
+        except sqlite3.OperationalError as e:
             last_error = e
-            if conn is not None:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                except Exception:
-            pass
-        time.sleep(0.4 * (attempt + 1))
-    raise last_error
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            conn.close()
+            if "locked" in str(e).lower() or "busy" in str(e).lower():
+                time.sleep(0.35 * (attempt + 1))
+                continue
+            raise
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            conn.close()
+            raise
+    raise last_error or sqlite3.OperationalError("SQLite database is busy")
 
 TEACHER_MESSAGES = {
     "uz": {
@@ -2781,22 +2732,23 @@ def require_teacher(user_id: int):
     add_user_to_db(user_id)
     def _check(conn):
         cur = conn.cursor()
-        cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = %s", (user_id,))
+        cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = ?", (user_id,))
         return cur.fetchone()
     row = teacher_db_read(_check)
-    if not row or not is_active_paid_status(row[0] or "", row[2] or 0) or (row[1] or get_plan_key(row[0] or "")):
+    if not row or not is_active_paid_status(row["status"] or "", row["premium_until"] or 0) or (row["plan_key"] or get_plan_key(row["status"] or "")) != "teachers":
         raise HTTPException(status_code=403, detail=teacher_text(user_id, "teacher_plan_required"))
 
-@app.get("/api/teacher/quizzes")
+@app.get("/api/teacher-quizzes")
 def teacher_quizzes(user_id: int):
     require_teacher(user_id)
-    def _work(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT id, title, total FROM quizzes WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
-        rows = cur.fetchall()
-        return [{"id": r[0], "title": r[1], "total": r[2]} for r in rows]
-    quizzes = teacher_db_read(_work)
-    return {"status": "ok", "quizzes": quizzes}
+    conn = teacher_db_connect()
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT id, title, total FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return {"status": "ok", "quizzes": [dict(r) for r in rows]}
+
 
 class TeacherSessionCreateRequest(BaseModel):
     user_id: int
@@ -2830,40 +2782,43 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
     # so students and teachers can distinguish them from manually started group tests.
     if assignment_id:
         def _read_assignment(conn):
-            cur = conn.cursor()
-            cur.execute("""SELECT id, group_id, quiz_id, variant_code, title, active, COALESCE(duration_minutes, 30) AS duration_minutes
-                           FROM teacher_assignments WHERE id = %s AND owner_id = %s""", (assignment_id, req.user_id))
-            return cur.fetchone()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("""SELECT id,group_id,quiz_id,variant_code,title,active,COALESCE(duration_minutes,30) AS duration_minutes
+                                  FROM teacher_assignments WHERE id=? AND owner_id=?""", (assignment_id, req.user_id)).fetchone()
+            return row
         assignment_row = teacher_db_read(_read_assignment)
-        if not assignment_row or not int(assignment_row[5] or 0):
+        if not assignment_row or not int(assignment_row["active"] or 0):
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "assignment_not_found"))
-        if str(assignment_row[1] or "") != group_id or str(assignment_row[2] or "") != str(req.quiz_id):
+        if str(assignment_row["group_id"] or "") != group_id or str(assignment_row["quiz_id"] or "") != str(req.quiz_id):
             raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "assignment_not_found"))
-        duration = max(5, min(int(assignment_row[6] or 30), 180))
+        duration = max(5, min(int(assignment_row["duration_minutes"] or 30), 180))
         if not variant_code:
-            variant_code = str(assignment_row[3] or "").strip().upper()
+            variant_code = str(assignment_row["variant_code"] or "").strip().upper()
 
     # Validate quiz and group before opening the write transaction.
     quiz_row, _items = _load_quiz_items(req.quiz_id, req.user_id)
     if variant_code:
         _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
-def _write(conn):
+
+    def _write(conn):
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, name FROM teacher_groups WHERE id = %s AND owner_id = %s AND active = 1",
+            "SELECT id, name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",
             (group_id, req.user_id),
         )
         group = cur.fetchone()
         if not group:
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+
         # Read the actual live schema every time. Railway may contain a database
-    # created by an older Teacher version with extra required columns.
-    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'teacher_sessions'")
-    column_info = {row[0] for row in cur.fetchall()}
-    required_core = {"id", "owner_id", "quiz_id", "code", "duration_minutes", "created_at", "expires_at", "active", "group_id", "variant_code"}
-    missing_core = sorted(required_core - column_info)
-    if missing_core:
-        raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
+        # created by an older Teacher version with extra required columns.
+        rows = cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()
+        column_info = {row[1]: row for row in rows}
+        required_core = {"id", "owner_id", "quiz_id", "code", "duration_minutes", "created_at", "expires_at", "active", "group_id", "variant_code"}
+        missing_core = sorted(required_core - set(column_info))
+        if missing_core:
+            raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
 
         session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
         if assignment_id and assignment_row is not None:
@@ -2923,65 +2878,56 @@ def _write(conn):
                         fallback = f"{sid}_{name}"
                     insert_columns.append(name)
                     insert_values.append(fallback)
-                    placeholders = ", ".join("%s" for _ in insert_columns)
-        try:
-            cur.execute(
-                f"INSERT INTO teacher_sessions ({', '.join(insert_columns)}) VALUES ({placeholders})",
-                tuple(insert_values),
-            )
-            return {
-                "session_id": sid,
-                "code": code,
-                "expires_at": expires,
-                "quiz_title": quiz_row["title"],
-                "variant_code": variant_code,
-                "group_id": group_id,
-                "group_name": group["name"],
-                "source_type": "assignment" if assignment_id else "group_test",
-                "assignment_id": assignment_id,
-            }
-        except Exception as e:
-            last_integrity = e
-            logging.warning("Teacher session INSERT collision/constraint (attempt %s): %s", _attempt + 1, e)
-            continue
-    raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error")) from last_integrity
+                    logging.warning("Teacher session legacy required column filled: %s=%r", name, fallback)
+
+            placeholders = ", ".join("?" for _ in insert_columns)
+            try:
+                cur.execute(
+                    f"INSERT INTO teacher_sessions ({', '.join(insert_columns)}) VALUES ({placeholders})",
+                    tuple(insert_values),
+                )
+                return {
+                    "session_id": sid,
+                    "code": code,
+                    "expires_at": expires,
+                    "quiz_title": quiz_row["title"],
+                    "variant_code": variant_code,
+                    "group_id": group_id,
+                    "group_name": group["name"],
+                    "source_type": "assignment" if assignment_id else "group_test",
+                    "assignment_id": assignment_id,
+                }
+            except sqlite3.IntegrityError as e:
+                last_integrity = e
+                logging.warning("Teacher session INSERT collision/constraint (attempt %s): %s", _attempt + 1, e)
+                continue
+
+        raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error")) from last_integrity
+
     data = teacher_db_write(_write)
     return {"status": "ok", **data}
 
-@app.get("/api/teacher/sessions")
+@app.get("/api/teacher-sessions")
 def teacher_sessions(user_id: int):
     require_teacher(user_id)
     def _read(conn):
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("""SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,
-                              COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code,
-                              COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id
-                       FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id
-                       WHERE s.owner_id = %s AND COALESCE(s.deleted, 0) = 0
-                       ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
-        rows = cur.fetchall()
-        return rows
+                             COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code,
+                             COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id
+                      FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
+                      WHERE s.owner_id=? AND COALESCE(s.deleted,0)=0
+                      ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
+        return cur.fetchall()
     rows = teacher_db_read(_read)
     now = int(time.time())
     result = []
     for r in rows:
-        # r[0]: id, r[1]: code, r[2]: quiz_id, r[3]: title, r[4]: duration_minutes, r[5]: created_at, r[6]: expires_at, r[7]: active, r[8]: group_id, r[9]: variant_code, r[10]: source_type, r[11]: assignment_id
-        active = bool(r[7] and r[6] and r[6] >= now)
-        result.append({
-            "session_id": r[0],
-            "code": r[1],
-            "quiz_id": r[2],
-            "quiz_title": r[3],
-            "duration_minutes": r[4],
-            "created_at": r[5],
-            "expires_at": r[6],
-            "active": active,
-            "group_id": r[8],
-            "variant_code": r[9],
-            "source_type": r[10],
-            "assignment_id": r[11]
-        })
+        active = bool(r["active"] and r["expires_at"] and r["expires_at"] >= now)
+        result.append({**dict(r), "active": active})
     return {"status": "ok", "sessions": result}
+
 
 @app.delete("/api/teacher/sessions/{session_id}")
 def teacher_delete_session(session_id: str, user_id: int):
@@ -2991,41 +2937,35 @@ def teacher_delete_session(session_id: str, user_id: int):
         # Soft-delete: the teacher no longer sees the session, but participant
         # records remain safe for database integrity/audit purposes.
         cur.execute(
-            "UPDATE teacher_sessions SET active = 0, deleted = 1 WHERE id = %s AND owner_id = %s",
+            "UPDATE teacher_sessions SET active=0, deleted=1 WHERE id=? AND owner_id=?",
             (session_id, user_id),
         )
-        if cur.rowcount < 1:
-            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_expired"))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     teacher_db_write(_write)
     return {"status": "ok"}
 
-@app.get("/api/teacher/session")
+@app.get("/api/teacher-session")
 def teacher_session_info(code: str, user_id: int):
     def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code FROM teacher_sessions s WHERE s.code = %s", (code,))
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=? AND COALESCE(s.deleted,0)=0", (code.upper(),))
         return cur.fetchone()
-    row = teacher_db_read(_read)
-    if not row:
-        raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    row=teacher_db_read(_read)
+    if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     # Session link is private to the teacher who created it and students who
     # belong to the corresponding group.
     def _access(conn):
-        return student_can_access_session(conn, row[0], user_id)
+        return _student_can_access_session(conn, row["id"], user_id)
     if not teacher_db_read(_access):
         raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
-    if not row[6] or int(time.time()) > row[5]:
-        raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
-    return {"status": "ok", "session_id": row[0], "quiz_id": row[2], "expires_at": row[5]}
+    if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+    return {"status":"ok", "session_id":row["id"], "quiz_id":row["quiz_id"], "title":row["title"], "total":row["total"], "expires_at":row["expires_at"], "duration_minutes":row["duration_minutes"], "variant_code":row["variant_code"], "group_id":row["group_id"]}
 
 def _session_owner_id(session_id: str, user_id: int):
-    def _work(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT owner_id FROM teacher_sessions WHERE id = %s", (session_id,))
-        return cur.fetchone()
-    row = teacher_db_read(_work)
-    if not row:
-        raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    conn=teacher_db_connect(); cur=conn.cursor()
+    cur.execute("SELECT owner_id FROM teacher_sessions WHERE id=?", (session_id,)); row=cur.fetchone(); conn.close()
+    if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     return row[0]
 
 
@@ -3037,7 +2977,32 @@ def teacher_group_sessions(user_id: int):
     need to be members of the group. The teacher/owner can also see their own
     sessions through the normal Teacher UI.
     """
-    
+    now = int(time.time())
+    def _read(conn):
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT s.id, s.code, s.quiz_id, q.title, q.total,
+                   s.duration_minutes, s.created_at, s.expires_at, s.group_id,
+                   g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code,
+                   COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id,
+                   COALESCE(p.finished_at,0) AS finished_at,
+                   COALESCE(p.started_at,0) AS started_at,
+                   COALESCE(p.score,0) AS student_score,
+                   COALESCE(p.total,q.total) AS student_total,
+                   COALESCE(p.percent,0) AS student_percent
+            FROM teacher_group_members m
+            JOIN teacher_groups g ON g.id=m.group_id AND g.active=1
+            JOIN teacher_sessions s ON s.group_id=g.id
+            JOIN quizzes q ON q.id=s.quiz_id
+            LEFT JOIN teacher_participants p ON p.session_id=s.id AND p.user_id=m.user_id
+            WHERE m.user_id=? AND s.active=1 AND COALESCE(s.deleted,0)=0
+              AND s.expires_at>?
+            ORDER BY s.created_at DESC
+            LIMIT 30
+        """, (user_id, now))
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
     return {"status":"ok", "sessions":[dict(r) for r in rows], "server_time":now}
 
 
@@ -3056,95 +3021,82 @@ def _student_can_access_session(conn, session_id: str, user_id: int):
     if not group_id:
         return None
     member = conn.execute(
-        "SELECT 1 FROM teacher_group_members WHERE group_id = %s AND user_id = %s LIMIT 1",
+        "SELECT 1 FROM teacher_group_members WHERE group_id=? AND user_id=? LIMIT 1",
         (group_id, user_id),
     ).fetchone()
     return row if member else None
+
 
 @app.post("/api/teacher-session-start")
 def teacher_session_start(session_id: str, user_id: int):
     """Register the moment a student actually enters a group test."""
     now = int(time.time())
     def _write(conn):
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("""
-            SELECT s.id, s.owner_id, s.group_id, s.quiz_id, s.expires_at, s.active,
-                   COALESCE(s.deleted,0) AS deleted, s.duration_minutes, q.title, q.total,
+            SELECT s.id,s.owner_id,s.group_id,s.quiz_id,s.expires_at,s.active,
+                   COALESCE(s.deleted,0) AS deleted,s.duration_minutes,q.title,q.total,
                    COALESCE(s.variant_code,'') AS variant_code
-            FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id
-            WHERE s.id = %s
+            FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
+            WHERE s.id=?
         """, (session_id,))
         s = cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-        if not student_can_access_session(conn, session_id, user_id):
+        if not _student_can_access_session(conn, session_id, user_id):
             raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
-        # s[6]: deleted, s[5]: active, s[4]: expires_at
-        if int(s[6] or 0) or not int(s[5] or 0) or now > int(s[4] or 0):
+        if s["deleted"] or not s["active"] or now > int(s["expires_at"] or 0):
             raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+        # The shared users table intentionally stores only account/status data;
         # Telegram profile names are supplied by the client when the result is submitted.
         first_name = "Telegram User"
         username = ""
         existing = cur.execute(
-        "SELECT id, started_at, finished_at, score, total, percent FROM teacher_participants WHERE session_id = %s AND user_id = %s ORDER BY id LIMIT 1",
-        (session_id, user_id),
-    ).fetchone()
+            "SELECT id, started_at, finished_at, score, total, percent FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1",
+            (session_id, user_id),
+        ).fetchone()
+        if existing:
             # A completed group test is permanently locked for this student.
             # Never reset finished_at/score by opening the same session again.
-            if existing and int(existing[2] or 0) > 0:
-        raise HTTPException(status_code=409, detail=teacher_text(user_id, "session_already_completed"))
-    # If the student simply reopens an unfinished test, preserve the
-    # original start time so the server-side session timer cannot reset.
-    cur.execute("""
-            UPDATE teacher_participants
-            SET first_name = %s, username = %s, total = %s
-            else:
-        cur.execute("""
-            INSERT INTO teacher_participants
-            (session_id, user_id, first_name, username, score, total, percent, started_at, finished_at)
-            VALUES (%s, %s, %s, %s, 0, %s, 0, %s, 0)
-        """, (session_id, user_id, first_name, username, s[9], now))
-        return {
-        "id": s[0],
-        "quiz_id": s[3],
-        "title": s[8],
-        "total": s[9],
-        "duration_minutes": s[7],
-        "expires_at": s[4],
-        "variant_code": s[10]
-    }
-data = teacher_db_write(_write)
-return {
-    "status": "ok",
-    "session_id": data["id"],
-    "quiz_id": data["quiz_id"],
-    "title": data["title"],
-    "total": data["total"],
-    "duration_minutes": data["duration_minutes"],
-    "expires_at": data["expires_at"],
-    "variant_code": data["variant_code"],
-    "server_time": now
-}
+            if int(existing[2] or 0) > 0:
+                raise HTTPException(status_code=409, detail=teacher_text(user_id, "session_already_completed"))
+            # If the student simply reopens an unfinished test, preserve the
+            # original start time so the server-side session timer cannot reset.
+            cur.execute("""
+                UPDATE teacher_participants
+                SET first_name=?, username=?, total=?
+                WHERE id=?
+            """, (first_name, username, s["total"], existing[0]))
+        else:
+            cur.execute("""
+                INSERT INTO teacher_participants
+                (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at)
+                VALUES (?,?,?,?,?,?,?,?,0)
+            """, (session_id,user_id,first_name,username,0,s["total"],0,now))
+        return dict(s)
+    data = teacher_db_write(_write)
+    return {"status":"ok", "session_id":data["id"], "quiz_id":data["quiz_id"],
+            "title":data["title"], "total":data["total"],
+            "duration_minutes":data["duration_minutes"], "expires_at":data["expires_at"],
+            "variant_code":data["variant_code"], "server_time":now}
+
+
 @app.get("/api/teacher-session-quiz")
 def teacher_session_quiz(session_id: str, user_id: int):
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
-        return cur.fetchone()
-    row = teacher_db_read(_read)
-    if not row:
-        raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-    def _access(conn):
-        return student_can_access_session(conn, session_id, user_id)
-    if not teacher_db_read(_access):
-        raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
-    if not row[3] or int(time.time()) > int(row[2] or 0):
-        raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
-    if row[4]:
-        payload = _get_teacher_variant(row[0], _session_owner_id(session_id, user_id), row[4])
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT s.quiz_id, q.title, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND COALESCE(s.deleted,0)=0", (session_id,))
+    row=cur.fetchone()
+    if not row: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    access = _student_can_access_session(conn, session_id, user_id)
+    conn.close()
+    if not access: raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
+    if not row["active"] or int(time.time())>row["expires_at"]: raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+    if row["variant_code"]:
+        payload = _get_teacher_variant(row["quiz_id"], _session_owner_id(session_id, user_id), row["variant_code"])
     else:
-        payload = json.loads(row[5])
-    return {"status": "ok", "quiz_id": row[0], "title": row[1] or "Test", "quiz_json": payload, "variant_code": row[4]}
+        payload = json.loads(row["quiz_json"])
+    return {"status":"ok", "quiz_id":row["quiz_id"], "title":row["title"] or "Test", "quiz_json":payload, "variant_code":row["variant_code"]}
 
 
 class TeacherSubmitRequest(BaseModel):
@@ -3159,151 +3111,56 @@ class TeacherSubmitRequest(BaseModel):
 
 @app.post("/api/teacher-submit")
 def teacher_submit(req: TeacherSubmitRequest):
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id = %s", (req.session_id,))
-        return cur.fetchone()
-    s = teacher_db_read(_read)
-    if not s:
-        raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id=?", (req.session_id,)); s=cur.fetchone()
+    if not s: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
     now=int(time.time())
-    if int(s[2] or 0):
-        raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
-    def _write_check(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id = %s AND user_id = %s ORDER BY id LIMIT 1", (req.session_id, req.user_id))
-        existing_participant = cur.fetchone()
-        return existing_participant
-    existing_participant = teacher_db_read(_write_check)
+    if s["deleted"]: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
+    cur.execute("SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
+    existing_participant = cur.fetchone()
     # Timer 00:00 da avtomatik yuborilgan natija ham server tomonidan qabul qilinadi,
     # lekin faqat o'quvchi sessiya tugashidan oldin kirgan bo'lsa. Bu kechikkan
     # network request sabab natijaning yo'qolib qolishini oldini oladi.
-    if not s[1] or now > int(s[0] or 0):
+    if not s["active"] or now>s["expires_at"]:
         started = int(existing_participant[1] or 0) if existing_participant else 0
         finished = int(existing_participant[2] or 0) if existing_participant else 0
-        if not existing_participant or not started or started > int(s[0] or 0) or finished:
-            raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
+        if not existing_participant or not started or started > int(s["expires_at"] or 0) or finished:
+            conn.close(); raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
     values = (req.first_name[:100], req.username[:100], req.score, req.total, req.percent, now, now)
-    def _write_submit(conn):
-        cur = conn.cursor()
-        if existing_participant:
-            # Once a student has submitted a result, the session is locked for that
-            # student. A duplicate/retry must never overwrite the completed result.
-            if int(existing_participant[2] or 0) > 0:
-                raise HTTPException(status_code=409, detail=teacher_text(req.user_id, "session_already_completed"))
-            cur.execute("""
-                UPDATE teacher_participants 
-                SET first_name = %s, username = %s, score = %s, total = %s, percent = %s, finished_at = %s 
-                WHERE id = %s
-            """, (*values[:5], values[6], existing_participant[0]))
-        else:
-            cur.execute("""
-                INSERT INTO teacher_participants 
-                (session_id, user_id, first_name, username, score, total, percent, started_at, finished_at) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (req.session_id, req.user_id, *values))
-    teacher_db_write(_write_submit)
-    return {"status": "ok"}
+    if existing_participant:
+        # Once a student has submitted a result, the session is locked for that
+        # student. A duplicate/retry must never overwrite the completed result.
+        if int(existing_participant[2] or 0) > 0:
+            conn.close(); raise HTTPException(status_code=409, detail=teacher_text(req.user_id, "session_already_completed"))
+        cur.execute("UPDATE teacher_participants SET first_name=?, username=?, score=?, total=?, percent=?, finished_at=? WHERE id=?", (*values[:5], values[6], existing_participant[0]))
+    else:
+        cur.execute("INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?)", (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
+    conn.commit(); conn.close(); return {"status":"ok"}
+
 
 @app.get("/api/teacher-session-results")
 def teacher_session_results(session_id: str, user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
-        s = cur.fetchone()
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY id", (session_id,))
-        rows = cur.fetchall()
-        active_students = sum(1 for r in rows if int(r[5] or 0) > 0 and int(r[6] or 0) == 0)
-        completed_students = sum(1 for r in rows if int(r[6] or 0) > 0)
-        return s, rows, active_students, completed_students
-    s, rows, active_students, completed_students = teacher_db_read(_read)
-@app.get("/api/teacher-session-results-json")
-def teacher_session_results_json(session_id: str, user_id: int):
-    require_teacher(user_id)
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
-        s = cur.fetchone()
-        if not s:
-            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY id", (session_id,))
-        rows = cur.fetchall()
-        return s, rows
-    s, rows = teacher_db_read(_read)
-    return {
-        "status": "ok",
-        "session_id": session_id,
-        "quiz_id": s[0],
-        "title": s[1],
-        "code": s[2],
-        "expires_at": s[3],
-        "source_type": s[4],
-        "assignment_id": s[5],
-        "participants": [
-            {
-                "first_name": r[0],
-                "username": r[1],
-                "score": r[2],
-                "total": r[3],
-                "percent": r[4],
-                "started_at": r[5],
-                "finished_at": r[6]
-            } for r in rows
-        ]
-   @app.get("/api/teacher-session-results")
-def teacher_session_results(session_id: str, user_id: int):
-    require_teacher(user_id)
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
-        s = cur.fetchone()
-        if not s:
-            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY id", (session_id,))
-        rows = cur.fetchall()
-        active_students = sum(1 for r in rows if int(r[5] or 0) > 0 and int(r[6] or 0) == 0)
-        completed_students = sum(1 for r in rows if int(r[6] or 0) > 0)
-        return s, rows, active_students, completed_students
-    s, rows, active_students, completed_students = teacher_db_read(_read)
-    return {
-        "status": "ok",
-        "session": {
-            "id": session_id,
-            "code": s[2],
-            "quiz_title": s[1],
-            "expires_at": s[3],
-            "source_type": s[4],
-            "assignment_id": s[5]
-        },
-        "participants": [
-            {
-                "first_name": r[0],
-                "username": r[1],
-                "score": r[2],
-                "total": r[3],
-                "percent": r[4],
-                "started_at": r[5],
-                "finished_at": r[6]
-            } for r in rows
-        ],
-        "active_students": active_students,
-        "completed_students": completed_students
-    }
+        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
+        active_students = sum(1 for r in rows if int(r["started_at"] or 0) > 0 and int(r["finished_at"] or 0) == 0)
+        completed_students = sum(1 for r in rows if int(r["finished_at"] or 0) > 0)
+        return dict(s), rows, active_students, completed_students
+    s, rows, active_students, completed_students=teacher_db_read(_read)
+    return {"status":"ok", "session":{"id":session_id,"code":s["code"],"quiz_title":s["title"],"expires_at":s["expires_at"],"source_type":s["source_type"],"assignment_id":s["assignment_id"]}, "active_students":active_students, "completed_students":completed_students, "participants":[dict(r) for r in rows]}
 
-def _teacher_export_rows(session_id: str, owner_id: int):
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s AND s.owner_id = %s AND COALESCE(s.deleted,0) = 0", (session_id, owner_id))
-        s = cur.fetchone()
-        if not s:
-            raise HTTPException(status_code=404, detail=teacher_text(owner_id, "session_not_found"))
-        cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY percent DESC, score DESC", (session_id,))
-        rows = cur.fetchall()
-        return s, rows
-    return teacher_db_read(_read)
+def _teacher_export_rows(session_id, owner_id):
+    require_teacher(owner_id)
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,owner_id)); s=cur.fetchone()
+    cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC", (session_id,)); rows=cur.fetchall(); conn.close()
+    if not s: raise HTTPException(status_code=404, detail=teacher_text(owner_id, "session_not_found"))
+    return s, rows
+
 
 def _register_pdf_font():
     candidates=["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
@@ -3358,101 +3215,136 @@ def teacher_export(session_id: str, user_id: int, format: str):
 
 @app.get("/api/flashcards")
 def get_flashcards(user_id: int):
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT id, front, back FROM flashcards WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
-        return cur.fetchall()
-    rows = teacher_db_read(_read)
-    cards = [{"id": r[0], "front": r[1], "back": r[2]} for r in rows]
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY"
+        " created_at DESC",
+        (user_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    cards = [{"id": r["id"], "front": r["front"], "back": r["back"]} for r in rows]
     return {"status": "ok", "cards": cards}
+
+
 @app.post("/api/create-flashcard")
 def create_flashcard(req: FlashcardCreateRequest):
     add_user_to_db(req.user_id)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = ?",
+        (req.user_id,),
+    )
+    u = cursor.fetchone()
     now = int(time.time())
-    def _read_user(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = %s", (req.user_id,))
-        return cur.fetchone()
-    u = teacher_db_read(_read_user)
-    is_paid = bool(u and is_active_paid_status(u[0] or "", u[1] or 0))
-    
+    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
+
     # 30 kunlik bepul davr tugagan bo'lsa, uchala hisoblagichni reset qilamiz.
-    if u and now - (u[3] or now) >= 30 * 24 * 3600 and not is_paid:
-        def _reset_user(conn):
-            cur = conn.cursor()
-            cur.execute("UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s", (now, req.user_id))
-        teacher_db_write(_reset_user)
+    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
+        cursor.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (now, req.user_id),
+        )
+        conn.commit()
 
     # Premium / Teacher: cheksiz.
     if not is_paid:
-        def _update_limit(conn):
-            cur = conn.cursor()
-            cur.execute(
-                "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
-                "WHERE user_id = %s AND COALESCE(flashcard_free_used, 0) < %s",
-                (req.user_id, FREE_FLASHCARD_LIMIT)
-            )
-            if cur.rowcount != 1:
-                lang = get_user_lang(req.user_id)
-                messages = {
-                    "uz": MESSAGES["uz"]["flashcard_limit_reached"],
-                    "ru": MESSAGES["ru"]["flashcard_limit_reached"],
-                    "en": MESSAGES["en"]["flashcard_limit_reached"]
-                }
-                raise HTTPException(status_code=403, detail=messages.get(lang, messages["uz"]))
-        teacher_db_write(_update_limit)
+        cursor.execute(
+            "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
+            "WHERE user_id = ? AND COALESCE(flashcard_free_used, 0) < ?",
+            (req.user_id, FREE_FLASHCARD_LIMIT),
+        )
+        if cursor.rowcount != 1:
+            conn.close()
+            lang = get_user_lang(req.user_id)
+            messages = {
+                "uz": MESSAGES["uz"]["flashcard_limit_reached"],
+                "ru": MESSAGES["ru"]["flashcard_limit_reached"],
+                "en": MESSAGES["en"]["flashcard_limit_reached"],
+            }
+            return {
+                "status": "error",
+                "error_code": "flashcard_limit",
+                "message": messages.get(lang, messages["uz"]),
+            }
+        conn.commit()
 
     card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
-    def _insert_card(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO flashcards (id, user_id, front, back, created_at) VALUES (%s, %s, %s, %s, %s)",
-            (card_id, req.user_id, req.front, req.back, int(time.time()))
-        )
-    teacher_db_write(_insert_card)
-    return {"status": "ok", "card_id": card_id}
+    cursor.execute(
+        "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
+        (card_id, req.user_id, req.front, req.back, int(time.time())),
+    )
+    conn.commit()
+    conn.close()
+    if not is_paid:
+        notify_free_limit_reached(req.user_id, "flashcard")
+    return {"status": "ok"}
+
 
 @app.delete("/api/delete-flashcard")
 def delete_flashcard(card_id: str, user_id: int):
-    def _delete(conn):
-        cur = conn.cursor()
-        cur.execute("DELETE FROM flashcards WHERE id = %s AND user_id = %s", (card_id, user_id))
-    teacher_db_write(_delete)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id)
+    )
+    conn.commit()
+    conn.close()
     return {"status": "ok"}
+
 
 @app.get("/api/quiz-detail")
 def get_quiz_detail(quiz_id: str):
-    def _read(conn):
-        cur = conn.cursor()
-        cur.execute("SELECT title, quiz_json FROM quizzes WHERE id = %s", (quiz_id,))
-        return cur.fetchone()
-    row = teacher_db_read(_read)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    row = cursor.fetchone()
+    conn.close()
     if row:
-        return {"status": "ok", "title": row[0] or "Test", "quiz_json": json.loads(row[1])}
+        return {"status": "ok", "title": row["title"] or "Test", "quiz_json": json.loads(row["quiz_json"])}
     raise HTTPException(status_code=404, detail="Test topilmadi")
+
 
 @app.post("/api/update-progress")
 def update_progress(data: ProgressUpdateRequest):
-    def _write(conn):
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE quizzes SET answered = total, last_score = %s, last_percent = %s WHERE id = %s AND user_id = %s",
-            (data.correct_count, data.percent, data.quiz_id, data.user_id)
-        )
-    teacher_db_write(_write)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
+        " WHERE id = ? AND user_id = ?",
+        (data.correct_count, data.percent, data.quiz_id, data.user_id),
+    )
+    conn.commit()
+    conn.close()
     return {"status": "ok"}
 
 
 @app.delete("/api/delete-quiz")
 def delete_quiz(quiz_id: str, user_id: int):
     try:
-        def _delete(conn):
-            cur = conn.cursor()
-            cur.execute("DELETE FROM quizzes WHERE id = %s AND user_id = %s", (quiz_id, user_id))
-        teacher_db_write(_delete)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute(
+            "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
+        )
+        conn.commit()
+        conn.close()
         return {"status": "ok", "message": "Test o'chirildi."}
     except Exception as e:
         raise HTTPException(status_code=500, detail="Xatolik.")
+
+
 def start_bot_polling():
     while True:
         try:
@@ -3480,6 +3372,108 @@ async def startup_event():
     threading.Thread(target=limit_notification_worker, daemon=True).start()
 
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+
+    # ==================================================================
+# YANGILIKLAR TIZIMI VA AVTO-TARJIMA BO'LIMI
+# ==================================================================
+
+# DB Sozlamalari
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if DATABASE_URL.startswith("sqlite"):
+    news_engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    news_engine = create_engine(DATABASE_URL)
+
+NewsSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=news_engine)
+NewsBase = declarative_base()
+
+class News(NewsBase):
+    __tablename__ = "news"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title_uz = Column(String(255), nullable=False)
+    content_uz = Column(Text, nullable=False)
+    title_ru = Column(String(255), nullable=True)
+    content_ru = Column(Text, nullable=True)
+    title_en = Column(String(255), nullable=True)
+    content_en = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+NewsBase.metadata.create_all(bind=news_engine)
+
+def get_news_db():
+    db = NewsSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def translate_to_ru_and_en(text_uz: str):
+    if not text_uz or not text_uz.strip():
+        return "", ""
+    try:
+        text_ru = GoogleTranslator(source='uz', target='ru').translate(text_uz)
+    except Exception as e:
+        print(f"[RU Tarjima Xatosi]: {e}")
+        text_ru = text_uz
+
+    try:
+        text_en = GoogleTranslator(source='uz', target='en').translate(text_uz)
+    except Exception as e:
+        print(f"[EN Tarjima Xatosi]: {e}")
+        text_en = text_uz
+
+    return text_ru, text_en
+
+class NewsCreateSchema(BaseModel):
+    title_uz: str
+    content_uz: str
+
+@app.post("/api/news")
+def create_news_api(news_data: NewsCreateSchema, db: Session = Depends(get_news_db)):
+    title_ru, title_en = translate_to_ru_and_en(news_data.title_uz)
+    content_ru, content_en = translate_to_ru_and_en(news_data.content_uz)
+
+    new_item = News(
+        title_uz=news_data.title_uz,
+        content_uz=news_data.content_uz,
+        title_ru=title_ru,
+        content_ru=content_ru,
+        title_en=title_en,
+        content_en=content_en
+    )
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+    return {"status": "success", "data": new_item}
+
+@app.get("/api/news")
+def get_news_api(lang: str = Query("uz"), db: Session = Depends(get_news_db)):
+    news_list = db.query(News).order_by(News.created_at.desc()).all()
+    result = []
+
+    for item in news_list:
+        if lang == "ru":
+            title = item.title_ru or item.title_uz
+            content = item.content_ru or item.content_uz
+        elif lang == "en":
+            title = item.title_en or item.title_uz
+            content = item.content_en or item.content_uz
+        else:
+            title = item.title_uz
+            content = item.content_uz
+
+        result.append({
+            "id": item.id,
+            "title": title,
+            "content": content,
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else ""
+        })
+
+    return {"status": "success", "data": result}
+    if __name__ == "__main__":
+        port = int(os.environ.get("PORT", 8080))
+        uvicorn.run(app, host="0.0.0.0", port=port)
