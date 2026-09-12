@@ -2496,10 +2496,8 @@ def _ensure_teacher_schema(conn):
         try:
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             if "id" in cols:
-                conn.execute(
-                    f"UPDATE {table} SET id=? || rowid WHERE id IS NULL OR TRIM(CAST(id AS TEXT))=''",
-                    (prefix,),
-                )
+                # PostgreSQL has no SQLite rowid. Production migration preserves existing IDs.
+                pass
         except sqlite3.OperationalError as e:
             logging.warning("Teacher DB ID repair %s: %s", table, e)
 
