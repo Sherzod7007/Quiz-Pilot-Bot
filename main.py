@@ -3714,19 +3714,19 @@ def update_progress(data: ProgressUpdateRequest):
 
 @app.delete("/api/delete-quiz")
 def delete_quiz(quiz_id: str, user_id: int):
+    def _write(conn):
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM quizzes WHERE id = %s AND user_id = %s
+            """, (quiz_id, user_id))
+        return {"status": "ok", "message": "Test o'chirildi."}
+    
     try:
-        def _write(conn):
-            with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM quizzes WHERE id = %s AND user_id = %s
-                """, (quiz_id, user_id))
-                return {"status": "ok", "message": "Test o'chirildi."}
-                
         return teacher_db_write(_write)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Xatolik.")
-
-
+                
+      
 def start_bot_polling():
     while True:
         try:
