@@ -63,12 +63,17 @@ current_key_index = 0
 key_lock = threading.Lock()
 
 # --- PROFESSIONAL AI QUEUE + RETRY + TIMEOUT + CONCURRENCY PROTECTION ---
+# Free API Key Rotation saqlanadi. Katta (100-500 savolli) so'rovlarni
+# sun'iy 90 soniya / 5 daqiqalik limit bilan kesib tashlamaymiz.
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", str(min(7, max(1, len(GOOGLE_API_KEYS)))))))
 AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "150")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
+# Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
+# AI so'rovlar sonini cheklaydi. 150 ta foydalanuvchi birdan so'rov yuborsa
+# ortiqcha so'rovlar xavfsiz kutadi, API birdaniga bosib yuborilmaydi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
 logging.info(
@@ -77,6 +82,8 @@ logging.info(
 )
 
 # --- PROFESSIONAL FILE PROTECTION LAYER ---
+# Katta kitob yoki juda og'ir fayllar server, parser va AI Queue ga
+# ortiqcha yuk bermasligi uchun yuklashdan oldin tekshiriladi.
 MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "20")))
 MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
@@ -111,7 +118,11 @@ def file_protection_message(lang: str, key: str) -> str:
     return FILE_PROTECTION_MESSAGES.get(lang, FILE_PROTECTION_MESSAGES["uz"]).get(key, FILE_PROTECTION_MESSAGES["uz"]["unreadable"])
 
 DOWNLOADS_DIR = "downloads"
+DB_PATH = (
+    "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
+)
 
+# --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
 TARIFFS = {
     "daily": {
         "price": "10 000 so'm",
@@ -159,6 +170,7 @@ def localized_tariff_name(plan_key: str, lang: str) -> str:
     lang = lang if lang in ("uz", "ru", "en") else "uz"
     return TARIFFS.get(plan_key, {}).get("names", {}).get(lang, plan_key)
 
+# --- MULTILINGUAL (3 TILDAGI BILDIRISHNOMALAR) ---
 MESSAGES = {
     "uz": {
         "welcome": (
@@ -331,9 +343,11 @@ def get_user_lang(user_id: int) -> str:
         logging.error(f"Foydalanuvchi tilini olishda xatolik: {e}")
     return "uz"
 
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
+ 
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS quizzes (
         id TEXT PRIMARY KEY,
@@ -359,10 +373,10 @@ def init_db():
         flashcard_free_used INTEGER DEFAULT 0,
         premium_until BIGINT DEFAULT 0,
         last_active BIGINT DEFAULT 0,
-        last_quiz_free_notice_cycle BIGINT DEFAULT 0,
-        last_public_free_notice_cycle BIGINT DEFAULT 0,
-        last_flashcard_free_notice_cycle BIGINT DEFAULT 0,
-        last_free_reset_notice_cycle BIGINT DEFAULT 0,
+        last_quiz_free_notice_cycle INTEGER DEFAULT 0,
+        last_public_free_notice_cycle INTEGER DEFAULT 0,
+        last_flashcard_free_notice_cycle INTEGER DEFAULT 0,
+        last_free_reset_notice_cycle INTEGER DEFAULT 0,
         paid_limit_notice_until BIGINT DEFAULT 0
     );""")
 
@@ -374,27 +388,41 @@ def init_db():
     columns = [col[0] for col in cursor.fetchall()]
 
     if "status" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Oddiy foydalanuvchi';")
-        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'Oddiy foydalanuvchi';")
+        except Exception:
+            pass
     if "free_used" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN free_used INTEGER DEFAULT 0;")
-        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN free_used INTEGER DEFAULT 0;")
+        except Exception:
+            pass
     if "premium_until" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN premium_until BIGINT DEFAULT 0;")
-        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN premium_until INTEGER DEFAULT 0;")
+        except Exception:
+            pass
     if "public_free_used" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN public_free_used INTEGER DEFAULT 0;")
-        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN public_free_used INTEGER DEFAULT 0;")
+        except Exception:
+            pass
     if "flashcard_free_used" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN flashcard_free_used INTEGER DEFAULT 0;")
-        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN flashcard_free_used INTEGER DEFAULT 0;")
+        except Exception:
+            pass
     if "plan_key" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN plan_key TEXT DEFAULT '';")
-        except Exception: pass
-    if "last_active" not in columns:
-        try: cursor.execute("ALTER TABLE users ADD COLUMN last_active BIGINT DEFAULT 0;")
-        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN plan_key TEXT DEFAULT '';" )
+        except Exception:
+            pass
 
+    if "last_active" not in columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN last_active INTEGER DEFAULT 0;")
+        except Exception:
+            pass
     for _col in (
         "last_quiz_free_notice_cycle",
         "last_public_free_notice_cycle",
@@ -403,9 +431,12 @@ def init_db():
         "paid_limit_notice_until",
     ):
         if _col not in columns:
-            try: cursor.execute(f"ALTER TABLE users ADD COLUMN {_col} BIGINT DEFAULT 0;")
-            except Exception: pass
+            try:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {_col} INTEGER DEFAULT 0;")
+            except Exception:
+                pass
 
+    # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
     cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
     cursor.execute("UPDATE users SET public_free_used = 0 WHERE public_free_used IS NULL;")
     cursor.execute("UPDATE users SET flashcard_free_used = 0 WHERE flashcard_free_used IS NULL;")
@@ -415,93 +446,89 @@ def init_db():
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS flashcards (
         id TEXT PRIMARY KEY,
-        user_id BIGINT,
+        user_id INTEGER,
         front TEXT,
         back TEXT,
-        created_at BIGINT
-    );""")
+        created_at INTEGER)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS payments (
         tx_id TEXT PRIMARY KEY,
-        user_id BIGINT,
+        user_id INTEGER,
         tariff_name TEXT,
         tariff_price TEXT,
         status TEXT DEFAULT 'pending',
-        created_at BIGINT
-    );""")
+        created_at INTEGER)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
         id TEXT PRIMARY KEY,
-        owner_id BIGINT,
+        owner_id INTEGER,
         quiz_id TEXT,
         code TEXT UNIQUE,
         duration_minutes INTEGER DEFAULT 30,
-        created_at BIGINT,
-        expires_at BIGINT,
+        created_at INTEGER,
+        expires_at INTEGER,
         active INTEGER DEFAULT 1,
         deleted INTEGER DEFAULT 0,
         source_type TEXT DEFAULT 'group_test',
-        assignment_id TEXT DEFAULT '',
-        group_id TEXT DEFAULT '',
-        variant_code TEXT DEFAULT ''
-    );""")
+        assignment_id TEXT DEFAULT '')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_participants (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT,
-        user_id BIGINT,
-        first_name TEXT DEFAULT '',
-        username TEXT DEFAULT '',
+        user_id INTEGER,
+        first_name TEXT,
+        username TEXT,
         score INTEGER DEFAULT 0,
         total INTEGER DEFAULT 0,
         percent INTEGER DEFAULT 0,
-        started_at BIGINT DEFAULT 0,
-        finished_at BIGINT DEFAULT 0,
-        UNIQUE(session_id, user_id)
-    );""")
+        started_at INTEGER,
+        finished_at INTEGER,
+        UNIQUE(session_id, user_id))""")
 
+    # O'qituvchilar uchun professional variantlar/guruhlar. Eski DB bilan mos:
+    # IF NOT EXISTS + ehtiyotkor migration mavjud funksiyalarni o'zgartirmaydi.
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_variants (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         quiz_id TEXT NOT NULL,
         variant_code TEXT NOT NULL,
         variant_json TEXT NOT NULL,
-        created_at BIGINT NOT NULL,
-        UNIQUE(quiz_id, variant_code)
-    );""")
+        created_at INTEGER NOT NULL,
+        UNIQUE(quiz_id, variant_code))""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_groups (
         id TEXT PRIMARY KEY,
-        owner_id BIGINT NOT NULL,
+        owner_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         description TEXT DEFAULT '',
         join_code TEXT DEFAULT '',
-        created_at BIGINT NOT NULL,
-        active INTEGER DEFAULT 1
-    );""")
+        created_at INTEGER NOT NULL,
+        active INTEGER DEFAULT 1)""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_group_members (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         group_id TEXT NOT NULL,
-        user_id BIGINT NOT NULL,
+        user_id INTEGER NOT NULL,
         first_name TEXT DEFAULT '',
         username TEXT DEFAULT '',
-        joined_at BIGINT NOT NULL,
-        UNIQUE(group_id, user_id)
-    );""")
+        joined_at INTEGER NOT NULL,
+        UNIQUE(group_id, user_id))""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_assignments (
         id TEXT PRIMARY KEY,
-        owner_id BIGINT NOT NULL,
+        owner_id INTEGER NOT NULL,
         group_id TEXT NOT NULL,
         quiz_id TEXT NOT NULL,
         variant_code TEXT DEFAULT '',
         title TEXT DEFAULT '',
-        due_at BIGINT DEFAULT 0,
+        due_at INTEGER DEFAULT 0,
         duration_minutes INTEGER DEFAULT 30,
-        created_at BIGINT NOT NULL,
-        active INTEGER DEFAULT 1
-    );""")
+        created_at INTEGER NOT NULL,
+        active INTEGER DEFAULT 1)""")
 
+    # Eski Railway/SQLite bazalarida Teacher jadvallari avvalgi versiyadan qolgan
+    # bo‘lishi mumkin. CREATE TABLE IF NOT EXISTS mavjud jadvalga yangi ustunlarni
+    # qo‘shmaydi, shuning uchun xavfsiz migration qilamiz. Bu faqat yetishmayotgan
+    # Teacher ustunlarini qo‘shadi va boshqa funksiyalarga tegmaydi.
     teacher_migrations = {
         "teacher_sessions": {
             "group_id": "TEXT DEFAULT ''",
@@ -516,51 +543,46 @@ def init_db():
             "score": "INTEGER DEFAULT 0",
             "total": "INTEGER DEFAULT 0",
             "percent": "INTEGER DEFAULT 0",
-            "started_at": "BIGINT DEFAULT 0",
-            "finished_at": "BIGINT DEFAULT 0",
+            "started_at": "INTEGER DEFAULT 0",
+            "finished_at": "INTEGER DEFAULT 0",
         },
         "teacher_variants": {
             "variant_code": "TEXT DEFAULT ''",
             "variant_json": "TEXT DEFAULT '{}'",
-            "created_at": "BIGINT DEFAULT 0",
+            "created_at": "INTEGER DEFAULT 0",
         },
         "teacher_groups": {
-            "owner_id": "BIGINT DEFAULT 0",
+            "owner_id": "INTEGER DEFAULT 0",
             "name": "TEXT DEFAULT ''",
             "description": "TEXT DEFAULT ''",
             "join_code": "TEXT DEFAULT ''",
-            "created_at": "BIGINT DEFAULT 0",
+            "created_at": "INTEGER DEFAULT 0",
             "active": "INTEGER DEFAULT 1",
         },
         "teacher_group_members": {
             "group_id": "TEXT DEFAULT ''",
-            "user_id": "BIGINT DEFAULT 0",
+            "user_id": "INTEGER DEFAULT 0",
             "first_name": "TEXT DEFAULT ''",
             "username": "TEXT DEFAULT ''",
-            "joined_at": "BIGINT DEFAULT 0",
+            "joined_at": "INTEGER DEFAULT 0",
         },
         "teacher_assignments": {
-            "owner_id": "BIGINT DEFAULT 0",
+            "owner_id": "INTEGER DEFAULT 0",
             "group_id": "TEXT DEFAULT ''",
             "quiz_id": "TEXT DEFAULT ''",
             "variant_code": "TEXT DEFAULT ''",
             "title": "TEXT DEFAULT ''",
-            "due_at": "BIGINT DEFAULT 0",
+            "due_at": "INTEGER DEFAULT 0",
             "duration_minutes": "INTEGER DEFAULT 30",
-            "created_at": "BIGINT DEFAULT 0",
+            "created_at": "INTEGER DEFAULT 0",
             "active": "INTEGER DEFAULT 1",
         },
     }
-
-    for table_name, cols in teacher_migrations.items():
+    for table_name, columns in teacher_migrations.items():
         try:
-            cursor.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = %s;
-            """, (table_name,))
-            existing = {row[0] for row in cursor.fetchall()}
-            for column_name, column_def in cols.items():
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            existing = {row[1] for row in cursor.fetchall()}
+            for column_name, column_def in columns.items():
                 if column_name not in existing:
                     try:
                         cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
@@ -569,10 +591,11 @@ def init_db():
         except Exception as migration_error:
             logging.warning("Teacher DB schema check %s: %s", table_name, migration_error)
 
+    # Eski yozuvlardagi NULL qiymatlar Teacher endpointlari uchun xavfsiz qiymatga o‘tkaziladi.
     for table_name, updates in {
         "teacher_groups": [("description", "''"), ("active", "1")],
         "teacher_assignments": [("variant_code", "''"), ("title", "''"), ("due_at", "0"), ("duration_minutes", "30"), ("active", "1")],
-        "teacher_sessions": [("group_id", "''"), ("variant_code", "''"), ("deleted", "0"), ("source_type", "'group_test'"), ("assignment_id", "''")],
+        "teacher_sessions": [("group_id", "''"), ("variant_code", "'" + "'" + "'"), ("deleted", "0"), ("source_type", "'group_test'"), ("assignment_id", "''")],
     }.items():
         for col, value in updates:
             try:
@@ -580,14 +603,12 @@ def init_db():
             except Exception:
                 pass
 
+    # Existing groups from older versions receive a 6-character join code.
     try:
         cursor.execute("SELECT id FROM teacher_groups WHERE COALESCE(join_code,'')='' AND active=1")
         for row in cursor.fetchall():
             code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
-            while True:
-                cursor.execute("SELECT 1 FROM teacher_groups WHERE join_code=%s LIMIT 1", (code,))
-                if not cursor.fetchone():
-                    break
+            while cursor.execute("SELECT 1 FROM teacher_groups WHERE join_code=%s LIMIT 1", (code,)).fetchone():
                 code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
             cursor.execute("UPDATE teacher_groups SET join_code=%s WHERE id=%s", (code, row[0]))
     except Exception as e:
@@ -596,7 +617,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 init_db()
+
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
@@ -604,8 +627,10 @@ class QuizItem(BaseModel):
     correct_index: int = Field(description="To'g'ri javob indeks (0 dan 3 gacha)")
     explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
 
+
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
+
 
 class ProgressUpdateRequest(BaseModel):
     quiz_id: str
@@ -613,10 +638,12 @@ class ProgressUpdateRequest(BaseModel):
     correct_count: int
     percent: int
 
+
 class FlashcardCreateRequest(BaseModel):
     user_id: int
     front: str
     back: str
+
 
 class PaymentIntentRequest(BaseModel):
     action: str
@@ -625,7 +652,10 @@ class PaymentIntentRequest(BaseModel):
     tariff_price: Optional[str] = None
     tariff_key: Optional[str] = None
 
+
+
 def _send_limit_message(user_id: int, message_key: str, **kwargs):
+    """Send a localized Telegram limit notification without affecting app requests."""
     try:
         lang = get_user_lang(user_id)
         text = MESSAGES.get(lang, MESSAGES["uz"])[message_key].format(**kwargs)
@@ -635,7 +665,9 @@ def _send_limit_message(user_id: int, message_key: str, **kwargs):
         logging.error(f"Limit Telegram xabari yuborilmadi ({user_id}, {message_key}): {e}")
         return False
 
+
 def notify_free_limit_reached(user_id: int, kind: str):
+    """Notify once per 30-day free-limit cycle when a free feature is exhausted."""
     columns = {
         "quiz": ("free_used", "last_quiz_free_notice_cycle", FREE_QUIZ_LIMIT, "free_quiz_limit_notice"),
         "public": ("public_free_used", "last_public_free_notice_cycle", FREE_PUBLIC_LIMIT, "free_public_limit_notice"),
@@ -662,7 +694,6 @@ def notify_free_limit_reached(user_id: int, kind: str):
             conn.close()
             return
         cur.execute(f"UPDATE users SET {notice_col} = %s WHERE user_id = %s AND {notice_col} <> %s", (cycle, user_id, cycle))
-        changed = cur.rowcount > 0
         conn.commit()
         conn.close()
         if changed:
@@ -670,7 +701,9 @@ def notify_free_limit_reached(user_id: int, kind: str):
     except Exception as e:
         logging.error(f"Bepul limit notification xatosi ({user_id}, {kind}): {e}")
 
+
 def process_expired_free_limits():
+    """Reset the 30-day free cycle and notify the user once when free limits return."""
     now = int(time.time())
     thirty_days = 30 * 24 * 3600
     try:
@@ -679,7 +712,7 @@ def process_expired_free_limits():
         cur.execute(
             "SELECT user_id, created_at, free_used, public_free_used, flashcard_free_used, "
             "status, premium_until, last_free_reset_notice_cycle "
-            "FROM users WHERE created_at > 0 AND created_at <= %s",
+            "FROM users WHERE created_at > 0 AND created_at <= %s"
             (now - thirty_days,),
         )
         rows = cur.fetchall()
@@ -687,6 +720,7 @@ def process_expired_free_limits():
             user_id = row["user_id"]
             old_cycle = row["created_at"] or 0
             is_paid = is_active_paid_status(row["status"] or "", row["premium_until"] or 0)
+            # Paid tarif davrida mavjud tizim qoidasi saqlanadi: bepul sikl reset qilinmaydi.
             if is_paid:
                 continue
 
@@ -697,11 +731,13 @@ def process_expired_free_limits():
                 or (row["flashcard_free_used"] or 0) >= FREE_FLASHCARD_LIMIT
             )
 
-            cur.execute(
-                "UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, "
-                "created_at=%s, last_free_reset_notice_cycle=%s "
-                "WHERE user_id=%s AND created_at=%s",
-                (now, old_cycle if had_exhausted_limit else already_notified, user_id, old_cycle),
+            
+                cur.execute(
+            "UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, "
+            "created_at=%s, last_free_reset_notice_cycle=%s "
+            "WHERE user_id=%s AND created_at=%s",
+            (now, old_cycle if had_exhausted_limit else already_notified, user_id, old_cycle),
+        )
             )
             if cur.rowcount == 1 and had_exhausted_limit and already_notified != old_cycle:
                 try:
@@ -715,14 +751,16 @@ def process_expired_free_limits():
     except Exception as e:
         logging.error(f"Bepul limit reset worker xatosi: {e}")
 
+
 def process_expired_paid_limits():
+    """Expire PRO plans and notify users once exactly when their paid period ends."""
     now = int(time.time())
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(
             "SELECT user_id, status, plan_key, premium_until, paid_limit_notice_until "
-            "FROM users WHERE premium_until > 0 AND premium_until <= %s AND status LIKE '%%PRO%%'",
+            "FROM users WHERE premium_until > 0 AND premium_until <= %s AND status LIKE '%PRO%'",
             (now,),
         )
         rows = cur.fetchall()
@@ -735,8 +773,8 @@ def process_expired_paid_limits():
             tariff_name = localized_tariff_name(plan_key, get_user_lang(user_id)) if plan_key else "Premium"
             cur.execute(
                 "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=%s "
-                "WHERE user_id=%s AND premium_until=%s",
-                (expiry, user_id, expiry),
+"WHERE user_id=%s AND premium_until=%s",
+(expiry, user_id, expiry),
             )
             if cur.rowcount == 1:
                 try:
@@ -749,6 +787,7 @@ def process_expired_paid_limits():
         conn.close()
     except Exception as e:
         logging.error(f"Premium limit worker xatosi: {e}")
+
 
 def limit_notification_worker():
     while True:
@@ -767,22 +806,25 @@ def add_user_to_db(user_id: int):
             "INSERT INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until) "
             "VALUES (%s, %s, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, %s) "
             "ON CONFLICT (user_id) DO NOTHING",
-            (user_id, int(time.time()), 0),
+            (user_id, int(time.time()), int(time.time())),
+        )
         )
         conn.commit()
         conn.close()
     except Exception as e:
         logging.error(f"Foydalanuvchi qo'shishda xato: {e}")
 
+
 def get_users_count():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
         active_since = int(time.time()) - 2 * 60
         cursor.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= %s",
-            (active_since,),
-        )
+        "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= %s",
+        (active_since,),
+    )
         count = cursor.fetchone()[0]
         conn.close()
         return count
@@ -790,7 +832,9 @@ def get_users_count():
         logging.error(f"Faol foydalanuvchilar sonini olishda xato: {e}")
         return 0
 
+
 def update_user_activity(user_id: int):
+    
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -803,10 +847,12 @@ def update_user_activity(user_id: int):
     except Exception as e:
         logging.error(f"Faol foydalanuvchi vaqtini yangilashda xato: {e}")
 
+
 def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_key=None):
     try:
         user_lang = get_user_lang(user_id)
         if tariff_key not in TARIFFS:
+            # Eski klientlardan kelgan tarif nomlarini ham saqlab qolamiz.
             low = (tariff_name or "").lower()
             if "o'qit" in low or "учител" in low or "teacher" in low:
                 tariff_key = "teachers"
@@ -823,14 +869,16 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
         cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = %s AND status = 'pending'", (user_id,))
         cursor.execute(
-            "INSERT INTO payments (tx_id, user_id, tariff_name, tariff_price, status, created_at) VALUES (%s, %s, %s, %s, 'pending', %s)",
+            "INSERT INTO payments VALUES (%s, %s, %s, %s, 'pending', %s)",
             (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
         )
         conn.commit()
         conn.close()
 
+        user_lang = get_user_lang(user_id)
         msg_text = MESSAGES[user_lang]["payment_prompt"].format(
             tariff_name=tariff_name,
             tariff_price=tariff_price,
@@ -840,6 +888,7 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         bot.send_message(user_id, msg_text, parse_mode="Markdown")
     except Exception as e:
         logging.error(f"To'lov jarayonini ishga tushirishda xato: {e}")
+
 
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
@@ -854,6 +903,7 @@ def send_welcome(message):
 
     markup.row(btn_start)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+
 
 @bot.message_handler(content_types=["web_app_data"])
 def handle_webapp_data(message):
@@ -880,6 +930,8 @@ def handle_webapp_data(message):
     except Exception as e:
         logging.error(f"WebApp ma'lumotlarini o'qishda jiddiy xato: {e}")
 
+
+# --- ADMIN SUPPORT: foydalanuvchi suhbatini davom ettirish tugmasi ---
 def support_continue_markup(lang: str):
     lang = lang if lang in MESSAGES else "uz"
     markup = telebot.types.InlineKeyboardMarkup()
@@ -889,6 +941,7 @@ def support_continue_markup(lang: str):
     ))
     return markup
 
+# --- ADMIN SUPPORT: murojaat va javob ---
 @bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
 def handle_support_text(message):
     user_id = message.from_user.id
@@ -902,6 +955,7 @@ def handle_support_text(message):
                 f"💬 {target_messages.get('support_admin_reply_title', 'Admin javobi')}:\n\n{message.text}",
                 reply_markup=support_continue_markup(target_lang)
             )
+            # Admin tomondagi texnik tasdiq doim O'zbek tilida qoladi.
             bot.send_message(user_id, MESSAGES["uz"]["support_reply_sent"])
         except Exception as e:
             logging.error(f"Admin javobini yuborishda xato: {e}")
@@ -933,6 +987,7 @@ def handle_support_text(message):
 
 @bot.callback_query_handler(func=lambda call: call.data == "support_continue")
 def handle_support_continue_callback(call):
+    """Allow the user to continue the same admin-support conversation from Telegram."""
     if ADMIN_ID and call.from_user.id == ADMIN_ID:
         bot.answer_callback_query(call.id, "Bu tugma foydalanuvchi uchun.", show_alert=True)
         return
@@ -966,26 +1021,26 @@ def handle_support_reply_callback(call):
         logging.error(f"Admin reply callback xatosi: {e}")
         bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
+# --- ISHONCHLI TO'LOV CHEKI QABUL QILISH (STABLE PHOTO HANDLER) ---
 @bot.message_handler(content_types=["photo"])
 def handle_receipt_photo(message):
     user_id = message.from_user.id
     user_lang = get_user_lang(user_id)
 
     conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    cursor.execute(
-        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = %s AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
-        (user_id,),
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(
+            "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = %s AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        )
     )
     pending_pay = cursor.fetchone()
     conn.close()
 
     if not pending_pay:
-        return
+        return  # Kutilayotgan to'lov yo'q bo'lsa javob berilmaydi
 
-    tx_id = pending_pay["tx_id"]
-    tariff_name = pending_pay["tariff_name"]
-    tariff_price = pending_pay["tariff_price"]
+    tx_id, tariff_name, tariff_price = pending_pay
 
     username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
     first_name = message.from_user.first_name
@@ -996,6 +1051,7 @@ def handle_receipt_photo(message):
     btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p_rej_{tx_id}_{user_id}")
     admin_markup.row(btn_approve, btn_reject)
 
+    # Admin uchun tarif nomi foydalanuvchi tilidan qat'i nazar doim O'zbek tilida ko'rsatiladi.
     plan_key = get_plan_key(tariff_name)
     admin_tariff_name = localized_tariff_name(plan_key, "uz") if plan_key else tariff_name
 
@@ -1025,6 +1081,7 @@ def handle_receipt_photo(message):
         logging.error(f"Admin ga rasm yuborishda xatolik yuz berdi: {e}")
         bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_error"])
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
 def handle_admin_decision(call):
     if ADMIN_ID and call.from_user.id != ADMIN_ID:
@@ -1038,9 +1095,9 @@ def handle_admin_decision(call):
     user_lang = get_user_lang(user_id)
 
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = %s", (tx_id,))
-    pay_row = cursor.fetchone()
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = %s", (tx_id,))
+        pay_row = cursor.fetchone()
 
     if not pay_row or pay_row[0] != "pending":
         bot.answer_callback_query(call.id, "Bu so'rov allaqachon ko'rib chiqilgan!", show_alert=True)
@@ -1051,6 +1108,7 @@ def handle_admin_decision(call):
 
     if action == "app":
         current_time = int(time.time())
+        # Eski to'lovlar uchun nomdan, yangi to'lovlar uchun canonical nomdan reja aniqlanadi.
         plan_key = get_plan_key(tariff_name)
         if not plan_key:
             low = tariff_name.lower()
@@ -1107,6 +1165,7 @@ def handle_admin_decision(call):
 
     conn.close()
 
+
 # --- FASTAPI ENDPOINTS ---
 app = FastAPI()
 
@@ -1125,11 +1184,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     response = templates.TemplateResponse("index.html", {"request": request})
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
 
 @app.post("/api/payment-intent")
 def api_payment_intent(req: PaymentIntentRequest):
@@ -1147,14 +1208,16 @@ def api_payment_intent(req: PaymentIntentRequest):
         }
     raise HTTPException(status_code=400, detail="Noto'g'ri amal")
 
+
 @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
     add_user_to_db(user_id)
     conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    cursor.execute(
-        "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at FROM users WHERE user_id = %s",
-        (user_id,),
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(
+            "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at FROM users WHERE user_id = %s",
+            (user_id,),
+        ),
     )
     row = cursor.fetchone()
     if not row:
@@ -1185,13 +1248,14 @@ def get_premium_status(user_id: int):
     if is_active_paid_status(user_status, premium_until):
         pass
     elif "PRO" in user_status and premium_until > 0 and now > premium_until:
-        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0 WHERE user_id = %s", (user_id,))
+        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0 WHERE user_id = ?", (user_id,))
         conn.commit()
         user_status, plan_key, premium_until = "Oddiy foydalanuvchi", "", 0
 
+    # 30 kunlik bepul hisob davri pullik davrdan mustaqil ishlaydi.
     if now - created_at >= 30 * 24 * 3600 and not is_active_paid_status(user_status, premium_until):
         cursor.execute(
-            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s",
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, user_id),
         )
         conn.commit()
@@ -1225,8 +1289,7 @@ def get_premium_status(user_id: int):
         "is_teacher": is_teacher,
     }
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB (baytlarda)
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1237,9 +1300,10 @@ async def create_quiz_web(
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
+# 10 MB Fayl hajmini tekshirish
     if file:
         file_bytes = bytearray()
-        chunk_size = 1024 * 1024
+        chunk_size = 1024 * 1024  # 1 MB bo'laklar
         while chunk := await file.read(chunk_size):
             file_bytes.extend(chunk)
             if len(file_bytes) > MAX_FILE_SIZE:
@@ -1248,6 +1312,7 @@ async def create_quiz_web(
                     detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
                 )
         await file.seek(0)
+
 
     conn_check = get_db_connection()
     cursor_check = conn_check.cursor(cursor_factory=RealDictCursor)
@@ -1267,9 +1332,9 @@ async def create_quiz_web(
         thirty_days_sec = 30 * 24 * 3600
         if current_now - created_at >= thirty_days_sec:
             cursor_check.execute(
-                "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s",
-                (current_now, user_id),
-            )
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s",
+            (current_now, user_id),
+        )
             free_used = 0
 
         if (
@@ -1278,15 +1343,19 @@ async def create_quiz_web(
             and current_now > premium_until
         ):
             cursor_check.execute(
-                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = %s",
-                (user_id,),
-            )
+            "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = %s",
+            (user_id,),
+        )
 
+        # 30 kunlik bepul limit: faqat 1 ta.
+        # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
+        # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
+        # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
         if "PRO" not in current_status:
             cursor_check.execute(
                 "UPDATE users "
                 "SET free_used = COALESCE(free_used, 0) + 1 "
-                "WHERE user_id = %s AND COALESCE(free_used, 0) < %s",
+                "WHERE user_id = ? AND COALESCE(free_used, 0) < ?",
                 (user_id, FREE_QUIZ_LIMIT),
             )
             if cursor_check.rowcount != 1:
@@ -1309,30 +1378,33 @@ async def create_quiz_web(
     auto_title = "Matnli Test"
 
     if file and file.filename and len(file.filename.strip()) > 0:
+        # Faylni avval xotirada bir marta o'qiymiz va diskka faqat tekshiruvdan
+        # o'tgandan keyin yozamiz. Bu server diskini keraksiz yukdan himoya qiladi.
         original_name = Path(file.filename).name
         extension = Path(original_name).suffix.lower()
         if extension not in ALLOWED_UPLOAD_EXTENSIONS:
             if free_slot_reserved:
+                if free_slot_reserved:
                 conn_restore = get_db_connection()
                 cur_restore = conn_restore.cursor()
                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
                 conn_restore.commit()
                 conn_restore.close()
-            return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
+                return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
+            
 
         try:
-            contents = await file.read()
-            if len(contents) > MAX_UPLOAD_FILE_BYTES:
-                if free_slot_reserved:
+            if free_slot_reserved:
                     conn_restore = get_db_connection()
                     cur_restore = conn_restore.cursor()
                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
                     conn_restore.commit()
                     conn_restore.close()
-                return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
+                    return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
                     
             if contents:
                 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+                # Bir xil nomdagi fayllar foydalanuvchilar orasida ustma-ust yozilmasligi uchun unique nom.
                 file_path = os.path.join(DOWNLOADS_DIR, f"upload_{uuid.uuid4().hex}{extension}")
                 with open(file_path, "wb") as f:
                     f.write(contents)
@@ -1345,10 +1417,10 @@ async def create_quiz_web(
                         except Exception: pass
                         if free_slot_reserved:
                             conn_restore = get_db_connection()
-                            cur_restore = conn_restore.cursor()
-                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                            conn_restore.commit()
-                            conn_restore.close()
+                    cur_restore = conn_restore.cursor()
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
+                    conn_restore.commit()
+                    conn_restore.close()
                         return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
                     text_parts = []
                     text_len = 0
@@ -1361,10 +1433,10 @@ async def create_quiz_web(
                                 except Exception: pass
                                 if free_slot_reserved:
                                     conn_restore = get_db_connection()
-                                    cur_restore = conn_restore.cursor()
-                                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                                    conn_restore.commit()
-                                    conn_restore.close()
+                cur_restore = conn_restore.cursor()
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
+                conn_restore.commit()
+                conn_restore.close()
                                 return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
                             text_parts.append(page_text)
                     raw_text = "\n".join(text_parts)
@@ -1381,10 +1453,9 @@ async def create_quiz_web(
                             except Exception: pass
                             if free_slot_reserved:
                                 conn_restore = get_db_connection()
-                                cur_restore = conn_restore.cursor()
-                                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                                conn_restore.commit()
-                                conn_restore.close()
+                cur_restore = conn_restore.cursor()
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
+                conn_restore.close()
                             return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
                         text_parts.append(part)
                     raw_text = "\n".join(text_parts)
@@ -1392,13 +1463,13 @@ async def create_quiz_web(
         except Exception as e:
             logging.error(f"Professional file protection / parsing error: {e}")
             if free_slot_reserved:
-                conn_restore = get_db_connection()
-                cur_restore = conn_restore.cursor()
-                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
-                conn_restore.commit()
-                conn_restore.close()
-            return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
-
+       if free_slot_reserved:
+            conn_restore = get_db_connection()
+            cur_restore = conn_restore.cursor()
+            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
+            conn_restore.commit()
+            conn_restore.close()
+        return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
     if not raw_text.strip() and text:
         raw_text = text
         auto_text_clean = text.replace("\n", " ").strip()
@@ -1420,6 +1491,8 @@ async def create_quiz_web(
                 pass
         return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
+    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
+    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
     quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
@@ -1429,62 +1502,70 @@ async def create_quiz_web(
                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s", (user_id,))
                 conn_restore.commit()
                 conn_restore.close()
-            except Exception as e:
-                logging.error(f"Bepul limitni qaytarishda xato: {e}")
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+except Exception as e:
+        logging.error(f"Bepul limitni qaytarishda xato: {e}")
+    return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+
+try:
+    quiz_data = json.loads(quiz_json_raw)
+    items = quiz_data.get("quizzes", [])
+    # Gemini qanday joylashtirishidan qat'i nazar, javob variantlari shu yerda
+    # xavfsiz va muvozanatli random qilinadi.
+    items = randomize_quiz_answer_positions(items)
+    quiz_data["quizzes"] = items
+    if not items:
+        return {
+            "status": "error",
+            "message": "AI savollar ro'yxatini bo'sh qaytardi.",
+        }
+
+    quiz_id = f"q_{uuid.uuid4().hex}"
+    final_title = (
+        quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
+    )
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)""",
+        (
+            quiz_id,
+            user_id,
+            final_title[:30],
+            len(items),
+            0,
+            quiz_json_raw,
+            int(time.time()),
+            None,
+            None,
+        )
+    )
+    conn.commit()
+    conn.close()
+
+    if free_slot_reserved:
+        notify_free_limit_reached(user_id, "quiz")
 
     try:
-        quiz_data = json.loads(quiz_json_raw)
-        items = quiz_data.get("quizzes", [])
-        items = randomize_quiz_answer_positions(items)
-        quiz_data["quizzes"] = items
-        if not items:
-            return {
-                "status": "error",
-                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
-            }
-
-        quiz_id = f"q_{uuid.uuid4().hex}"
-        final_title = (
-            quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
+        q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
+            title=final_title[:30],
+            count=len(items)
         )
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)""",
-            (
-                quiz_id,
-                user_id,
-                final_title[:30],
-                len(items),
-                0,
-                json.dumps(quiz_data),
-                int(time.time()),
-                -1,
-                -1,
-            )
-        )
-        conn.commit()
-        conn.close()
-
-        if free_slot_reserved:
-            notify_free_limit_reached(user_id, "quiz")
-
-        try:
-            q_ready_msg = MESSAGES[user_lang]["quiz_ready"].format(
-                title=final_title[:30],
-                count=len(items)
-            )
-            bot.send_message(user_id, q_ready_msg)
-        except Exception as e:
-            logging.error(f"Telegram xabari yuborilmadi: {e}")
-        return {"status": "ok"}
+        bot.send_message(user_id, q_ready_msg)
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        logging.error(f"Telegram xabari yuborilmadi: {e}")
+    return {"status": "ok"}
+except Exception as e:
+    return {"status": "error", "message": str(e)}
+
 
 def randomize_quiz_answer_positions(items):
+    """
+    AI tomonidan berilgan variantlarni xavfsiz aralashtiradi va correct_index ni
+    yangi joylashuvga moslaydi. To'g'ri javob mazmuni o'zgarmaydi.
+    Savollar ko'p bo'lsa A/B/C/D pozitsiyalari muvozanatli taqsimlanadi.
+    """
     if not isinstance(items, list) or not items:
         return items
 
@@ -1505,6 +1586,7 @@ def randomize_quiz_answer_positions(items):
         if correct_index < 0 or correct_index >= len(options):
             correct_index = 0
 
+        # Indeks bilan ishlash bir xil matnli variantlarda ham to'g'ri javobni saqlaydi.
         correct_pair = (correct_index, options[correct_index])
         other_pairs = [(i, value) for i, value in enumerate(options) if i != correct_index]
         secrets.SystemRandom().shuffle(other_pairs)
@@ -1518,6 +1600,14 @@ def randomize_quiz_answer_positions(items):
     return items
 
 def generate_quiz_from_gemini(extracted_text):
+    """
+    Professional AI Queue + Retry + Timeout + Concurrency Protection.
+    API Key Rotation va Gemini 2.5 Flash saqlanadi.
+
+    Muhim: katta testlarni avvalgi 203 savolli ishlagan versiyadek yaratish
+    uchun request 90 soniyada majburan to'xtatilmaydi. Timeout nazorati
+    umumiy jarayonni kuzatadi va katta so'rovlar uchun yetarli vaqt beradi.
+    """
     global current_key_index
 
     if not GOOGLE_API_KEYS:
@@ -1529,6 +1619,8 @@ CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
 2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
 
+    # Queue: 150 tagacha bir vaqtning o'zida kelgan foydalanuvchi so'rovini
+    # xavfsiz boshqaradi. Katta test uchun kutish vaqti umumiy timeoutga mos.
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
         logging.error("AI Queue kutish vaqti tugadi")
         return None
@@ -1542,6 +1634,8 @@ CRITICAL RULES:
         deadline = time.monotonic() + AI_TOTAL_TIMEOUT
         last_error = None
 
+        # Har bir key bo'yicha retry qilinadi, keylar esa eski versiyadagi
+        # kabi ketma-ket fallback sifatida sinab ko'riladi.
         for retry_round in range(AI_RETRY_PER_KEY):
             for offset in range(total_keys):
                 if time.monotonic() >= deadline:
@@ -1557,6 +1651,8 @@ CRITICAL RULES:
                 if remaining <= 0:
                     return None
 
+                # Faqat haqiqiy Gemini chaqiruvi concurrent limit ostida.
+                # Queue slot esa butun foydalanuvchi jarayonini boshqaradi.
                 if not gemini_semaphore.acquire(timeout=remaining):
                     last_error = "Gemini concurrency kutish vaqti tugadi"
                     continue
@@ -1599,6 +1695,8 @@ CRITICAL RULES:
                 finally:
                     gemini_semaphore.release()
 
+                # Exponential backoff: faqat xatodan keyin, server/APIga
+                # ortiqcha bosim bermasdan.
                 if time.monotonic() < deadline:
                     time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
 
@@ -1607,8 +1705,17 @@ CRITICAL RULES:
     finally:
         ai_queue_slots.release()
 
+
 @app.post("/api/contact-admin")
 async def api_contact_admin(request: Request):
+    """Start an admin-support conversation from the Mini App.
+
+    The frontend calls this endpoint instead of relying on Telegram
+    WebApp.sendData(), which is not reliable for every Mini App launch mode.
+    The bot sends the support prompt directly to the user's private chat;
+    the next text message is then forwarded to ADMIN_ID by the existing
+    support handler.
+    """
     try:
         data = await request.json()
         user_id = int(data.get("user_id") or 0)
@@ -1633,11 +1740,13 @@ async def api_contact_admin(request: Request):
         logging.exception(f"Admin bilan bog'lanish API xatosi: {e}")
         raise HTTPException(status_code=500, detail="contact_admin_failed")
 
+
 @app.get("/api/heartbeat")
 def user_heartbeat(user_id: int):
     add_user_to_db(user_id)
     update_user_activity(user_id)
     return {"status": "ok", "active_users": get_users_count()}
+
 
 @app.get("/api/quizzes")
 def get_user_quizzes(user_id: int):
@@ -1674,6 +1783,7 @@ def get_user_quizzes(user_id: int):
         "user_lang": user_lang,
     }
 
+
 @app.get("/api/public-quizzes")
 def get_public_quizzes(user_id: int):
     add_user_to_db(user_id)
@@ -1686,6 +1796,7 @@ def get_public_quizzes(user_id: int):
     u = cursor.fetchone()
     now = int(time.time())
     
+    # psycopg2 da fetchone() tuple qaytaradi: u[0]=status, u[1]=plan_key, u[2]=premium_until, u[3]=public_free_used, u[4]=created_at
     u_created_at = u[4] if u and u[4] else now
     u_status = u[0] if u else ""
     u_premium_until = u[2] if u else 0
@@ -1717,6 +1828,7 @@ def get_public_quizzes(user_id: int):
         }
         for r in rows
     ]
+    ]
     return {
         "status": "ok",
         "quizzes": quizzes,
@@ -1725,6 +1837,8 @@ def get_public_quizzes(user_id: int):
         "public_remaining": public_remaining,
         "public_limit": FREE_PUBLIC_LIMIT,
     }
+
+
 
 @app.get("/api/public-quiz-detail")
 def get_public_quiz_detail(quiz_id: str, user_id: int):
@@ -1756,39 +1870,1616 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
     is_paid = bool(u and is_active_paid_status(u_status, u_premium_until))
     public_remaining = max(0, FREE_PUBLIC_LIMIT - public_free_used)
 
-    if not is_paid and public_remaining <= 0:
-        conn.close()
-        user_lang = get_user_lang(user_id)
-        return {
-            "status": "error",
-            "error_code": "free_public_limit",
-            "message": MESSAGES[user_lang]["public_limit_reached"],
-        }
-
-    cursor.execute("SELECT id, title, total, quiz_json FROM quizzes WHERE id = %s AND is_public = 1", (quiz_id,))
-    q_row = cursor.fetchone()
-    if not q_row:
-        conn.close()
-        return {"status": "error", "message": "Ommaviy test topilmadi."}
-
-    if not is_paid:
-        cursor.execute("UPDATE users SET public_free_used = public_free_used + 1 WHERE user_id = %s", (user_id,))
+    cursor.execute(
+        "SELECT id, user_id, title, total, answered, quiz_json, is_public FROM quizzes WHERE id = %s",
+        (quiz_id,),
+    )
+    q = cursor.fetchone()
+    conn.close()
+    # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
+    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
+        cursor.execute(
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
+            (now, user_id),
+        )
         conn.commit()
-        notify_free_limit_reached(user_id, "public")
+        public_free_used = 0
+    else:
+        public_free_used = (u["public_free_used"] or 0) if u else 0
 
+    # Premium / Teacher: cheksiz.
+    if not is_paid:
+        cursor.execute(
+            "UPDATE users SET public_free_used = COALESCE(public_free_used, 0) + 1 "
+            "WHERE user_id = ? AND COALESCE(public_free_used, 0) < ?",
+            (user_id, FREE_PUBLIC_LIMIT),
+        )
+        if cursor.rowcount != 1:
+            conn.close()
+            lang = get_user_lang(user_id)
+            messages = {
+                "uz": MESSAGES["uz"]["public_limit_reached"],
+                "ru": MESSAGES["ru"]["public_limit_reached"],
+                "en": MESSAGES["en"]["public_limit_reached"],
+            }
+            return {
+                "status": "error",
+                "error_code": "public_limit",
+                "message": messages.get(lang, messages["uz"]),
+            }
+        conn.commit()
+        if not is_paid:
+            notify_free_limit_reached(user_id, "public")
+cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = %s", (quiz_id,))
+    row = cursor.fetchone()
     conn.close()
 
-    try:
-        data = json.loads(q_row[3])
-    except Exception:
-        data = {}
+    if not row or row[2] != 1:
+        raise HTTPException(status_code=404, detail=teacher_text(user_id, "quiz_not_found"))
+    return {"status": "ok", "title": row[0] or "Test", "quiz_json": json.loads(row[1])}
 
+
+@app.post("/api/toggle-public")
+def toggle_public(quiz_id: str, user_id: int, is_public: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE quizzes SET is_public = %s WHERE id = %s AND user_id = %s",
+        (is_public, quiz_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+@app.post("/api/set-language")
+def set_language(user_id: int, lang: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET language = %s WHERE user_id = %s", (lang, user_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+
+# --- O'QITUVCHI PROFESSIONAL VOSITALARI ---
+TEACHER_VARIANT_CODES = ("A", "B", "C", "D")
+
+def _load_quiz_items(quiz_id: str, owner_id: int):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = %s AND user_id = %s", (quiz_id, owner_id))
+        return cur.fetchone()
+    row = teacher_db_read(_read)
+    if not row:
+        raise HTTPException(status_code=404, detail=teacher_text(owner_id, "quiz_not_found"))
+    try:
+        data = json.loads(row[2])
+    except Exception:
+        raise HTTPException(status_code=500, detail=teacher_text(owner_id, "quiz_data_broken"))
+    if not items:
+        raise HTTPException(status_code=400, detail=teacher_text(owner_id, "quiz_questions_missing"))
+    return row, items
+
+def _make_variant(items, variant_code: str):
+    """Variantlar bir-biridan farqli bo'lishi uchun savollar va variantlar deterministik aralashtiriladi."""
+    code_index = TEACHER_VARIANT_CODES.index(variant_code)
+    result = deepcopy(items)
+    # Har bir variant uchun turlicha, lekin takrorlanadigan seed.
+    rng = random.Random(f"QuizPilot:{variant_code}:{len(items)}:{json.dumps(items, ensure_ascii=False, sort_keys=True)}")
+    # Variant B/C/D savollar tartibini ham o'zgartiradi; A ham originaldan ko'chirma emas.
+    if code_index:
+        rng.shuffle(result)
+    elif len(result) > 1:
+        # A variantda ham testni biroz qayta tartiblaymiz, ammo keyin javob kaliti aniq saqlanadi.
+        rng.shuffle(result)
+    for item in result:
+        options = list(item.get("options") or [])[:4]
+        correct = int(item.get("correct_index", 0))
+        pairs = list(enumerate(options))
+        # Har variantda variantlar tartibi ham aralashadi.
+        rng.shuffle(pairs)
+        new_options = [p[1] for p in pairs]
+        new_correct = next((i for i, p in enumerate(pairs) if p[0] == correct), 0)
+        item["options"] = new_options
+        item["correct_index"] = new_correct
+    return {"variant": variant_code, "quizzes": result}
+
+
+class TeacherVariantsRequest(BaseModel):
+    user_id: int
+    quiz_id: str
+    variants: List[str] = Field(default_factory=lambda: ["A", "B", "C", "D"])
+
+
+@app.post("/api/teacher/generate-variants")
+def teacher_generate_variants(req: TeacherVariantsRequest):
+    require_teacher(req.user_id)
+    row, items = _load_quiz_items(req.quiz_id, req.user_id)
+    requested = []
+    for code in req.variants:
+        code = str(code).strip().upper()
+        if code in TEACHER_VARIANT_CODES and code not in requested:
+            requested.append(code)
+    if not requested:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "select_quiz_variant"))
+
+    conn = teacher_db_connect()
+    cur = conn.cursor()
+    now = int(time.time())
+    result = []
+    for code in requested:
+        variant = _make_variant(items, code)
+        payload_json = json.dumps(variant, ensure_ascii=False)
+        cur.execute("SELECT id FROM teacher_variants WHERE quiz_id=? AND variant_code=? ORDER BY id LIMIT 1", (req.quiz_id, code))
+        existing_variant = cur.fetchone()
+        if existing_variant:
+            cur.execute("UPDATE teacher_variants SET variant_json=?, created_at=? WHERE id=?", (payload_json, now, existing_variant[0]))
+        else:
+            cur.execute("INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (?, ?, ?, ?)", (req.quiz_id, code, payload_json, now))
+        result.append({"variant": code, "question_count": len(variant["quizzes"])})
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "quiz_id": req.quiz_id, "title": row["title"], "variants": result}
+
+
+@app.get("/api/teacher/variants")
+def teacher_list_variants(user_id: int, quiz_id: str):
+    require_teacher(user_id)
+    _load_quiz_items(quiz_id, user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id = %s ORDER BY variant_code", (quiz_id,))
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
+    return {"status": "ok", "variants": [{"variant_code": r[0], "created_at": r[1]} for r in rows]}
+
+def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
+    _load_quiz_items(quiz_id, owner_id)
+    code = (variant_code or "A").strip().upper()
+    if code not in TEACHER_VARIANT_CODES:
+        raise HTTPException(status_code=400, detail=teacher_text(owner_id, "variant_required"))
+    
+    def _read_var(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT variant_json FROM teacher_variants WHERE quiz_id = %s AND variant_code = %s", (quiz_id, code))
+        return cur.fetchone()
+    
+    row = teacher_db_read(_read_var)
+    if row:
+        return json.loads(row[0])
+    
+    _, items = _load_quiz_items(quiz_id, owner_id)
+    variant = _make_variant(items, code)
+    
+    def _write_var(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (%s, %s, %s, %s) ON CONFLICT (quiz_id, variant_code) DO UPDATE SET variant_json = EXCLUDED.variant_json",
+            (quiz_id, code, json.dumps(variant, ensure_ascii=False), int(time.time()))
+        )
+    
+    teacher_db_write(_write_var)
+    return variant
+
+
+class TeacherGroupCreateRequest(BaseModel):
+    user_id: int
+    name: str
+    description: str = ""
+
+
+class TeacherGroupJoinRequest(BaseModel):
+    group_id: str = ""
+    join_code: str = ""
+    user_id: int
+    first_name: str = ""
+    username: str = ""
+
+
+def _new_group_code(conn, length=6):
+    "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    for _ in range(50):
+        code = "".join(secrets.choice(alphabet) for _ in range(length))
+        row = conn.execute("SELECT 1 FROM teacher_groups WHERE join_code=? LIMIT 1", (code,)).fetchone()
+        if not row:
+            return code
+    raise HTTPException(status_code=500, detail="__TEACHER_SERVER_ERROR__")
+
+
+@app.post("/api/teacher/groups")
+def teacher_create_group(req: TeacherGroupCreateRequest):
+    require_teacher(req.user_id)
+    name = (req.name or "").strip()[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_name_required"))
+    gid = f"tg_{uuid.uuid4().hex[:10]}"
+    now = int(time.time())
+    description = (req.description or "")[:500]
+    def _write(conn):
+        code = _new_group_code(conn)
+        conn.execute(
+            "INSERT INTO teacher_groups (id,owner_id,name,description,join_code,created_at,active) VALUES (?,?,?,?,?,?,1)",
+            (gid, req.user_id, name, description, code, now),
+        )
+        return code
+    code = teacher_db_write(_write)
+    return {"status":"ok", "group_id":gid, "name":name, "join_code":code}
+
+@app.get("/api/teacher/groups")
+def teacher_groups(user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT g.id, g.name, g.description, g.join_code, g.created_at, g.active, COUNT(m.id) AS member_count "
+            "FROM teacher_groups g LEFT JOIN teacher_group_members m ON m.group_id = g.id "
+            "WHERE g.owner_id = %s AND g.active = 1 GROUP BY g.id ORDER BY g.created_at DESC",
+            (user_id,),
+        )
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
     return {
         "status": "ok",
-        "quiz": {
-            "id": q_row[0],
-            "title": q_row[1],
-            "total": q_row[2],
-            "quizzes": data.get("quizzes", []),
-        }
+        "groups": [
+            {
+                "id": r[0],
+                "name": r[1],
+                "description": r[2],
+                "join_code": r[3],
+                "created_at": r[4],
+                "active": r[5],
+                "member_count": r[6],
+            }
+            for r in rows
+        ],
     }
+
+@app.post("/api/teacher/groups/join")
+def teacher_join_group(req: TeacherJoinRequest):
+    code = (req.join_code or "").strip().upper().replace(" ", "")
+    group_id = (req.group_id or "").strip()
+    
+    def _write(conn):
+        cur = conn.cursor()
+        if code:
+            cur.execute("SELECT id, name, active FROM teacher_groups WHERE join_code = %s", (code,))
+        elif group_id:
+            cur.execute("SELECT id, name, active FROM teacher_groups WHERE id = %s", (group_id,))
+        else:
+            raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_code_required"))
+        
+        row = cur.fetchone()
+        if not row or not row[2]:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+        
+        g_id, g_name = row[0], row[1]
+        now = int(time.time())
+        cur.execute(
+            "INSERT INTO teacher_group_members (group_id, user_id, first_name, username, joined_at) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (group_id, user_id) DO NOTHING",
+            (g_id, req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
+        )
+        return {"id": g_id, "name": g_name}
+    
+    group_info = teacher_db_write(_write)
+    return {"status": "ok", "group_id": group_info["id"], "group_name": group_info["name"]}
+@app.get("/api/teacher/my-groups")
+def teacher_my_groups(user_id: int):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT g.id, g.name, g.description, g.join_code, g.created_at, m.joined_at "
+            "FROM teacher_group_members m JOIN teacher_groups g ON g.id = m.group_id "
+            "WHERE m.user_id = %s AND g.active = 1 ORDER BY m.joined_at DESC",
+            (user_id,),
+        )
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
+    return {
+        "status": "ok",
+        "groups": [
+            {
+                "id": r[0],
+                "name": r[1],
+                "description": r[2],
+                "join_code": r[3],
+                "created_at": r[4],
+                "joined_at": r[5],
+            }
+            for r in rows
+        ],
+    }
+
+@app.get("/api/teacher/group-members")
+def teacher_group_members(group_id: str, user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT g.id, g.name FROM teacher_groups g WHERE g.id = %s AND g.owner_id = %s", (group_id, user_id))
+        g = cur.fetchone()
+        if not g:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
+        
+        cur.execute("SELECT user_id, first_name, username, joined_at FROM teacher_group_members WHERE group_id = %s ORDER BY joined_at", (group_id,))
+        members = cur.fetchall()
+        return {"id": g[0], "name": g[1]}, members
+    
+    group_info, members = teacher_db_read(_read)
+    return {
+        "status": "ok",
+        "group": {"id": group_info[0], "name": group_info[1]},
+        "members": [
+            {
+                "user_id": m[0],
+                "first_name": m[1],
+                "username": m[2],
+                "joined_at": m[3],
+            }
+            for m in members
+        ],
+    }
+
+@app.delete("/api/teacher/groups/{group_id}")
+def teacher_delete_group(group_id: str, user_id: int):
+    require_teacher(user_id)
+    def _write(conn):
+        cur = conn.cursor()
+        cur.execute("UPDATE teacher_groups SET active = 0 WHERE id = %s AND owner_id = %s", (group_id, user_id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
+    teacher_db_write(_write)
+    return {"status": "ok"}
+
+class TeacherAssignmentCreateRequest(BaseModel):
+    user_id: int
+    group_id: str
+    quiz_id: str
+    variant_code: str = ""
+    title: str = ""
+    due_at: int = 0
+    duration_minutes: int = 30
+
+
+@app.post("/api/teacher/assignments")
+def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
+    require_teacher(req.user_id)
+    group_id=(req.group_id or "").strip(); quiz_id=(req.quiz_id or "").strip()
+    if not group_id or not quiz_id:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_required"))
+    code=(req.variant_code or "").strip().upper()
+    duration = max(5, min(int(req.duration_minutes or 30), 180))
+    if code and code not in TEACHER_VARIANT_CODES:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
+    if code:
+        _get_teacher_variant(quiz_id,req.user_id,code)
+    def _write(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM teacher_groups WHERE id = %s AND owner_id = %s AND active = 1", (group_id, req.user_id))
+        group = cur.fetchone()
+        cur.execute("SELECT id, title FROM quizzes WHERE id = %s AND user_id = %s", (quiz_id, req.user_id))
+        quiz = cur.fetchone()
+        
+        if not group:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+        if not quiz:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "quiz_not_found"))
+        
+        aid = f"ta_{uuid.uuid4().hex[:10]}"
+        now = int(time.time())
+        title = (req.title or "").strip()[:150] or quiz[1]
+        due_at = max(0, int(req.due_at or 0))
+        
+        cur.execute(
+            "INSERT INTO teacher_assignments (id, owner_id, group_id, quiz_id, variant_code, title, due_at, duration_minutes, created_at, active) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1)",
+            (aid, req.user_id, group_id, quiz_id, code, title, due_at, duration, now)
+        )
+        return {"id": aid, "group_id": group_id, "quiz_id": quiz_id, "variant_code": code, "title": title, "due_at": due_at, "duration_minutes": duration, "created_at": now}
+    
+    assignment = teacher_db_write(_write)
+    return {"status": "ok", "assignment": assignment}
+
+@app.get("/api/teacher/assignments")
+def teacher_assignments(user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT a.id, a.group_id, a.quiz_id, a.variant_code, a.title, a.due_at, "
+            "COALESCE(a.duration_minutes, 30) AS duration_minutes, a.created_at, "
+            "g.name AS group_name, q.title AS quiz_title "
+            "FROM teacher_assignments a "
+            "JOIN teacher_groups g ON g.id = a.group_id "
+            "JOIN quizzes q ON q.id = a.quiz_id "
+            "WHERE a.owner_id = %s AND a.active = 1 ORDER BY a.created_at DESC",
+            (user_id,)
+        )
+        return cur.fetchall()
+
+    rows = teacher_db_read(_read)
+    return {
+        "status": "ok",
+        "assignments": [
+            {
+                "id": r[0],
+                "group_id": r[1],
+                "quiz_id": r[2],
+                "variant_code": r[3],
+                "title": r[4],
+                "due_at": r[5],
+                "duration_minutes": r[6],
+                "created_at": r[7],
+                "group_name": r[8],
+                "quiz_title": r[9],
+            }
+            for r in rows
+        ],
+    def teacher_delete_assignment(assignment_id: str, user_id: int):
+    require_teacher(user_id)
+    def _write(conn):
+        cur = conn.cursor()
+        cur.execute("UPDATE teacher_assignments SET active = 0 WHERE id = %s AND owner_id = %s", (assignment_id, user_id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "assignment_not_found"))
+    teacher_db_write(_write)
+    return {"status": "ok"}
+@app.get("/api/teacher/export-assignment")
+def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT a.*, g.name AS group_name, q.title AS quiz_title "
+            "FROM teacher_assignments a "
+            "JOIN teacher_groups g ON g.id = a.group_id "
+            "LEFT JOIN quizzes q ON q.id = a.quiz_id "
+            "WHERE a.id = %s AND a.owner_id = %s",
+            (assignment_id, user_id)
+        )
+        return cur.fetchone()
+    
+    assignment = teacher_db_read(_read)
+    if not assignment:
+        raise HTTPException(status_code=404, detail=teacher_text(user_id, "assignment_not_found"))
+    return teacher_export_quiz(assignment[2], user_id, format, assignment[4] or "A", 0)
+
+@app.get("/api/teacher/export-quiz")
+def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = "A", all_variants: int = 0):
+    require_teacher(user_id)
+    row, items = _load_quiz_items(quiz_id, user_id)
+    fmt = format.lower().strip()
+    codes = list(TEACHER_VARIANT_CODES) if int(all_variants) else [variant.upper()]
+    for c in codes:
+        if c not in TEACHER_VARIANT_CODES: raise HTTPException(status_code=400, detail=teacher_text(user_id, "variant_required"))
+
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", row["title"] or "quiz")[:40]
+    variant_payloads = [(c, _get_teacher_variant(quiz_id, user_id, c)) for c in codes]
+
+    def answer_key(payload):
+        return [chr(65 + int(q.get("correct_index", 0))) for q in payload.get("quizzes", [])]
+
+    if fmt == "xlsx":
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.xlsx")
+        wb=Workbook(); ws=wb.active; ws.title="Testlar"
+        ws.append(["Variant","№","Savol","A","B","C","D","To'g'ri javob"])
+        for code,payload in variant_payloads:
+            for i,q in enumerate(payload.get("quizzes",[]),1):
+                opts=(q.get("options") or [])+['','','','']
+                ws.append([code,i,q.get("question",""),opts[0],opts[1],opts[2],opts[3],chr(65+int(q.get("correct_index",0)))])
+        ws.freeze_panes="A2"; wb.save(path)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    if fmt == "docx":
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.docx")
+        doc=Document(); doc.add_heading(row["title"], level=1); doc.add_paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes))
+        for code,payload in variant_payloads:
+            doc.add_heading(f"Variant {code}", level=2)
+            for i,q in enumerate(payload.get("quizzes",[]),1):
+                doc.add_paragraph(f"{i}. {q.get('question','')}")
+                opts=(q.get("options") or [])+['','','','']
+                for j in range(4): doc.add_paragraph(f"{chr(65+j)}) {opts[j]}", style=None)
+            doc.add_paragraph("Javoblar: " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))))
+        doc.save(path)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    if fmt == "pdf":
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.pdf")
+        reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
+        doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
+        styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
+        story=[Paragraph(row["title"],title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
+        for code,payload in variant_payloads:
+            story.append(Paragraph(f"<b>Variant {code}</b>", q_style)); story.append(Spacer(1,5))
+            for i,q in enumerate(payload.get("quizzes",[]),1):
+                story.append(Paragraph(f"{i}. {q.get('question','')}",q_style))
+                opts=(q.get("options") or [])+['','','','']
+                for j in range(4): story.append(Paragraph(f"{chr(65+j)}) {opts[j]}",q_style))
+                story.append(Spacer(1,4))
+            story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
+        doc.build(story)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+    raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
+
+
+# --- O'QITUVCHI GURUH REJIMI ---
+# --- Teacher DB: barqaror ulanish va SQLite lock himoyasi ---
+def _ensure_teacher_schema(conn):
+    """Teacher jadvallarini Railway'dagi eski SQLite bazalari bilan ham moslaydi.
+
+    Oldingi Teacher versiyalarida jadvallar qisman yaratilgan bo'lishi mumkin edi.
+    CREATE TABLE IF NOT EXISTS bunday jadvalni yangilamaydi, shuning uchun bu yerda
+    kerakli ustunlar birma-bir tekshiriladi va yetishmaganlari xavfsiz qo'shiladi.
+    Bu faqat teacher_* jadvallariga taalluqli.
+    """
+    table_defs = {
+        "teacher_variants": {
+            "id": "INTEGER",
+            "quiz_id": "TEXT",
+            "variant_code": "TEXT",
+            "variant_json": "TEXT",
+            "created_at": "INTEGER",
+        },
+        "teacher_groups": {
+            "id": "TEXT",
+            "owner_id": "INTEGER",
+            "name": "TEXT",
+            "description": "TEXT",
+            "created_at": "INTEGER",
+            "active": "INTEGER",
+        },
+        "teacher_group_members": {
+            "id": "INTEGER",
+            "group_id": "TEXT",
+            "user_id": "INTEGER",
+            "first_name": "TEXT",
+            "username": "TEXT",
+            "joined_at": "INTEGER",
+        },
+        "teacher_assignments": {
+            "id": "TEXT",
+            "owner_id": "INTEGER",
+            "group_id": "TEXT",
+            "quiz_id": "TEXT",
+            "variant_code": "TEXT",
+            "title": "TEXT",
+            "due_at": "INTEGER",
+            "duration_minutes": "INTEGER",
+            "created_at": "INTEGER",
+            "active": "INTEGER",
+        },
+        "teacher_sessions": {
+            "id": "TEXT",
+            "owner_id": "INTEGER",
+            "teacher_id": "INTEGER",
+            "quiz_id": "TEXT",
+            "code": "TEXT",
+            "title": "TEXT",
+            "duration_minutes": "INTEGER",
+            "created_at": "INTEGER",
+            "expires_at": "INTEGER",
+            "active": "INTEGER",
+            "group_id": "TEXT",
+            "variant_code": "TEXT",
+            "deleted": "INTEGER",
+            "source_type": "TEXT",
+            "assignment_id": "TEXT",
+        },
+        "teacher_participants": {
+            "id": "INTEGER",
+            "session_id": "TEXT",
+            "user_id": "INTEGER",
+            "first_name": "TEXT",
+            "username": "TEXT",
+            "score": "INTEGER",
+            "total": "INTEGER",
+            "percent": "INTEGER",
+            "started_at": "INTEGER",
+            "finished_at": "INTEGER",
+        },
+    }
+
+    # Avval jadvalning o'zi mavjudligini kafolatlaymiz.
+    create_sql = {
+        "teacher_variants": """CREATE TABLE IF NOT EXISTS teacher_variants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            quiz_id TEXT NOT NULL, variant_code TEXT NOT NULL,
+            variant_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+            UNIQUE(quiz_id, variant_code))""",
+        "teacher_groups": """CREATE TABLE IF NOT EXISTS teacher_groups (
+            id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, name TEXT NOT NULL,
+            description TEXT DEFAULT '', created_at INTEGER NOT NULL,
+            active INTEGER DEFAULT 1)""",
+        "teacher_group_members": """CREATE TABLE IF NOT EXISTS teacher_group_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL, first_name TEXT DEFAULT '',
+            username TEXT DEFAULT '', joined_at INTEGER NOT NULL,
+            UNIQUE(group_id, user_id))""",
+        "teacher_assignments": """CREATE TABLE IF NOT EXISTS teacher_assignments (
+            id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, group_id TEXT NOT NULL,
+            quiz_id TEXT NOT NULL, variant_code TEXT DEFAULT '', title TEXT DEFAULT '',
+            due_at INTEGER DEFAULT 0, duration_minutes INTEGER DEFAULT 30, created_at INTEGER NOT NULL,
+            active INTEGER DEFAULT 1)""",
+        "teacher_sessions": """CREATE TABLE IF NOT EXISTS teacher_sessions (
+            id TEXT PRIMARY KEY, owner_id INTEGER, teacher_id INTEGER, quiz_id TEXT, code TEXT UNIQUE,
+            title TEXT DEFAULT '', duration_minutes INTEGER DEFAULT 30, created_at INTEGER,
+            expires_at INTEGER, active INTEGER DEFAULT 1,
+            group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '', deleted INTEGER DEFAULT 0,
+            source_type TEXT DEFAULT 'group_test', assignment_id TEXT DEFAULT '')""",
+        "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, user_id INTEGER,
+            first_name TEXT, username TEXT, score INTEGER DEFAULT 0,
+            total INTEGER DEFAULT 0, percent INTEGER DEFAULT 0,
+            started_at INTEGER, finished_at INTEGER,
+            UNIQUE(session_id, user_id))""",
+    }
+    for name, ddl in create_sql.items():
+        conn.execute(ddl)
+
+    # Eski jadvallarga yetishmayotgan ustunlarni qo'shamiz.
+    for table, columns in table_defs.items():
+        cur = conn.cursor()
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))
+        existing = {r[0] for r in cur.fetchall()}
+        for col, typ in columns.items():
+            if col in existing:
+                continue
+            try:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+                logging.info("Teacher DB migration: %s.%s qo'shildi", table, col)
+            except Exception as e:
+                logging.warning("Teacher DB migration %s.%s: %s", table, col, e)
+
+    id_prefixes = {
+        "teacher_groups": "tg_migrated_",
+        "teacher_assignments": "ta_migrated_",
+        "teacher_sessions": "ts_migrated_",
+    }
+    for table, prefix in id_prefixes.items():
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))
+            cols = {r[0] for r in cur.fetchall()}
+            if "id" in cols:
+                cur.execute(
+                    f"UPDATE {table} SET id = %s || rowid::text WHERE id IS NULL OR TRIM(CAST(id AS TEXT)) = ''",
+                    (prefix,)
+                )
+        except Exception as e:
+            logging.warning("ID migration warning for %s: %s", table, e)
+
+    # Eski Railway bazasida teacher_sessions.teacher_id mavjud bo'lsa,
+    # owner_id bilan bir xil qiymatga to'ldiramiz. Bu yangi endpointlar va
+    # eski sessiyalarni bir xil sxemada ishlashini ta'minlaydi.
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'teacher_sessions'")
+        session_cols = {r[0] for r in cur.fetchall()}
+        if "teacher_id" in session_cols and "owner_id" in session_cols:
+            cur.execute("UPDATE teacher_sessions SET teacher_id = owner_id WHERE teacher_id IS NULL")
+    except Exception as e:
+        logging.warning("Teacher DB teacher_id repair: %s", e)
+    # NULL qiymatlar endpointlar ishlashiga xalaqit bermasin.
+    null_defaults = {
+        "teacher_groups": {"description": "", "active": 1},
+        "teacher_assignments": {"variant_code": "", "title": "", "due_at": 0, "active": 1},
+        "teacher_sessions": {"group_id": "", "variant_code": "", "active": 1, "deleted": 0},
+        "teacher_participants": {"first_name": "", "username": "", "score": 0, "total": 0, "percent": 0, "started_at": 0, "finished_at": 0},
+    }
+    for table, values in null_defaults.items():
+        for col, value in values.items():
+            try:
+                cur = conn.cursor()
+                cur.execute(f"UPDATE {table} SET {col} = %s WHERE {col} IS NULL", (value,))
+            except Exception as e:
+                logging.warning("Teacher DB default repair %s.%s: %s", table, col, e)
+
+    conn.commit()
+
+
+_teacher_schema_checked = False
+
+def teacher_db_connect():
+    """Teacher uchun PostgreSQL ulanishi."""
+    global _teacher_schema_checked
+    conn = get_db_connection()
+    try:
+        if not _teacher_schema_checked:
+            _ensure_teacher_schema(conn)
+            conn.commit()
+            _teacher_schema_checked = True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        conn.close()
+        raise
+    return conn
+def teacher_db_read(work, attempts=6):
+    """Teacher o'qish so'rovlarini avtomatik qayta urinadi."""
+    last_error = None
+    for attempt in range(attempts):
+        conn = None
+        try:
+            conn = teacher_db_connect()
+            result = work(conn)
+            conn.close()
+            return result
+        except Exception as e:
+            last_error = e
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            time.sleep(0.3 * (attempt + 1))
+    raise last_error
+
+def teacher_db_write(work, attempts=6):
+    """Teacher yozish so'rovlarini avtomatik qayta urinadi."""
+    last_error = None
+    for attempt in range(attempts):
+        conn = None
+        try:
+            conn = teacher_db_connect()
+            result = work(conn)
+            conn.commit()
+            conn.close()
+            return result
+        except Exception as e:
+            last_error = e
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    conn.close()
+                except Exception:
+            pass
+        time.sleep(0.4 * (attempt + 1))
+    raise last_error
+
+def teacher_db_write(work, attempts=6):
+    """Teacher yozish so'rovlarini avtomatik qayta urinadi."""
+    last_error = None
+    for attempt in range(attempts):
+        conn = None
+        try:
+            conn = teacher_db_connect()
+            result = work(conn)
+            conn.commit()
+            conn.close()
+            return result
+        except Exception as e:
+            last_error = e
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                except Exception:
+            pass
+        time.sleep(0.4 * (attempt + 1))
+    raise last_error
+
+TEACHER_MESSAGES = {
+    "uz": {
+        "quiz_data_broken": "Test ma’lumotlari buzilgan.",
+        "quiz_questions_missing": "Test savollari mavjud emas.",
+        "variant_required": "A, B, C yoki D variantidan foydalaning.",
+        "group_required": "Guruh va testni tanlang.",
+        "select_group": "Avval guruhni tanlang.",
+        "assignment_not_found": "Topshiriq topilmadi.",
+        "session_expired": "Sessiya muddati tugagan.",
+        "format_invalid": "Fayl formati noto‘g‘ri.",
+
+        "teacher_plan_required": "O‘qituvchi tarifini faollashtiring.",
+        "group_name_required": "Guruh nomini kiriting.",
+        "group_created": "Guruh yaratildi.",
+        "group_not_found": "Guruh topilmadi.",
+        "groups_empty": "Hozircha guruhlar yo‘q.",
+        "members_count": "a’zo",
+        "active": "Faol", "closed": "Yopiq",
+        "delete": "O‘chirish",
+        "assignment_created": "Topshiriq guruhga biriktirildi.",
+        "assignment_empty": "Hozircha topshiriqlar yo‘q.",
+        "select_group_quiz": "Guruh va testni tanlang.",
+        "variant_invalid": "A, B, C yoki D variantidan foydalaning.",
+        "variants_ready": "Variantlar tayyorlandi. Har bir variant uchun test kaliti saqlandi.",
+        "select_quiz_variant": "Test va kamida bitta variantni tanlang.",
+        "session_created": "Sessiya yaratildi.",
+        "no_results": "Hali natijalar yo‘q.",
+        "no_students_results": "Hali o‘quvchilar natijasi yo‘q.",
+        "server_error": "Serverda ichki xatolik yuz berdi. Iltimos, qayta urinib ko‘ring.",
+        "db_busy": "Server ma’lumotlar bazasi band. Bir necha soniyadan so‘ng qayta urinib ko‘ring.",
+        "quiz_not_found": "Test topilmadi.",
+        "session_not_found": "Sessiya topilmadi.",
+        "session_already_completed": "Bu testni siz allaqachon yakunlagansiz. Qayta kirish mumkin emas.",
+        "test_first": "Avval test yarating.",
+        "copy_link": "Havolani nusxalash",
+    },
+    "ru": {
+        "quiz_data_broken": "Данные теста повреждены.",
+        "quiz_questions_missing": "В тесте нет вопросов.",
+        "variant_required": "Используйте вариант A, B, C или D.",
+        "group_required": "Выберите группу и тест.",
+        "select_group": "Сначала выберите группу.",
+        "assignment_not_found": "Задание не найдено.",
+        "session_expired": "Срок сессии истёк.",
+        "format_invalid": "Неверный формат файла.",
+
+        "teacher_plan_required": "Активируйте тариф для учителей.",
+        "group_name_required": "Введите название группы.",
+        "group_created": "Группа создана.",
+        "group_not_found": "Группа не найдена.",
+        "groups_empty": "Групп пока нет.",
+        "members_count": "уч.",
+        "active": "Активна", "closed": "Закрыта",
+        "delete": "Удалить",
+        "assignment_created": "Задание назначено группе.",
+        "assignment_empty": "Заданий пока нет.",
+        "select_group_quiz": "Выберите группу и тест.",
+        "variant_invalid": "Используйте вариант A, B, C или D.",
+        "variants_ready": "Варианты готовы. Ключ для каждого варианта сохранён.",
+        "select_quiz_variant": "Выберите тест и хотя бы один вариант.",
+        "session_created": "Сессия создана.",
+        "no_results": "Результатов пока нет.",
+        "no_students_results": "Результатов учеников пока нет.",
+        "server_error": "Произошла внутренняя ошибка сервера. Попробуйте ещё раз.",
+        "db_busy": "База данных сервера занята. Повторите через несколько секунд.",
+        "quiz_not_found": "Тест не найден.",
+        "session_not_found": "Сессия не найдена.",
+        "session_already_completed": "Вы уже завершили этот тест. Повторный вход недоступен.",
+        "test_first": "Сначала создайте тест.",
+        "copy_link": "Копировать ссылку",
+    },
+    "en": {
+        "quiz_data_broken": "Quiz data is corrupted.",
+        "quiz_questions_missing": "The quiz has no questions.",
+        "variant_required": "Use variant A, B, C or D.",
+        "group_required": "Select a group and a quiz.",
+        "select_group": "Select a group first.",
+        "assignment_not_found": "Assignment not found.",
+        "session_expired": "The session has expired.",
+        "format_invalid": "Invalid file format.",
+
+        "teacher_plan_required": "Activate the Teacher plan.",
+        "group_name_required": "Enter a group name.",
+        "group_created": "Group created.",
+        "group_not_found": "Group not found.",
+        "groups_empty": "No groups yet.",
+        "members_count": "members",
+        "active": "Active", "closed": "Closed",
+        "delete": "Delete",
+        "assignment_created": "Assignment was assigned to the group.",
+        "assignment_empty": "No assignments yet.",
+        "select_group_quiz": "Select a group and a quiz.",
+        "variant_invalid": "Use variant A, B, C or D.",
+        "variants_ready": "Variants are ready. An answer key was saved for each variant.",
+        "select_quiz_variant": "Select a quiz and at least one variant.",
+        "session_created": "Session created.",
+        "no_results": "No results yet.",
+        "no_students_results": "No student results yet.",
+        "server_error": "An internal server error occurred. Please try again.",
+        "db_busy": "The server database is busy. Please try again in a few seconds.",
+        "quiz_not_found": "Quiz not found.",
+        "session_not_found": "Session not found.",
+        "session_already_completed": "You have already completed this test. Re-entry is not allowed.",
+        "test_first": "Create a quiz first.",
+        "copy_link": "Copy link",
+    },
+}
+
+def teacher_text(user_id, key, default=None):
+    lang = get_user_lang(user_id)
+    return TEACHER_MESSAGES.get(lang, TEACHER_MESSAGES["uz"]).get(key, default or key)
+
+
+def require_teacher(user_id: int):
+    add_user_to_db(user_id)
+    def _check(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = %s", (user_id,))
+        return cur.fetchone()
+    row = teacher_db_read(_check)
+    if not row or not is_active_paid_status(row[0] or "", row[2] or 0) or (row[1] or get_plan_key(row[0] or "")):
+        raise HTTPException(status_code=403, detail=teacher_text(user_id, "teacher_plan_required"))
+
+@app.get("/api/teacher/quizzes")
+def teacher_quizzes(user_id: int):
+    require_teacher(user_id)
+    def _work(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id, title, total FROM quizzes WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        rows = cur.fetchall()
+        return [{"id": r[0], "title": r[1], "total": r[2]} for r in rows]
+    quizzes = teacher_db_read(_work)
+    return {"status": "ok", "quizzes": quizzes}
+
+class TeacherSessionCreateRequest(BaseModel):
+    user_id: int
+    quiz_id: str
+    duration_minutes: int = 30
+    variant_code: str = ""
+    group_id: str = ""
+    assignment_id: str = ""
+
+
+@app.post("/api/teacher/create-session")
+def teacher_create_session(req: TeacherSessionCreateRequest):
+    """Create a fresh teacher group session safely on both new and legacy SQLite schemas.
+
+    The endpoint deliberately does not reuse an old session. Every click creates a new
+    session id and an independent 8-character access code. Legacy NOT NULL/extra columns
+    are populated dynamically, and rare UNIQUE collisions are retried automatically.
+    """
+    require_teacher(req.user_id)
+    assignment_id = (req.assignment_id or "").strip()
+    duration = max(5, min(int(req.duration_minutes or 30), 180))
+    variant_code = (req.variant_code or "").strip().upper()
+    if variant_code and variant_code not in TEACHER_VARIANT_CODES:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "variant_required"))
+
+    group_id = (req.group_id or "").strip()
+    if not group_id:
+        raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "select_group"))
+
+    # Assignment sessions inherit their configured test duration and are tagged
+    # so students and teachers can distinguish them from manually started group tests.
+    if assignment_id:
+        def _read_assignment(conn):
+            cur = conn.cursor()
+            cur.execute("""SELECT id, group_id, quiz_id, variant_code, title, active, COALESCE(duration_minutes, 30) AS duration_minutes
+                           FROM teacher_assignments WHERE id = %s AND owner_id = %s""", (assignment_id, req.user_id))
+            return cur.fetchone()
+        assignment_row = teacher_db_read(_read_assignment)
+        if not assignment_row or not int(assignment_row[5] or 0):
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "assignment_not_found"))
+        if str(assignment_row[1] or "") != group_id or str(assignment_row[2] or "") != str(req.quiz_id):
+            raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "assignment_not_found"))
+        duration = max(5, min(int(assignment_row[6] or 30), 180))
+        if not variant_code:
+            variant_code = str(assignment_row[3] or "").strip().upper()
+
+    # Validate quiz and group before opening the write transaction.
+    quiz_row, _items = _load_quiz_items(req.quiz_id, req.user_id)
+    if variant_code:
+        _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
+def _write(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name FROM teacher_groups WHERE id = %s AND owner_id = %s AND active = 1",
+            (group_id, req.user_id),
+        )
+        group = cur.fetchone()
+        if not group:
+            raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
+        # Read the actual live schema every time. Railway may contain a database
+    # created by an older Teacher version with extra required columns.
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'teacher_sessions'")
+    column_info = {row[0] for row in cur.fetchall()}
+    required_core = {"id", "owner_id", "quiz_id", "code", "duration_minutes", "created_at", "expires_at", "active", "group_id", "variant_code"}
+    missing_core = sorted(required_core - column_info)
+    if missing_core:
+        raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error"))
+
+        session_title = str(quiz_row["title"] or "Guruh testi").strip() or "Guruh testi"
+        if assignment_id and assignment_row is not None:
+            session_title = str(assignment_row["title"] or session_title).strip() or session_title
+        now = int(time.time())
+        expires = now + duration * 60
+
+        # A new id/code is generated for every session. We retry the INSERT itself,
+        # not just the code lookup, because legacy databases may have additional
+        # UNIQUE constraints unknown to this version.
+        last_integrity = None
+        for _attempt in range(12):
+            sid = f"ts_{uuid.uuid4().hex[:12]}"
+            code = uuid.uuid4().hex[:8].upper()
+            values_by_column = {
+                "id": sid,
+                "session_id": sid,
+                "owner_id": req.user_id,
+                "teacher_id": req.user_id,
+                "teacher_user_id": req.user_id,
+                "user_id": req.user_id,
+                "quiz_id": req.quiz_id,
+                "code": code,
+                "join_code": code,
+                "title": session_title,
+                "name": session_title,
+                "duration_minutes": duration,
+                "duration": duration,
+                "created_at": now,
+                "started_at": now,
+                "expires_at": expires,
+                "active": 1,
+                "group_id": group_id,
+                "group_name": group["name"],
+                "variant_code": variant_code,
+                "deleted": 0,
+                "source_type": "assignment" if assignment_id else "group_test",
+                "assignment_id": assignment_id,
+            }
+
+            insert_columns, insert_values = [], []
+            for name, row in column_info.items():
+                if name in values_by_column:
+                    insert_columns.append(name)
+                    insert_values.append(values_by_column[name])
+                    continue
+                not_null = bool(row[3])
+                default_value = row[4]
+                is_pk = bool(row[5])
+                if not_null and not is_pk and default_value is None:
+                    declared_type = str(row[2] or "").upper()
+                    # Give unknown legacy required columns a value that is also
+                    # unlikely to collide if the column happens to be UNIQUE.
+                    if "INT" in declared_type or "REAL" in declared_type or "NUM" in declared_type:
+                        fallback = now + random.randint(1, 999999)
+                    else:
+                        fallback = f"{sid}_{name}"
+                    insert_columns.append(name)
+                    insert_values.append(fallback)
+                    placeholders = ", ".join("%s" for _ in insert_columns)
+        try:
+            cur.execute(
+                f"INSERT INTO teacher_sessions ({', '.join(insert_columns)}) VALUES ({placeholders})",
+                tuple(insert_values),
+            )
+            return {
+                "session_id": sid,
+                "code": code,
+                "expires_at": expires,
+                "quiz_title": quiz_row["title"],
+                "variant_code": variant_code,
+                "group_id": group_id,
+                "group_name": group["name"],
+                "source_type": "assignment" if assignment_id else "group_test",
+                "assignment_id": assignment_id,
+            }
+        except Exception as e:
+            last_integrity = e
+            logging.warning("Teacher session INSERT collision/constraint (attempt %s): %s", _attempt + 1, e)
+            continue
+    raise HTTPException(status_code=500, detail=teacher_text(req.user_id, "server_error")) from last_integrity
+    data = teacher_db_write(_write)
+    return {"status": "ok", **data}
+
+@app.get("/api/teacher/sessions")
+def teacher_sessions(user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("""SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,
+                              COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code,
+                              COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id
+                       FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id
+                       WHERE s.owner_id = %s AND COALESCE(s.deleted, 0) = 0
+                       ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
+        rows = cur.fetchall()
+        return rows
+    rows = teacher_db_read(_read)
+    now = int(time.time())
+    result = []
+    for r in rows:
+        # r[0]: id, r[1]: code, r[2]: quiz_id, r[3]: title, r[4]: duration_minutes, r[5]: created_at, r[6]: expires_at, r[7]: active, r[8]: group_id, r[9]: variant_code, r[10]: source_type, r[11]: assignment_id
+        active = bool(r[7] and r[6] and r[6] >= now)
+        result.append({
+            "session_id": r[0],
+            "code": r[1],
+            "quiz_id": r[2],
+            "quiz_title": r[3],
+            "duration_minutes": r[4],
+            "created_at": r[5],
+            "expires_at": r[6],
+            "active": active,
+            "group_id": r[8],
+            "variant_code": r[9],
+            "source_type": r[10],
+            "assignment_id": r[11]
+        })
+    return {"status": "ok", "sessions": result}
+
+@app.delete("/api/teacher/sessions/{session_id}")
+def teacher_delete_session(session_id: str, user_id: int):
+    require_teacher(user_id)
+    def _write(conn):
+        cur = conn.cursor()
+        # Soft-delete: the teacher no longer sees the session, but participant
+        # records remain safe for database integrity/audit purposes.
+        cur.execute(
+            "UPDATE teacher_sessions SET active = 0, deleted = 1 WHERE id = %s AND owner_id = %s",
+            (session_id, user_id),
+        )
+        if cur.rowcount < 1:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_expired"))
+    teacher_db_write(_write)
+    return {"status": "ok"}
+
+@app.get("/api/teacher/session")
+def teacher_session_info(code: str, user_id: int):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code FROM teacher_sessions s WHERE s.code = %s", (code,))
+        return cur.fetchone()
+    row = teacher_db_read(_read)
+    if not row:
+        raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    # Session link is private to the teacher who created it and students who
+    # belong to the corresponding group.
+    def _access(conn):
+        return student_can_access_session(conn, row[0], user_id)
+    if not teacher_db_read(_access):
+        raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
+    if not row[6] or int(time.time()) > row[5]:
+        raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+    return {"status": "ok", "session_id": row[0], "quiz_id": row[2], "expires_at": row[5]}
+
+def _session_owner_id(session_id: str, user_id: int):
+    def _work(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT owner_id FROM teacher_sessions WHERE id = %s", (session_id,))
+        return cur.fetchone()
+    row = teacher_db_read(_work)
+    if not row:
+        raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    return row[0]
+
+
+@app.get("/api/teacher-group-sessions")
+def teacher_group_sessions(user_id: int):
+    """Return currently active test sessions for groups the student has joined.
+
+    This endpoint intentionally does not require the Teacher plan: students only
+    need to be members of the group. The teacher/owner can also see their own
+    sessions through the normal Teacher UI.
+    """
+    
+    return {"status":"ok", "sessions":[dict(r) for r in rows], "server_time":now}
+
+
+def _student_can_access_session(conn, session_id: str, user_id: int):
+    """A session is accessible to its owner or to a member of its group."""
+    row = conn.execute("""
+        SELECT s.owner_id, s.group_id, s.active, COALESCE(s.deleted,0) AS deleted,
+               s.expires_at
+        FROM teacher_sessions s WHERE s.id=?
+    """, (session_id,)).fetchone()
+    if not row:
+        return None
+    if int(row[0] or 0) == int(user_id):
+        return row
+    group_id = str(row[1] or '')
+    if not group_id:
+        return None
+    member = conn.execute(
+        "SELECT 1 FROM teacher_group_members WHERE group_id = %s AND user_id = %s LIMIT 1",
+        (group_id, user_id),
+    ).fetchone()
+    return row if member else None
+
+@app.post("/api/teacher-session-start")
+def teacher_session_start(session_id: str, user_id: int):
+    """Register the moment a student actually enters a group test."""
+    now = int(time.time())
+    def _write(conn):
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT s.id, s.owner_id, s.group_id, s.quiz_id, s.expires_at, s.active,
+                   COALESCE(s.deleted,0) AS deleted, s.duration_minutes, q.title, q.total,
+                   COALESCE(s.variant_code,'') AS variant_code
+            FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id
+            WHERE s.id = %s
+        """, (session_id,))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+        if not student_can_access_session(conn, session_id, user_id):
+            raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
+        # s[6]: deleted, s[5]: active, s[4]: expires_at
+        if int(s[6] or 0) or not int(s[5] or 0) or now > int(s[4] or 0):
+            raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+        # Telegram profile names are supplied by the client when the result is submitted.
+        first_name = "Telegram User"
+        username = ""
+        existing = cur.execute(
+        "SELECT id, started_at, finished_at, score, total, percent FROM teacher_participants WHERE session_id = %s AND user_id = %s ORDER BY id LIMIT 1",
+        (session_id, user_id),
+    ).fetchone()
+            # A completed group test is permanently locked for this student.
+            # Never reset finished_at/score by opening the same session again.
+            if existing and int(existing[2] or 0) > 0:
+        raise HTTPException(status_code=409, detail=teacher_text(user_id, "session_already_completed"))
+    # If the student simply reopens an unfinished test, preserve the
+    # original start time so the server-side session timer cannot reset.
+    cur.execute("""
+            UPDATE teacher_participants
+            SET first_name = %s, username = %s, total = %s
+            else:
+        cur.execute("""
+            INSERT INTO teacher_participants
+            (session_id, user_id, first_name, username, score, total, percent, started_at, finished_at)
+            VALUES (%s, %s, %s, %s, 0, %s, 0, %s, 0)
+        """, (session_id, user_id, first_name, username, s[9], now))
+        return {
+        "id": s[0],
+        "quiz_id": s[3],
+        "title": s[8],
+        "total": s[9],
+        "duration_minutes": s[7],
+        "expires_at": s[4],
+        "variant_code": s[10]
+    }
+data = teacher_db_write(_write)
+return {
+    "status": "ok",
+    "session_id": data["id"],
+    "quiz_id": data["quiz_id"],
+    "title": data["title"],
+    "total": data["total"],
+    "duration_minutes": data["duration_minutes"],
+    "expires_at": data["expires_at"],
+    "variant_code": data["variant_code"],
+    "server_time": now
+}
+@app.get("/api/teacher-session-quiz")
+def teacher_session_quiz(session_id: str, user_id: int):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
+        return cur.fetchone()
+    row = teacher_db_read(_read)
+    if not row:
+        raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+    def _access(conn):
+        return student_can_access_session(conn, session_id, user_id)
+    if not teacher_db_read(_access):
+        raise HTTPException(status_code=403, detail=teacher_text(user_id, "session_not_found"))
+    if not row[3] or int(time.time()) > int(row[2] or 0):
+        raise HTTPException(status_code=410, detail=teacher_text(user_id, "session_expired"))
+    if row[4]:
+        payload = _get_teacher_variant(row[0], _session_owner_id(session_id, user_id), row[4])
+    else:
+        payload = json.loads(row[5])
+    return {"status": "ok", "quiz_id": row[0], "title": row[1] or "Test", "quiz_json": payload, "variant_code": row[4]}
+
+
+class TeacherSubmitRequest(BaseModel):
+    session_id: str
+    user_id: int
+    first_name: str = ""
+    username: str = ""
+    score: int
+    total: int
+    percent: int
+
+
+@app.post("/api/teacher-submit")
+def teacher_submit(req: TeacherSubmitRequest):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id = %s", (req.session_id,))
+        return cur.fetchone()
+    s = teacher_db_read(_read)
+    if not s:
+        raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
+    now=int(time.time())
+    if int(s[2] or 0):
+        raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
+    def _write_check(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id = %s AND user_id = %s ORDER BY id LIMIT 1", (req.session_id, req.user_id))
+        existing_participant = cur.fetchone()
+        return existing_participant
+    existing_participant = teacher_db_read(_write_check)
+    # Timer 00:00 da avtomatik yuborilgan natija ham server tomonidan qabul qilinadi,
+    # lekin faqat o'quvchi sessiya tugashidan oldin kirgan bo'lsa. Bu kechikkan
+    # network request sabab natijaning yo'qolib qolishini oldini oladi.
+    if not s[1] or now > int(s[0] or 0):
+        started = int(existing_participant[1] or 0) if existing_participant else 0
+        finished = int(existing_participant[2] or 0) if existing_participant else 0
+        if not existing_participant or not started or started > int(s[0] or 0) or finished:
+            raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
+    values = (req.first_name[:100], req.username[:100], req.score, req.total, req.percent, now, now)
+    def _write_submit(conn):
+        cur = conn.cursor()
+        if existing_participant:
+            # Once a student has submitted a result, the session is locked for that
+            # student. A duplicate/retry must never overwrite the completed result.
+            if int(existing_participant[2] or 0) > 0:
+                raise HTTPException(status_code=409, detail=teacher_text(req.user_id, "session_already_completed"))
+            cur.execute("""
+                UPDATE teacher_participants 
+                SET first_name = %s, username = %s, score = %s, total = %s, percent = %s, finished_at = %s 
+                WHERE id = %s
+            """, (*values[:5], values[6], existing_participant[0]))
+        else:
+            cur.execute("""
+                INSERT INTO teacher_participants 
+                (session_id, user_id, first_name, username, score, total, percent, started_at, finished_at) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (req.session_id, req.user_id, *values))
+    teacher_db_write(_write_submit)
+    return {"status": "ok"}
+
+@app.get("/api/teacher-session-results")
+def teacher_session_results(session_id: str, user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY id", (session_id,))
+        rows = cur.fetchall()
+        active_students = sum(1 for r in rows if int(r[5] or 0) > 0 and int(r[6] or 0) == 0)
+        completed_students = sum(1 for r in rows if int(r[6] or 0) > 0)
+        return s, rows, active_students, completed_students
+    s, rows, active_students, completed_students = teacher_db_read(_read)
+@app.get("/api/teacher-session-results-json")
+def teacher_session_results_json(session_id: str, user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY id", (session_id,))
+        rows = cur.fetchall()
+        return s, rows
+    s, rows = teacher_db_read(_read)
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "quiz_id": s[0],
+        "title": s[1],
+        "code": s[2],
+        "expires_at": s[3],
+        "source_type": s[4],
+        "assignment_id": s[5],
+        "participants": [
+            {
+                "first_name": r[0],
+                "username": r[1],
+                "score": r[2],
+                "total": r[3],
+                "percent": r[4],
+                "started_at": r[5],
+                "finished_at": r[6]
+            } for r in rows
+        ]
+   @app.get("/api/teacher-session-results")
+def teacher_session_results(session_id: str, user_id: int):
+    require_teacher(user_id)
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s", (session_id,))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
+        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY id", (session_id,))
+        rows = cur.fetchall()
+        active_students = sum(1 for r in rows if int(r[5] or 0) > 0 and int(r[6] or 0) == 0)
+        completed_students = sum(1 for r in rows if int(r[6] or 0) > 0)
+        return s, rows, active_students, completed_students
+    s, rows, active_students, completed_students = teacher_db_read(_read)
+    return {
+        "status": "ok",
+        "session": {
+            "id": session_id,
+            "code": s[2],
+            "quiz_title": s[1],
+            "expires_at": s[3],
+            "source_type": s[4],
+            "assignment_id": s[5]
+        },
+        "participants": [
+            {
+                "first_name": r[0],
+                "username": r[1],
+                "score": r[2],
+                "total": r[3],
+                "percent": r[4],
+                "started_at": r[5],
+                "finished_at": r[6]
+            } for r in rows
+        ],
+        "active_students": active_students,
+        "completed_students": completed_students
+    }
+
+def _teacher_export_rows(session_id: str, owner_id: int):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id = s.quiz_id WHERE s.id = %s AND s.owner_id = %s AND COALESCE(s.deleted,0) = 0", (session_id, owner_id))
+        s = cur.fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail=teacher_text(owner_id, "session_not_found"))
+        cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id = %s ORDER BY percent DESC, score DESC", (session_id,))
+        rows = cur.fetchall()
+        return s, rows
+    return teacher_db_read(_read)
+
+def _register_pdf_font():
+    candidates=["/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+    bolds=["/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+    reg=bld=False
+    for path in candidates:
+        if os.path.exists(path):
+            try: pdfmetrics.registerFont(TTFont("QuizPilotFont", path)); reg=True; break
+            except Exception: pass
+    for path in bolds:
+        if os.path.exists(path):
+            try: pdfmetrics.registerFont(TTFont("QuizPilotFontBold", path)); bld=True; break
+            except Exception: pass
+    return reg,bld
+
+
+@app.get("/api/teacher-export")
+def teacher_export(session_id: str, user_id: int, format: str):
+    s, rows = _teacher_export_rows(session_id, user_id)
+    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    fmt=format.lower(); safe=re.sub(r"[^A-Za-z0-9_-]+", "_", s["title"] or "quiz")[:40]
+    if fmt=="xlsx":
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.xlsx")
+        wb=Workbook(); ws=wb.active; ws.title="Natijalar"
+        ws.append(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]);
+        for i,r in enumerate(rows,1): ws.append([i,r["first_name"],r["username"],r["score"],r["total"],r["percent"]])
+        ws.freeze_panes="A2"; wb.save(path)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    if fmt=="docx":
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.docx")
+        doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
+        table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
+        for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
+        for i,r in enumerate(rows,1):
+            cells=table.add_row().cells
+            vals=[i,r["first_name"],r["username"],r["score"],r["total"],f"{r['percent']}%"]
+            for j,v in enumerate(vals): cells[j].text=str(v)
+        doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    if fmt=="pdf":
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
+        reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
+        doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=28,leftMargin=28,topMargin=28,bottomMargin=28)
+        styles=getSampleStyleSheet(); title_style=ParagraphStyle("qp_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER)
+        body_style=ParagraphStyle("qp_body",parent=styles["BodyText"],fontName=font,fontSize=8)
+        story=[Paragraph(s["title"],title_style),Spacer(1,8),Paragraph(f"Session: {s['code']}",body_style),Spacer(1,8)]
+        data=[["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]]
+        for i,r in enumerate(rows,1): data.append([str(i),str(r["first_name"]),str(r["username"]),str(r["score"]),str(r["total"]),f"{r['percent']}%"] )
+        table=Table(data,repeatRows=1,colWidths=[24,170,100,45,40,45]); table.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("FONTNAME",(0,0),(-1,0),bold),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"MIDDLE")])); story.append(table); doc.build(story)
+        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+    raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
+
+
+@app.get("/api/flashcards")
+def get_flashcards(user_id: int):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT id, front, back FROM flashcards WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
+        return cur.fetchall()
+    rows = teacher_db_read(_read)
+    cards = [{"id": r[0], "front": r[1], "back": r[2]} for r in rows]
+    return {"status": "ok", "cards": cards}
+@app.post("/api/create-flashcard")
+def create_flashcard(req: FlashcardCreateRequest):
+    add_user_to_db(req.user_id)
+    now = int(time.time())
+    def _read_user(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = %s", (req.user_id,))
+        return cur.fetchone()
+    u = teacher_db_read(_read_user)
+    is_paid = bool(u and is_active_paid_status(u[0] or "", u[1] or 0))
+    
+    # 30 kunlik bepul davr tugagan bo'lsa, uchala hisoblagichni reset qilamiz.
+    if u and now - (u[3] or now) >= 30 * 24 * 3600 and not is_paid:
+        def _reset_user(conn):
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s", (now, req.user_id))
+        teacher_db_write(_reset_user)
+
+    # Premium / Teacher: cheksiz.
+    if not is_paid:
+        def _update_limit(conn):
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
+                "WHERE user_id = %s AND COALESCE(flashcard_free_used, 0) < %s",
+                (req.user_id, FREE_FLASHCARD_LIMIT)
+            )
+            if cur.rowcount != 1:
+                lang = get_user_lang(req.user_id)
+                messages = {
+                    "uz": MESSAGES["uz"]["flashcard_limit_reached"],
+                    "ru": MESSAGES["ru"]["flashcard_limit_reached"],
+                    "en": MESSAGES["en"]["flashcard_limit_reached"]
+                }
+                raise HTTPException(status_code=403, detail=messages.get(lang, messages["uz"]))
+        teacher_db_write(_update_limit)
+
+    card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
+    def _insert_card(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO flashcards (id, user_id, front, back, created_at) VALUES (%s, %s, %s, %s, %s)",
+            (card_id, req.user_id, req.front, req.back, int(time.time()))
+        )
+    teacher_db_write(_insert_card)
+    return {"status": "ok", "card_id": card_id}
+
+@app.delete("/api/delete-flashcard")
+def delete_flashcard(card_id: str, user_id: int):
+    def _delete(conn):
+        cur = conn.cursor()
+        cur.execute("DELETE FROM flashcards WHERE id = %s AND user_id = %s", (card_id, user_id))
+    teacher_db_write(_delete)
+    return {"status": "ok"}
+
+@app.get("/api/quiz-detail")
+def get_quiz_detail(quiz_id: str):
+    def _read(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT title, quiz_json FROM quizzes WHERE id = %s", (quiz_id,))
+        return cur.fetchone()
+    row = teacher_db_read(_read)
+    if row:
+        return {"status": "ok", "title": row[0] or "Test", "quiz_json": json.loads(row[1])}
+    raise HTTPException(status_code=404, detail="Test topilmadi")
+
+@app.post("/api/update-progress")
+def update_progress(data: ProgressUpdateRequest):
+    def _write(conn):
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quizzes SET answered = total, last_score = %s, last_percent = %s WHERE id = %s AND user_id = %s",
+            (data.correct_count, data.percent, data.quiz_id, data.user_id)
+        )
+    teacher_db_write(_write)
+    return {"status": "ok"}
+
+
+@app.delete("/api/delete-quiz")
+def delete_quiz(quiz_id: str, user_id: int):
+    try:
+        def _delete(conn):
+            cur = conn.cursor()
+            cur.execute("DELETE FROM quizzes WHERE id = %s AND user_id = %s", (quiz_id, user_id))
+        teacher_db_write(_delete)
+        return {"status": "ok", "message": "Test o'chirildi."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Xatolik.")
+def start_bot_polling():
+    while True:
+        try:
+            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        except Exception:
+            time.sleep(5)
+
+
+@app.exception_handler(Exception)
+async def api_exception_handler(request: Request, exc: Exception):
+    # Teacher/frontend fetchlari 500 paytida "Unexpected token I..." kabi JSON parse
+    # xatosini bermasligi uchun API xatolarini ham JSON ko‘rinishida qaytaramiz.
+    if request.url.path.startswith("/api/teacher") or request.url.path.startswith("/api/teacher-"):
+        logging.exception("Teacher API internal error: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"status": "error", "detail": "__TEACHER_SERVER_ERROR__"})
+    if request.url.path.startswith("/api/"):
+        logging.exception("API internal error: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"status": "error", "detail": "Server ichki xatosi"})
+    raise exc
+
+
+@app.on_event("startup")
+async def startup_event():
+    threading.Thread(target=start_bot_polling, daemon=True).start()
+    threading.Thread(target=limit_notification_worker, daemon=True).start()
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
