@@ -77,16 +77,6 @@ def get_db_connection():
     finally:
         from datetime import datetime
 from fastapi import Depends, Query
-
-# ==========================================
-# POSTGRESQL CONTEXT MANAGER (XAVFSIZ ULANISH)
-# ==========================================
-
-    # ==========================================
-# POSTGRESQL CONTEXT MANAGER
-# ==========================================
-@contextmanager
-def get_db_connection():
     
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
