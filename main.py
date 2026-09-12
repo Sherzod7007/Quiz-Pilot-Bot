@@ -739,7 +739,7 @@ def init_db():
                     cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def};")
                 except Exception:
                     pass
-    }
+    
     # Eski yazuvlardagi NULL qiymatlar Teacher endpointlari uchun xavfsiz qiymatga o'tkaziladi.
     null_updates = {
         "teacher_groups": [("description", "''"), ("active", "1")],
