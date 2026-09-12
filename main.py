@@ -1307,24 +1307,6 @@ def handle_admin_decision(call):
 # --- FASTAPI ENDPOINTS ---
 app = FastAPI()
 
-# --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
-# Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
-# The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
-# so the live /data database is never moved, renamed or modified.
-SQLITE_BACKUP_TOKEN = os.getenv("SQLITE_BACKUP_TOKEN", "").strip()
-BACKUP_DIR = "/tmp/quiz_pilot_backups"
-
-def _remove_temp_backup(path: str):
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        logging.exception("Temporary SQLite backup cleanup failed")
-
-
-
-
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -3056,7 +3038,7 @@ class TeacherSessionCreateRequest(BaseModel):
 
 @app.post("/api/teacher/create-session")
 def teacher_create_session(req: TeacherSessionCreateRequest):
-    """Create a fresh teacher group session safely on both new and legacy SQLite schemas.
+    """Create a fresh teacher group session safely on both new and legacy PostgreSQL schemas.
 
     The endpoint deliberately does not reuse an old session. Every click creates a new
     session id and an independent 8-character access code. Legacy NOT NULL/extra columns
