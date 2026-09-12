@@ -11,3 +11,17 @@ sqlalchemy
 psycopg2-binary
 python-multipart
 jinja2
+pyTelegramBotAPI==4.26.0
+pypdf==4.2.0
+python-docx==1.1.2
+google-genai
+pydantic==2.6.4
+fastapi==0.110.0
+uvicorn==0.28.0
+jinja2==3.1.3
+python-multipart
+openpyxl
+reportlab
+psycopg2-binary
+deep-translator
+sqlalchemy
