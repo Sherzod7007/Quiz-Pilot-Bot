@@ -22,7 +22,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-import database as db
+import sqlite3
 import telebot
 import threading
 import time
@@ -122,7 +122,9 @@ def file_protection_message(lang: str, key: str) -> str:
     return FILE_PROTECTION_MESSAGES.get(lang, FILE_PROTECTION_MESSAGES["uz"]).get(key, FILE_PROTECTION_MESSAGES["uz"]["unreadable"])
 
 DOWNLOADS_DIR = "downloads"
-DB_TARGET = "postgresql"
+DB_PATH = (
+    "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
+)
 
 # --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
 TARIFFS = {
@@ -326,9 +328,9 @@ MESSAGES = {
 
 def get_user_lang(user_id: int) -> str:
     try:
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
-        cursor.execute('SELECT language FROM users WHERE user_id = %s', (user_id,))
+        cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         conn.close()
         if row and row[0] in MESSAGES:
@@ -339,8 +341,9 @@ def get_user_lang(user_id: int) -> str:
 
 
 def init_db():
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS quizzes (
         id TEXT PRIMARY KEY,
@@ -371,7 +374,8 @@ def init_db():
         last_free_reset_notice_cycle INTEGER DEFAULT 0,
         paid_limit_notice_until INTEGER DEFAULT 0)""")
 
-    columns = db.table_columns(conn, "users")
+    cursor.execute("PRAGMA table_info(users);")
+    columns = [col[1] for col in cursor.fetchall()]
 
     if "status" not in columns:
         try:
@@ -458,11 +462,28 @@ def init_db():
         source_type TEXT DEFAULT 'group_test',
         assignment_id TEXT DEFAULT '')""")
 
-    cursor.execute('CREATE TABLE IF NOT EXISTS teacher_participants (\n        id BIGSERIAL PRIMARY KEY,\n        session_id TEXT,\n        user_id INTEGER,\n        first_name TEXT,\n        username TEXT,\n        score INTEGER DEFAULT 0,\n        total INTEGER DEFAULT 0,\n        percent INTEGER DEFAULT 0,\n        started_at INTEGER,\n        finished_at INTEGER,\n        UNIQUE(session_id, user_id))')
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_participants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT,
+        user_id INTEGER,
+        first_name TEXT,
+        username TEXT,
+        score INTEGER DEFAULT 0,
+        total INTEGER DEFAULT 0,
+        percent INTEGER DEFAULT 0,
+        started_at INTEGER,
+        finished_at INTEGER,
+        UNIQUE(session_id, user_id))""")
 
     # O'qituvchilar uchun professional variantlar/guruhlar. Eski DB bilan mos:
     # IF NOT EXISTS + ehtiyotkor migration mavjud funksiyalarni o'zgartirmaydi.
-    cursor.execute('CREATE TABLE IF NOT EXISTS teacher_variants (\n        id BIGSERIAL PRIMARY KEY,\n        quiz_id TEXT NOT NULL,\n        variant_code TEXT NOT NULL,\n        variant_json TEXT NOT NULL,\n        created_at INTEGER NOT NULL,\n        UNIQUE(quiz_id, variant_code))')
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quiz_id TEXT NOT NULL,
+        variant_code TEXT NOT NULL,
+        variant_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(quiz_id, variant_code))""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_groups (
         id TEXT PRIMARY KEY,
@@ -473,7 +494,14 @@ def init_db():
         created_at INTEGER NOT NULL,
         active INTEGER DEFAULT 1)""")
 
-    cursor.execute("CREATE TABLE IF NOT EXISTS teacher_group_members (\n        id BIGSERIAL PRIMARY KEY,\n        group_id TEXT NOT NULL,\n        user_id INTEGER NOT NULL,\n        first_name TEXT DEFAULT '',\n        username TEXT DEFAULT '',\n        joined_at INTEGER NOT NULL,\n        UNIQUE(group_id, user_id))")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_group_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        first_name TEXT DEFAULT '',
+        username TEXT DEFAULT '',
+        joined_at INTEGER NOT NULL,
+        UNIQUE(group_id, user_id))""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_assignments (
         id TEXT PRIMARY KEY,
@@ -487,7 +515,7 @@ def init_db():
         created_at INTEGER NOT NULL,
         active INTEGER DEFAULT 1)""")
 
-    # Eski Railway/oldingi bazalarda Teacher jadvallari avvalgi versiyadan qolgan
+    # Eski Railway/SQLite bazalarida Teacher jadvallari avvalgi versiyadan qolgan
     # bo‘lishi mumkin. CREATE TABLE IF NOT EXISTS mavjud jadvalga yangi ustunlarni
     # qo‘shmaydi, shuning uchun xavfsiz migration qilamiz. Bu faqat yetishmayotgan
     # Teacher ustunlarini qo‘shadi va boshqa funksiyalarga tegmaydi.
@@ -542,7 +570,8 @@ def init_db():
     }
     for table_name, columns in teacher_migrations.items():
         try:
-            existing = set(db.table_columns(conn, table_name))
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            existing = {row[1] for row in cursor.fetchall()}
             for column_name, column_def in columns.items():
                 if column_name not in existing:
                     try:
@@ -569,9 +598,9 @@ def init_db():
         cursor.execute("SELECT id FROM teacher_groups WHERE COALESCE(join_code,'')='' AND active=1")
         for row in cursor.fetchall():
             code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
-            while cursor.execute('SELECT 1 FROM teacher_groups WHERE join_code=%s LIMIT 1', (code,)).fetchone():
+            while cursor.execute("SELECT 1 FROM teacher_groups WHERE join_code=? LIMIT 1", (code,)).fetchone():
                 code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
-            cursor.execute('UPDATE teacher_groups SET join_code=%s WHERE id=%s', (code, row[0]))
+            cursor.execute("UPDATE teacher_groups SET join_code=? WHERE id=?", (code, row[0]))
     except Exception as e:
         logging.warning("Teacher group code migration: %s", e)
 
@@ -638,8 +667,8 @@ def notify_free_limit_reached(user_id: int, kind: str):
         return
     used_col, notice_col, limit, message_key = columns[kind]
     try:
-        conn = db.connect()
-        conn.row_factory = db.Row
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
             f"SELECT {used_col}, created_at, {notice_col}, status, premium_until FROM users WHERE user_id = ?",
@@ -670,8 +699,8 @@ def process_expired_free_limits():
     now = int(time.time())
     thirty_days = 30 * 24 * 3600
     try:
-        conn = db.connect()
-        conn.row_factory = db.Row
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
             "SELECT user_id, created_at, free_used, public_free_used, flashcard_free_used, "
@@ -709,19 +738,17 @@ def process_expired_free_limits():
                 except Exception as e:
                     logging.error(f"Bepul limit qaytgani haqida xabar yuborilmadi ({user_id}): {e}")
         conn.commit()
+        conn.close()
     except Exception as e:
         logging.error(f"Bepul limit reset worker xatosi: {e}")
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 
 def process_expired_paid_limits():
     """Expire PRO plans and notify users once exactly when their paid period ends."""
     now = int(time.time())
     try:
-        conn = db.connect()
-        conn.row_factory = db.Row
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
             "SELECT user_id, status, plan_key, premium_until, paid_limit_notice_until "
@@ -737,7 +764,7 @@ def process_expired_paid_limits():
             plan_key = row["plan_key"] or get_plan_key(row["status"] or "")
             tariff_name = localized_tariff_name(plan_key, get_user_lang(user_id)) if plan_key else "Premium"
             cur.execute(
-                "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=%s "
+                "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=? "
                 "WHERE user_id=? AND premium_until=?",
                 (expiry, user_id, expiry),
             )
@@ -765,11 +792,12 @@ def limit_notification_worker():
 
 def add_user_to_db(user_id: int):
     try:
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            'INSERT INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, last_active) '
-            "VALUES (%s, %s, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0, %s) ON CONFLICT DO NOTHING",
+            "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, last_active) "
+            "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0, ?)",
             (user_id, int(time.time()), int(time.time())),
         )
         conn.commit()
@@ -780,12 +808,13 @@ def add_user_to_db(user_id: int):
 
 def get_users_count():
     try:
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
         active_since = int(time.time()) - 2 * 60
         cursor.execute(
-            'SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= %s',
+            "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= ?",
             (active_since,),
         )
         count = cursor.fetchone()[0]
@@ -798,10 +827,11 @@ def get_users_count():
 
 def update_user_activity(user_id: int):
     try:
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            'UPDATE users SET last_active = %s WHERE user_id = %s',
+            "UPDATE users SET last_active = ? WHERE user_id = ?",
             (int(time.time()), user_id),
         )
         conn.commit()
@@ -828,13 +858,14 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         tariff_price = TARIFFS[tariff_key]["price"]
         tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
 
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
 
         # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
-        cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = %s AND status = 'pending'", (user_id,))
+        cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
-            "INSERT INTO payments VALUES (%s, %s, %s, %s, 'pending', %s)",
+            "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
             (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
         )
         conn.commit()
@@ -989,10 +1020,10 @@ def handle_receipt_photo(message):
     user_id = message.from_user.id
     user_lang = get_user_lang(user_id)
 
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = %s AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
         (user_id,)
     )
     pending_pay = cursor.fetchone()
@@ -1055,9 +1086,10 @@ def handle_admin_decision(call):
     user_id = int(parts[3])
     user_lang = get_user_lang(user_id)
 
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute('SELECT status, tariff_name FROM payments WHERE tx_id = %s', (tx_id,))
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = ?", (tx_id,))
     pay_row = cursor.fetchone()
 
     if not pay_row or pay_row[0] != "pending":
@@ -1083,10 +1115,10 @@ def handle_admin_decision(call):
                 plan_key = "daily"
         duration = TARIFFS[plan_key]["duration"]
         premium_until_timestamp = current_time + duration
-        cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = %s", (tx_id,))
+        cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
         display_name = localized_tariff_name(plan_key, user_lang)
         cursor.execute(
-            'UPDATE users SET status = %s, plan_key = %s, premium_until = %s WHERE user_id = %s',
+            "UPDATE users SET status = ?, plan_key = ?, premium_until = ? WHERE user_id = ?",
             (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, user_id),
         )
         conn.commit()
@@ -1107,7 +1139,7 @@ def handle_admin_decision(call):
             pass
 
     elif action == "rej":
-        cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = %s", (tx_id,))
+        cursor.execute("UPDATE payments SET status = 'rejected' WHERE tx_id = ?", (tx_id,))
         conn.commit()
         bot.answer_callback_query(call.id, "To'lov rad etildi.")
         try:
@@ -1130,15 +1162,69 @@ def handle_admin_decision(call):
 # --- FASTAPI ENDPOINTS ---
 app = FastAPI()
 
-@app.exception_handler(db.OperationalError)
-async def teacher_database_operational_error(request: Request, exc: db.OperationalError):
-    logging.exception("PostgreSQL OperationalError: %s", exc)
+# --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
+# Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
+# The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
+# so the live /data database is never moved, renamed or modified.
+SQLITE_BACKUP_TOKEN = os.getenv("SQLITE_BACKUP_TOKEN", "").strip()
+BACKUP_DIR = "/tmp/quiz_pilot_backups"
+
+def _remove_temp_backup(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        logging.exception("Temporary SQLite backup cleanup failed")
+
+@app.get("/admin/sqlite-backup")
+def download_sqlite_backup(
+    token: str = Query(..., min_length=16),
+    background_tasks: BackgroundTasks = None,
+):
+    if not SQLITE_BACKUP_TOKEN:
+        raise HTTPException(status_code=503, detail="SQLite backup endpoint is not configured")
+    if not secrets.compare_digest(token, SQLITE_BACKUP_TOKEN):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="SQLite database file was not found")
+
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(BACKUP_DIR, f"quiz_pilot_sqlite_backup_{stamp}.db")
+
+    try:
+        # sqlite3 backup API creates a consistent snapshot while the app is live.
+        src_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        dst_conn = sqlite3.connect(backup_path, check_same_thread=False)
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+            src_conn.close()
+    except Exception:
+        _remove_temp_backup(backup_path)
+        logging.exception("SQLite backup creation failed")
+        raise HTTPException(status_code=500, detail="SQLite backup creation failed")
+
+    tasks = background_tasks or BackgroundTasks()
+    tasks.add_task(_remove_temp_backup, backup_path)
+    return FileResponse(
+        backup_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(backup_path),
+        background=tasks,
+    )
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def teacher_sqlite_operational_error(request: Request, exc: sqlite3.OperationalError):
+    logging.exception("SQLite OperationalError: %s", exc)
     msg = "__TEACHER_DB_BUSY__" if any(x in str(exc).lower() for x in ("locked", "busy", "readonly")) else "__TEACHER_SERVER_ERROR__"
     return JSONResponse(status_code=500, content={"status": "error", "detail": msg})
 
-@app.exception_handler(db.IntegrityError)
-async def teacher_database_integrity_error(request: Request, exc: db.IntegrityError):
-    logging.exception("PostgreSQL IntegrityError: %s", exc)
+@app.exception_handler(sqlite3.IntegrityError)
+async def teacher_sqlite_integrity_error(request: Request, exc: sqlite3.IntegrityError):
+    logging.exception("SQLite IntegrityError: %s", exc)
     return JSONResponse(status_code=500, content={"status": "error", "detail": "__TEACHER_SERVER_ERROR__"})
 
 app.add_middleware(
@@ -1177,8 +1263,8 @@ def api_payment_intent(req: PaymentIntentRequest):
 @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
     add_user_to_db(user_id)
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at "
@@ -1214,14 +1300,14 @@ def get_premium_status(user_id: int):
     if is_active_paid_status(user_status, premium_until):
         pass
     elif "PRO" in user_status and premium_until > 0 and now > premium_until:
-        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0 WHERE user_id = %s", (user_id,))
+        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0 WHERE user_id = ?", (user_id,))
         conn.commit()
         user_status, plan_key, premium_until = "Oddiy foydalanuvchi", "", 0
 
     # 30 kunlik bepul hisob davri pullik davrdan mustaqil ishlaydi.
     if now - created_at >= 30 * 24 * 3600 and not is_active_paid_status(user_status, premium_until):
         cursor.execute(
-            'UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s',
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, user_id),
         )
         conn.commit()
@@ -1280,11 +1366,11 @@ async def create_quiz_web(
         await file.seek(0)
 
 
-    conn_check = db.connect()
-    conn_check.row_factory = db.Row
+    conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
     cursor_check.execute(
-        'SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = %s',
+        "SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     user_row = cursor_check.fetchone()
@@ -1299,7 +1385,7 @@ async def create_quiz_web(
         thirty_days_sec = 30 * 24 * 3600
         if current_now - created_at >= thirty_days_sec:
             cursor_check.execute(
-                'UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s',
+                "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
                 (current_now, user_id),
             )
             conn_check.commit()
@@ -1311,7 +1397,7 @@ async def create_quiz_web(
             and current_now > premium_until
         ):
             cursor_check.execute(
-                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = %s",
+                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
                 (user_id,),
             )
             conn_check.commit()
@@ -1354,9 +1440,9 @@ async def create_quiz_web(
         extension = Path(original_name).suffix.lower()
         if extension not in ALLOWED_UPLOAD_EXTENSIONS:
             if free_slot_reserved:
-                conn_restore = db.connect()
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                 cur_restore = conn_restore.cursor()
-                cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                 conn_restore.commit(); conn_restore.close()
             return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
 
@@ -1364,9 +1450,9 @@ async def create_quiz_web(
             contents = await file.read()
             if len(contents) > MAX_UPLOAD_FILE_BYTES:
                 if free_slot_reserved:
-                    conn_restore = db.connect()
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                     cur_restore = conn_restore.cursor()
-                    cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                     conn_restore.commit(); conn_restore.close()
                 return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
 
@@ -1384,9 +1470,9 @@ async def create_quiz_web(
                         try: os.remove(file_path)
                         except Exception: pass
                         if free_slot_reserved:
-                            conn_restore = db.connect()
+                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                             cur_restore = conn_restore.cursor()
-                            cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                             conn_restore.commit(); conn_restore.close()
                         return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
                     text_parts = []
@@ -1399,9 +1485,9 @@ async def create_quiz_web(
                                 try: os.remove(file_path)
                                 except Exception: pass
                                 if free_slot_reserved:
-                                    conn_restore = db.connect()
+                                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                     cur_restore = conn_restore.cursor()
-                                    cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                     conn_restore.commit(); conn_restore.close()
                                 return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
                             text_parts.append(page_text)
@@ -1418,9 +1504,9 @@ async def create_quiz_web(
                             try: os.remove(file_path)
                             except Exception: pass
                             if free_slot_reserved:
-                                conn_restore = db.connect()
+                                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                 cur_restore = conn_restore.cursor()
-                                cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                 conn_restore.commit(); conn_restore.close()
                             return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
                         text_parts.append(part)
@@ -1430,9 +1516,9 @@ async def create_quiz_web(
             logging.error(f"Professional file protection / parsing error: {e}")
             if free_slot_reserved:
                 try:
-                    conn_restore = db.connect()
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                     cur_restore = conn_restore.cursor()
-                    cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                    cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                     conn_restore.commit(); conn_restore.close()
                 except Exception: pass
             return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
@@ -1449,9 +1535,9 @@ async def create_quiz_web(
     if not raw_text.strip():
         if free_slot_reserved:
             try:
-                conn_restore = db.connect()
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                 cur_restore = conn_restore.cursor()
-                cur_restore.execute('UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = %s', (user_id,))
+                cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                 conn_restore.commit(); conn_restore.close()
             except Exception: pass
         return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
@@ -1462,7 +1548,7 @@ async def create_quiz_web(
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
-                conn_restore = db.connect()
+                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                 cur_restore = conn_restore.cursor()
                 cur_restore.execute(
                     "UPDATE users "
@@ -1495,10 +1581,12 @@ async def create_quiz_web(
             quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         )
 
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            'INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)\n            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 0)',
+            """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
             (
                 quiz_id,
                 user_id,
@@ -1723,16 +1811,17 @@ def user_heartbeat(user_id: int):
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
     total_users = get_users_count()
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
         "SELECT id, title, total, answered, created_at, last_score, last_percent,"
         " is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC",
         (user_id,),
     )
     personal_rows = cursor.fetchall()
-    cursor.execute('SELECT language FROM users WHERE user_id = %s', (user_id,))
+    cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
     lang_row = cursor.fetchone()
     user_lang = lang_row["language"] if lang_row else "uz"
     conn.close()
@@ -1758,18 +1847,18 @@ def get_user_quizzes(user_id: int):
 @app.get("/api/public-quizzes")
 def get_public_quizzes(user_id: int):
     add_user_to_db(user_id)
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = %s',
+        "SELECT status, plan_key, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     u = cursor.fetchone()
     now = int(time.time())
     if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_active_paid_status(u["status"] or "", u["premium_until"] or 0):
         cursor.execute(
-            'UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s',
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, user_id),
         )
         conn.commit()
@@ -1807,12 +1896,12 @@ def get_public_quizzes(user_id: int):
 @app.get("/api/public-quiz-detail")
 def get_public_quiz_detail(quiz_id: str, user_id: int):
     add_user_to_db(user_id)
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        'SELECT status, premium_until, public_free_used, created_at FROM users WHERE user_id = %s',
+        "SELECT status, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
     u = cursor.fetchone()
@@ -1823,7 +1912,7 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
     # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
     if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
         cursor.execute(
-            'UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s',
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, user_id),
         )
         conn.commit()
@@ -1855,7 +1944,7 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
         if not is_paid:
             notify_free_limit_reached(user_id, "public")
 
-    cursor.execute('SELECT title, quiz_json, is_public FROM quizzes WHERE id = %s', (quiz_id,))
+    cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
 
@@ -1867,10 +1956,11 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
 
 @app.post("/api/toggle-public")
 def toggle_public(quiz_id: str, user_id: int, is_public: int):
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        'UPDATE quizzes SET is_public = %s WHERE id = %s AND user_id = %s',
+        "UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?",
         (is_public, quiz_id, user_id),
     )
     conn.commit()
@@ -1880,10 +1970,11 @@ def toggle_public(quiz_id: str, user_id: int, is_public: int):
 
 @app.post("/api/set-language")
 def set_language(user_id: int, lang: str):
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        'UPDATE users SET language = %s WHERE user_id = %s', (lang, user_id)
+        "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
     )
     conn.commit()
     conn.close()
@@ -1897,7 +1988,7 @@ TEACHER_VARIANT_CODES = ("A", "B", "C", "D")
 def _load_quiz_items(quiz_id: str, owner_id: int):
     def _read(conn):
         cur = conn.cursor()
-        cur.execute('SELECT id, title, quiz_json, total FROM quizzes WHERE id = %s AND user_id = %s', (quiz_id, owner_id))
+        cur.execute("SELECT id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, owner_id))
         return cur.fetchone()
     row = teacher_db_read(_read)
     if not row:
@@ -1961,12 +2052,12 @@ def teacher_generate_variants(req: TeacherVariantsRequest):
     for code in requested:
         variant = _make_variant(items, code)
         payload_json = json.dumps(variant, ensure_ascii=False)
-        cur.execute('SELECT id FROM teacher_variants WHERE quiz_id=%s AND variant_code=%s ORDER BY id LIMIT 1', (req.quiz_id, code))
+        cur.execute("SELECT id FROM teacher_variants WHERE quiz_id=? AND variant_code=? ORDER BY id LIMIT 1", (req.quiz_id, code))
         existing_variant = cur.fetchone()
         if existing_variant:
-            cur.execute('UPDATE teacher_variants SET variant_json=%s, created_at=%s WHERE id=%s', (payload_json, now, existing_variant[0]))
+            cur.execute("UPDATE teacher_variants SET variant_json=?, created_at=? WHERE id=?", (payload_json, now, existing_variant[0]))
         else:
-            cur.execute('INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (%s, %s, %s, %s) ON CONFLICT (quiz_id, variant_code) DO UPDATE SET variant_json=EXCLUDED.variant_json, created_at=EXCLUDED.created_at', (req.quiz_id, code, payload_json, now))
+            cur.execute("INSERT INTO teacher_variants (quiz_id, variant_code, variant_json, created_at) VALUES (?, ?, ?, ?)", (req.quiz_id, code, payload_json, now))
         result.append({"variant": code, "question_count": len(variant["quizzes"])})
     conn.commit()
     conn.close()
@@ -1979,7 +2070,7 @@ def teacher_list_variants(user_id: int, quiz_id: str):
     _load_quiz_items(quiz_id, user_id)
     def _read(conn):
         cur = conn.cursor()
-        cur.execute('SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id=%s ORDER BY variant_code', (quiz_id,))
+        cur.execute("SELECT variant_code, created_at FROM teacher_variants WHERE quiz_id=? ORDER BY variant_code", (quiz_id,))
         return cur.fetchall()
     rows = teacher_db_read(_read)
     return {"status": "ok", "variants": [dict(r) for r in rows]}
@@ -1990,9 +2081,9 @@ def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
     if code not in TEACHER_VARIANT_CODES:
         raise HTTPException(status_code=400, detail=teacher_text(owner_id, "variant_required"))
     conn = teacher_db_connect()
-    conn.row_factory = db.Row
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute('SELECT variant_json FROM teacher_variants WHERE quiz_id=%s AND variant_code=%s', (quiz_id, code))
+    cur.execute("SELECT variant_json FROM teacher_variants WHERE quiz_id=? AND variant_code=?", (quiz_id, code))
     row = cur.fetchone()
     conn.close()
     if row:
@@ -2001,7 +2092,7 @@ def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
     _, items = _load_quiz_items(quiz_id, owner_id)
     variant = _make_variant(items, code)
     conn = teacher_db_connect()
-    conn.execute('INSERT INTO teacher_variants (quiz_id,variant_code,variant_json,created_at) VALUES (%s,%s,%s,%s) ON CONFLICT (quiz_id,variant_code) DO UPDATE SET variant_json=EXCLUDED.variant_json, created_at=EXCLUDED.created_at',
+    conn.execute("INSERT OR REPLACE INTO teacher_variants (quiz_id,variant_code,variant_json,created_at) VALUES (?,?,?,?)",
                  (quiz_id, code, json.dumps(variant, ensure_ascii=False), int(time.time())))
     conn.commit(); conn.close()
     return variant
@@ -2026,7 +2117,7 @@ def _new_group_code(conn, length=6):
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     for _ in range(50):
         code = "".join(secrets.choice(alphabet) for _ in range(length))
-        row = conn.execute('SELECT 1 FROM teacher_groups WHERE join_code=%s LIMIT 1', (code,)).fetchone()
+        row = conn.execute("SELECT 1 FROM teacher_groups WHERE join_code=? LIMIT 1", (code,)).fetchone()
         if not row:
             return code
     raise HTTPException(status_code=500, detail="__TEACHER_SERVER_ERROR__")
@@ -2044,7 +2135,7 @@ def teacher_create_group(req: TeacherGroupCreateRequest):
     def _write(conn):
         code = _new_group_code(conn)
         conn.execute(
-            'INSERT INTO teacher_groups (id,owner_id,name,description,join_code,created_at,active) VALUES (%s,%s,%s,%s,%s,%s,1)',
+            "INSERT INTO teacher_groups (id,owner_id,name,description,join_code,created_at,active) VALUES (?,?,?,?,?,?,1)",
             (gid, req.user_id, name, description, code, now),
         )
         return code
@@ -2071,12 +2162,12 @@ def teacher_join_group(req: TeacherGroupJoinRequest):
     code = (req.join_code or "").strip().upper().replace(" ", "")
     group_id = (req.group_id or "").strip()
     def _write(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         if code:
-            cur.execute('SELECT id,name,active FROM teacher_groups WHERE join_code=%s', (code,))
+            cur.execute("SELECT id,name,active FROM teacher_groups WHERE join_code=?", (code,))
         elif group_id:
-            cur.execute('SELECT id,name,active FROM teacher_groups WHERE id=%s', (group_id,))
+            cur.execute("SELECT id,name,active FROM teacher_groups WHERE id=?", (group_id,))
         else:
             raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_code_required"))
         group = cur.fetchone()
@@ -2084,7 +2175,7 @@ def teacher_join_group(req: TeacherGroupJoinRequest):
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
         now = int(time.time())
         cur.execute(
-            'INSERT INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (group_id,user_id) DO NOTHING',
+            "INSERT OR IGNORE INTO teacher_group_members (group_id,user_id,first_name,username,joined_at) VALUES (?,?,?,?,?)",
             (group["id"], req.user_id, (req.first_name or "")[:100], (req.username or "")[:100], now),
         )
         return dict(group)
@@ -2094,7 +2185,7 @@ def teacher_join_group(req: TeacherGroupJoinRequest):
 @app.get("/api/teacher/my-groups")
 def teacher_my_groups(user_id: int):
     def _read(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
             "SELECT g.id,g.name,g.description,g.join_code,g.created_at,m.joined_at "
@@ -2110,13 +2201,13 @@ def teacher_my_groups(user_id: int):
 def teacher_group_members(group_id: str, user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur=conn.cursor()
-        cur.execute('SELECT g.id,g.name FROM teacher_groups g WHERE g.id=%s AND g.owner_id=%s', (group_id,user_id))
+        cur.execute("SELECT g.id,g.name FROM teacher_groups g WHERE g.id=? AND g.owner_id=?", (group_id,user_id))
         g=cur.fetchone()
         if not g:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
-        cur.execute('SELECT user_id,first_name,username,joined_at FROM teacher_group_members WHERE group_id=%s ORDER BY joined_at', (group_id,))
+        cur.execute("SELECT user_id,first_name,username,joined_at FROM teacher_group_members WHERE group_id=? ORDER BY joined_at", (group_id,))
         return dict(g), cur.fetchall()
     g, rows = teacher_db_read(_read)
     return {"status":"ok", "group":g, "members":[dict(r) for r in rows]}
@@ -2126,7 +2217,7 @@ def teacher_delete_group(group_id: str, user_id: int):
     require_teacher(user_id)
     def _write(conn):
         cur=conn.cursor()
-        cur.execute('UPDATE teacher_groups SET active=0 WHERE id=%s AND owner_id=%s', (group_id,user_id))
+        cur.execute("UPDATE teacher_groups SET active=0 WHERE id=? AND owner_id=?", (group_id,user_id))
         if cur.rowcount != 1:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "group_not_found"))
     teacher_db_write(_write)
@@ -2155,16 +2246,16 @@ def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
     if code:
         _get_teacher_variant(quiz_id,req.user_id,code)
     def _write(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur=conn.cursor()
-        cur.execute('SELECT id,name FROM teacher_groups WHERE id=%s AND owner_id=%s AND active=1',(group_id,req.user_id)); group=cur.fetchone()
-        cur.execute('SELECT id,title FROM quizzes WHERE id=%s AND user_id=%s',(quiz_id,req.user_id)); quiz=cur.fetchone()
+        cur.execute("SELECT id,name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",(group_id,req.user_id)); group=cur.fetchone()
+        cur.execute("SELECT id,title FROM quizzes WHERE id=? AND user_id=?",(quiz_id,req.user_id)); quiz=cur.fetchone()
         if not group:
             raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "group_not_found"))
         if not quiz:
             raise HTTPException(status_code=404,detail=teacher_text(req.user_id, "quiz_not_found"))
         aid=f"ta_{uuid.uuid4().hex[:10]}"; now=int(time.time()); title=(req.title or "").strip()[:150] or quiz["title"]; due_at=max(0,int(req.due_at or 0))
-        cur.execute('INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,duration_minutes,created_at,active) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1)',(aid,req.user_id,group_id,quiz_id,code,title,due_at,duration,now))
+        cur.execute("INSERT INTO teacher_assignments (id,owner_id,group_id,quiz_id,variant_code,title,due_at,duration_minutes,created_at,active) VALUES (?,?,?,?,?,?,?,?,?,1)",(aid,req.user_id,group_id,quiz_id,code,title,due_at,duration,now))
         return {"id":aid,"group_id":group_id,"quiz_id":quiz_id,"variant_code":code,"title":title,"due_at":due_at,"duration_minutes":duration,"created_at":now,"active":True,"group_name":group["name"],"quiz_title":quiz["title"]}
     assignment = teacher_db_write(_write)
     return {"status":"ok","assignment":assignment}
@@ -2173,8 +2264,11 @@ def teacher_create_assignment(req: TeacherAssignmentCreateRequest):
 def teacher_assignments(user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        conn.row_factory=db.Row; cur=conn.cursor()
-        cur.execute('SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,COALESCE(a.duration_minutes,30) AS duration_minutes,a.created_at,a.active,\n                             g.name AS group_name,q.title AS quiz_title\n                      FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id\n                      LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=%s ORDER BY a.created_at DESC LIMIT 100',(user_id,))
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("""SELECT a.id,a.group_id,a.quiz_id,a.variant_code,a.title,a.due_at,COALESCE(a.duration_minutes,30) AS duration_minutes,a.created_at,a.active,
+                             g.name AS group_name,q.title AS quiz_title
+                      FROM teacher_assignments a LEFT JOIN teacher_groups g ON g.id=a.group_id
+                      LEFT JOIN quizzes q ON q.id=a.quiz_id WHERE a.owner_id=? ORDER BY a.created_at DESC LIMIT 100""",(user_id,))
         return cur.fetchall()
     rows=teacher_db_read(_read)
     return {"status":"ok","assignments":[dict(r) for r in rows]}
@@ -2184,7 +2278,7 @@ def teacher_delete_assignment(assignment_id: str, user_id: int):
     require_teacher(user_id)
     def _write(conn):
         cur=conn.cursor()
-        cur.execute('UPDATE teacher_assignments SET active=0 WHERE id=%s AND owner_id=%s',(assignment_id,user_id))
+        cur.execute("UPDATE teacher_assignments SET active=0 WHERE id=? AND owner_id=?",(assignment_id,user_id))
         if cur.rowcount!=1:
             raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
     teacher_db_write(_write)
@@ -2193,8 +2287,10 @@ def teacher_delete_assignment(assignment_id: str, user_id: int):
 @app.get("/api/teacher/export-assignment")
 def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
     require_teacher(user_id)
-    conn=teacher_db_connect(); conn.row_factory=db.Row; cur=conn.cursor()
-    cur.execute('SELECT a.*,g.name AS group_name,q.title AS quiz_title FROM teacher_assignments a\n                   LEFT JOIN teacher_groups g ON g.id=a.group_id LEFT JOIN quizzes q ON q.id=a.quiz_id\n                   WHERE a.id=%s AND a.owner_id=%s',(assignment_id,user_id))
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("""SELECT a.*,g.name AS group_name,q.title AS quiz_title FROM teacher_assignments a
+                   LEFT JOIN teacher_groups g ON g.id=a.group_id LEFT JOIN quizzes q ON q.id=a.quiz_id
+                   WHERE a.id=? AND a.owner_id=?""",(assignment_id,user_id))
     a=cur.fetchone(); conn.close()
     if not a: raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
     return teacher_export_quiz(a["quiz_id"],user_id,format,a["variant_code"] or "A",0)
@@ -2260,9 +2356,9 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
 
 
 # --- O'QITUVCHI GURUH REJIMI ---
-# --- Teacher DB: barqaror ulanish va database contention himoyasi ---
+# --- Teacher DB: barqaror ulanish va SQLite lock himoyasi ---
 def _ensure_teacher_schema(conn):
-    """Teacher jadvallarini Railway'dagi eski PostgreSQL bazalari bilan ham moslaydi.
+    """Teacher jadvallarini Railway'dagi eski SQLite bazalari bilan ham moslaydi.
 
     Oldingi Teacher versiyalarida jadvallar qisman yaratilgan bo'lishi mumkin edi.
     CREATE TABLE IF NOT EXISTS bunday jadvalni yangilamaydi, shuning uchun bu yerda
@@ -2338,12 +2434,20 @@ def _ensure_teacher_schema(conn):
 
     # Avval jadvalning o'zi mavjudligini kafolatlaymiz.
     create_sql = {
-        "teacher_variants": 'CREATE TABLE IF NOT EXISTS teacher_variants (\n            id BIGSERIAL PRIMARY KEY,\n            quiz_id TEXT NOT NULL, variant_code TEXT NOT NULL,\n            variant_json TEXT NOT NULL, created_at INTEGER NOT NULL,\n            UNIQUE(quiz_id, variant_code))',
+        "teacher_variants": """CREATE TABLE IF NOT EXISTS teacher_variants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            quiz_id TEXT NOT NULL, variant_code TEXT NOT NULL,
+            variant_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+            UNIQUE(quiz_id, variant_code))""",
         "teacher_groups": """CREATE TABLE IF NOT EXISTS teacher_groups (
             id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, name TEXT NOT NULL,
             description TEXT DEFAULT '', created_at INTEGER NOT NULL,
             active INTEGER DEFAULT 1)""",
-        "teacher_group_members": "CREATE TABLE IF NOT EXISTS teacher_group_members (\n            id BIGSERIAL PRIMARY KEY, group_id TEXT NOT NULL,\n            user_id INTEGER NOT NULL, first_name TEXT DEFAULT '',\n            username TEXT DEFAULT '', joined_at INTEGER NOT NULL,\n            UNIQUE(group_id, user_id))",
+        "teacher_group_members": """CREATE TABLE IF NOT EXISTS teacher_group_members (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL, first_name TEXT DEFAULT '',
+            username TEXT DEFAULT '', joined_at INTEGER NOT NULL,
+            UNIQUE(group_id, user_id))""",
         "teacher_assignments": """CREATE TABLE IF NOT EXISTS teacher_assignments (
             id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL, group_id TEXT NOT NULL,
             quiz_id TEXT NOT NULL, variant_code TEXT DEFAULT '', title TEXT DEFAULT '',
@@ -2355,14 +2459,19 @@ def _ensure_teacher_schema(conn):
             expires_at INTEGER, active INTEGER DEFAULT 1,
             group_id TEXT DEFAULT '', variant_code TEXT DEFAULT '', deleted INTEGER DEFAULT 0,
             source_type TEXT DEFAULT 'group_test', assignment_id TEXT DEFAULT '')""",
-        "teacher_participants": 'CREATE TABLE IF NOT EXISTS teacher_participants (\n            id BIGSERIAL PRIMARY KEY, session_id TEXT, user_id INTEGER,\n            first_name TEXT, username TEXT, score INTEGER DEFAULT 0,\n            total INTEGER DEFAULT 0, percent INTEGER DEFAULT 0,\n            started_at INTEGER, finished_at INTEGER,\n            UNIQUE(session_id, user_id))',
+        "teacher_participants": """CREATE TABLE IF NOT EXISTS teacher_participants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, user_id INTEGER,
+            first_name TEXT, username TEXT, score INTEGER DEFAULT 0,
+            total INTEGER DEFAULT 0, percent INTEGER DEFAULT 0,
+            started_at INTEGER, finished_at INTEGER,
+            UNIQUE(session_id, user_id))""",
     }
     for name, ddl in create_sql.items():
         conn.execute(ddl)
 
     # Eski jadvallarga yetishmayotgan ustunlarni qo'shamiz.
     for table, columns in table_defs.items():
-        existing = {r[1] for r in db.table_info_rows(conn, table)}
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         for col, typ in columns.items():
             if col in existing:
                 continue
@@ -2370,21 +2479,38 @@ def _ensure_teacher_schema(conn):
                 # ALTER TABLE ADD COLUMN uchun xavfsiz oddiy tip.
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
                 logging.info("Teacher DB migration: %s.%s qo'shildi", table, col)
-            except db.OperationalError as e:
+            except sqlite3.OperationalError as e:
                 # Bir nechta Railway worker bir paytda migration qilsa, keyingi
                 # worker ustun allaqachon qo'shilgan bo'lishi mumkin.
                 logging.warning("Teacher DB migration %s.%s: %s", table, col, e)
 
-    # PostgreSQL migratsiyasidan keyin mavjud ID qiymatlari saqlanadi; row identifier repair talab qilinmaydi.
+    # ID ustuni eski bazada mavjud bo'lmagan bo'lsa, qo'shilgan qiymatlarni
+    # mavjud rowlar uchun ham to'ldiramiz. Yangi yozuvlar endpointlar tomonidan
+    # o'z ID'sini beradi.
+    id_prefixes = {
+        "teacher_groups": "tg_migrated_",
+        "teacher_assignments": "ta_migrated_",
+        "teacher_sessions": "ts_migrated_",
+    }
+    for table, prefix in id_prefixes.items():
+        try:
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "id" in cols:
+                conn.execute(
+                    f"UPDATE {table} SET id=? || rowid WHERE id IS NULL OR TRIM(CAST(id AS TEXT))=''",
+                    (prefix,),
+                )
+        except sqlite3.OperationalError as e:
+            logging.warning("Teacher DB ID repair %s: %s", table, e)
 
     # Eski Railway bazasida teacher_sessions.teacher_id mavjud bo'lsa,
     # owner_id bilan bir xil qiymatga to'ldiramiz. Bu yangi endpointlar va
     # eski sessiyalarni bir xil sxemada ishlashini ta'minlaydi.
     try:
-        session_cols = {r[1] for r in db.table_info_rows(conn, "teacher_sessions")}
+        session_cols = {r[1] for r in conn.execute("PRAGMA table_info(teacher_sessions)").fetchall()}
         if "teacher_id" in session_cols and "owner_id" in session_cols:
             conn.execute("UPDATE teacher_sessions SET teacher_id=owner_id WHERE teacher_id IS NULL")
-    except db.OperationalError as e:
+    except sqlite3.OperationalError as e:
         logging.warning("Teacher DB teacher_id repair: %s", e)
 
     # NULL qiymatlar endpointlar ishlashiga xalaqit bermasin.
@@ -2398,7 +2524,7 @@ def _ensure_teacher_schema(conn):
         for col, value in values.items():
             try:
                 conn.execute(f"UPDATE {table} SET {col}=? WHERE {col} IS NULL", (value,))
-            except db.OperationalError as e:
+            except sqlite3.OperationalError as e:
                 logging.warning("Teacher DB default repair %s.%s: %s", table, col, e)
 
     conn.commit()
@@ -2407,15 +2533,18 @@ def _ensure_teacher_schema(conn):
 _teacher_schema_checked = False
 
 def teacher_db_connect():
-    """Teacher uchun barqaror PostgreSQL ulanishi.
+    """Teacher uchun barqaror SQLite ulanishi.
 
+    Muhim: har bir so'rovda PRAGMA journal_mode=WAL ni qayta yoqish SQLite
     faylini qisqa muddatga lock qilib qo'yishi mumkin. Shu sabab WAL/synchronous
     rejimi init_db() vaqtida o'rnatiladi, bu yerda esa faqat busy_timeout ishlatiladi.
     """
     global _teacher_schema_checked
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=20000")
     try:
+        conn.execute("PRAGMA foreign_keys=ON")
         if not _teacher_schema_checked:
             _ensure_teacher_schema(conn)
             conn.commit()
@@ -2430,7 +2559,7 @@ def teacher_db_connect():
     return conn
 
 def teacher_db_read(work, attempts=6):
-    """Teacher o'qish so'rovlarini database contention bo'lsa avtomatik qayta urinadi."""
+    """Teacher o'qish so'rovlarini SQLite lock bo'lsa avtomatik qayta urinadi."""
     last_error = None
     for attempt in range(attempts):
         conn = None
@@ -2439,14 +2568,14 @@ def teacher_db_read(work, attempts=6):
             result = work(conn)
             conn.close()
             return result
-        except db.OperationalError as e:
+        except sqlite3.OperationalError as e:
             last_error = e
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:
                     pass
-            if any(x in str(e).lower() for x in ("deadlock", "serialization", "connection")):
+            if "locked" in str(e).lower() or "busy" in str(e).lower():
                 time.sleep(0.25 * (attempt + 1))
                 continue
             raise
@@ -2457,7 +2586,7 @@ def teacher_db_read(work, attempts=6):
                 except Exception:
                     pass
             raise
-    raise last_error or db.OperationalError("PostgreSQL database request failed")
+    raise last_error or sqlite3.OperationalError("SQLite database is busy")
 
 def teacher_db_write(work, attempts=6):
     last_error = None
@@ -2468,14 +2597,14 @@ def teacher_db_write(work, attempts=6):
             conn.commit()
             conn.close()
             return result
-        except db.OperationalError as e:
+        except sqlite3.OperationalError as e:
             last_error = e
             try:
                 conn.rollback()
             except Exception:
                 pass
             conn.close()
-            if any(x in str(e).lower() for x in ("deadlock", "serialization", "connection")):
+            if "locked" in str(e).lower() or "busy" in str(e).lower():
                 time.sleep(0.35 * (attempt + 1))
                 continue
             raise
@@ -2486,7 +2615,7 @@ def teacher_db_write(work, attempts=6):
                 pass
             conn.close()
             raise
-    raise last_error or db.OperationalError("PostgreSQL database request failed")
+    raise last_error or sqlite3.OperationalError("SQLite database is busy")
 
 TEACHER_MESSAGES = {
     "uz": {
@@ -2605,7 +2734,7 @@ def require_teacher(user_id: int):
     add_user_to_db(user_id)
     def _check(conn):
         cur = conn.cursor()
-        cur.execute('SELECT status, plan_key, premium_until FROM users WHERE user_id = %s', (user_id,))
+        cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id = ?", (user_id,))
         return cur.fetchone()
     row = teacher_db_read(_check)
     if not row or not is_active_paid_status(row["status"] or "", row["premium_until"] or 0) or (row["plan_key"] or get_plan_key(row["status"] or "")) != "teachers":
@@ -2615,9 +2744,9 @@ def require_teacher(user_id: int):
 def teacher_quizzes(user_id: int):
     require_teacher(user_id)
     conn = teacher_db_connect()
-    conn.row_factory = db.Row
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute('SELECT id, title, total FROM quizzes WHERE user_id = %s ORDER BY created_at DESC', (user_id,))
+    cur.execute("SELECT id, title, total FROM quizzes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     rows = cur.fetchall()
     conn.close()
     return {"status": "ok", "quizzes": [dict(r) for r in rows]}
@@ -2634,7 +2763,7 @@ class TeacherSessionCreateRequest(BaseModel):
 
 @app.post("/api/teacher/create-session")
 def teacher_create_session(req: TeacherSessionCreateRequest):
-    """Create a fresh teacher group session safely on both new and legacy database schemas.
+    """Create a fresh teacher group session safely on both new and legacy SQLite schemas.
 
     The endpoint deliberately does not reuse an old session. Every click creates a new
     session id and an independent 8-character access code. Legacy NOT NULL/extra columns
@@ -2655,8 +2784,9 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
     # so students and teachers can distinguish them from manually started group tests.
     if assignment_id:
         def _read_assignment(conn):
-            conn.row_factory = db.Row
-            row = conn.execute('SELECT id,group_id,quiz_id,variant_code,title,active,COALESCE(duration_minutes,30) AS duration_minutes\n                                  FROM teacher_assignments WHERE id=%s AND owner_id=%s', (assignment_id, req.user_id)).fetchone()
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("""SELECT id,group_id,quiz_id,variant_code,title,active,COALESCE(duration_minutes,30) AS duration_minutes
+                                  FROM teacher_assignments WHERE id=? AND owner_id=?""", (assignment_id, req.user_id)).fetchone()
             return row
         assignment_row = teacher_db_read(_read_assignment)
         if not assignment_row or not int(assignment_row["active"] or 0):
@@ -2673,10 +2803,10 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
         _get_teacher_variant(req.quiz_id, req.user_id, variant_code)
 
     def _write(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
-            'SELECT id, name FROM teacher_groups WHERE id=%s AND owner_id=%s AND active=1',
+            "SELECT id, name FROM teacher_groups WHERE id=? AND owner_id=? AND active=1",
             (group_id, req.user_id),
         )
         group = cur.fetchone()
@@ -2685,7 +2815,7 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
 
         # Read the actual live schema every time. Railway may contain a database
         # created by an older Teacher version with extra required columns.
-        rows = db.table_info_rows(conn, "teacher_sessions")
+        rows = cur.execute("PRAGMA table_info(teacher_sessions)").fetchall()
         column_info = {row[1]: row for row in rows}
         required_core = {"id", "owner_id", "quiz_id", "code", "duration_minutes", "created_at", "expires_at", "active", "group_id", "variant_code"}
         missing_core = sorted(required_core - set(column_info))
@@ -2769,7 +2899,7 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
                     "source_type": "assignment" if assignment_id else "group_test",
                     "assignment_id": assignment_id,
                 }
-            except db.IntegrityError as e:
+            except sqlite3.IntegrityError as e:
                 last_integrity = e
                 logging.warning("Teacher session INSERT collision/constraint (attempt %s): %s", _attempt + 1, e)
                 continue
@@ -2783,9 +2913,14 @@ def teacher_create_session(req: TeacherSessionCreateRequest):
 def teacher_sessions(user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,\n                             COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code,\n                             COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id\n                      FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id\n                      WHERE s.owner_id=%s AND COALESCE(s.deleted,0)=0\n                      ORDER BY s.created_at DESC LIMIT 30", (user_id,))
+        cur.execute("""SELECT s.id, s.code, s.quiz_id, q.title, s.duration_minutes, s.created_at, s.expires_at, s.active,
+                             COALESCE(s.group_id,'') AS group_id, COALESCE(s.variant_code,'') AS variant_code,
+                             COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id
+                      FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
+                      WHERE s.owner_id=? AND COALESCE(s.deleted,0)=0
+                      ORDER BY s.created_at DESC LIMIT 30""", (user_id,))
         return cur.fetchall()
     rows = teacher_db_read(_read)
     now = int(time.time())
@@ -2804,7 +2939,7 @@ def teacher_delete_session(session_id: str, user_id: int):
         # Soft-delete: the teacher no longer sees the session, but participant
         # records remain safe for database integrity/audit purposes.
         cur.execute(
-            'UPDATE teacher_sessions SET active=0, deleted=1 WHERE id=%s AND owner_id=%s',
+            "UPDATE teacher_sessions SET active=0, deleted=1 WHERE id=? AND owner_id=?",
             (session_id, user_id),
         )
         if cur.rowcount != 1:
@@ -2815,8 +2950,8 @@ def teacher_delete_session(session_id: str, user_id: int):
 @app.get("/api/teacher-session")
 def teacher_session_info(code: str, user_id: int):
     def _read(conn):
-        conn.row_factory=db.Row; cur=conn.cursor()
-        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=%s AND COALESCE(s.deleted,0)=0", (code.upper(),))
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("SELECT s.id, s.owner_id, s.quiz_id, s.code, s.duration_minutes, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, COALESCE(s.group_id,'') AS group_id, q.title, q.total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.code=? AND COALESCE(s.deleted,0)=0", (code.upper(),))
         return cur.fetchone()
     row=teacher_db_read(_read)
     if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
@@ -2831,7 +2966,7 @@ def teacher_session_info(code: str, user_id: int):
 
 def _session_owner_id(session_id: str, user_id: int):
     conn=teacher_db_connect(); cur=conn.cursor()
-    cur.execute('SELECT owner_id FROM teacher_sessions WHERE id=%s', (session_id,)); row=cur.fetchone(); conn.close()
+    cur.execute("SELECT owner_id FROM teacher_sessions WHERE id=?", (session_id,)); row=cur.fetchone(); conn.close()
     if not row: raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     return row[0]
 
@@ -2846,9 +2981,28 @@ def teacher_group_sessions(user_id: int):
     """
     now = int(time.time())
     def _read(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("\n            SELECT DISTINCT s.id, s.code, s.quiz_id, q.title, q.total,\n                   s.duration_minutes, s.created_at, s.expires_at, s.group_id,\n                   g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code,\n                   COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id,\n                   COALESCE(p.finished_at,0) AS finished_at,\n                   COALESCE(p.started_at,0) AS started_at,\n                   COALESCE(p.score,0) AS student_score,\n                   COALESCE(p.total,q.total) AS student_total,\n                   COALESCE(p.percent,0) AS student_percent\n            FROM teacher_group_members m\n            JOIN teacher_groups g ON g.id=m.group_id AND g.active=1\n            JOIN teacher_sessions s ON s.group_id=g.id\n            JOIN quizzes q ON q.id=s.quiz_id\n            LEFT JOIN teacher_participants p ON p.session_id=s.id AND p.user_id=m.user_id\n            WHERE m.user_id=%s AND s.active=1 AND COALESCE(s.deleted,0)=0\n              AND s.expires_at>%s\n            ORDER BY s.created_at DESC\n            LIMIT 30\n        ", (user_id, now))
+        cur.execute("""
+            SELECT DISTINCT s.id, s.code, s.quiz_id, q.title, q.total,
+                   s.duration_minutes, s.created_at, s.expires_at, s.group_id,
+                   g.name AS group_name, COALESCE(s.variant_code,'') AS variant_code,
+                   COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id,
+                   COALESCE(p.finished_at,0) AS finished_at,
+                   COALESCE(p.started_at,0) AS started_at,
+                   COALESCE(p.score,0) AS student_score,
+                   COALESCE(p.total,q.total) AS student_total,
+                   COALESCE(p.percent,0) AS student_percent
+            FROM teacher_group_members m
+            JOIN teacher_groups g ON g.id=m.group_id AND g.active=1
+            JOIN teacher_sessions s ON s.group_id=g.id
+            JOIN quizzes q ON q.id=s.quiz_id
+            LEFT JOIN teacher_participants p ON p.session_id=s.id AND p.user_id=m.user_id
+            WHERE m.user_id=? AND s.active=1 AND COALESCE(s.deleted,0)=0
+              AND s.expires_at>?
+            ORDER BY s.created_at DESC
+            LIMIT 30
+        """, (user_id, now))
         return cur.fetchall()
     rows = teacher_db_read(_read)
     return {"status":"ok", "sessions":[dict(r) for r in rows], "server_time":now}
@@ -2856,7 +3010,11 @@ def teacher_group_sessions(user_id: int):
 
 def _student_can_access_session(conn, session_id: str, user_id: int):
     """A session is accessible to its owner or to a member of its group."""
-    row = conn.execute('\n        SELECT s.owner_id, s.group_id, s.active, COALESCE(s.deleted,0) AS deleted,\n               s.expires_at\n        FROM teacher_sessions s WHERE s.id=%s\n    ', (session_id,)).fetchone()
+    row = conn.execute("""
+        SELECT s.owner_id, s.group_id, s.active, COALESCE(s.deleted,0) AS deleted,
+               s.expires_at
+        FROM teacher_sessions s WHERE s.id=?
+    """, (session_id,)).fetchone()
     if not row:
         return None
     if int(row[0] or 0) == int(user_id):
@@ -2865,7 +3023,7 @@ def _student_can_access_session(conn, session_id: str, user_id: int):
     if not group_id:
         return None
     member = conn.execute(
-        'SELECT 1 FROM teacher_group_members WHERE group_id=%s AND user_id=%s LIMIT 1',
+        "SELECT 1 FROM teacher_group_members WHERE group_id=? AND user_id=? LIMIT 1",
         (group_id, user_id),
     ).fetchone()
     return row if member else None
@@ -2876,9 +3034,15 @@ def teacher_session_start(session_id: str, user_id: int):
     """Register the moment a student actually enters a group test."""
     now = int(time.time())
     def _write(conn):
-        conn.row_factory = db.Row
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("\n            SELECT s.id,s.owner_id,s.group_id,s.quiz_id,s.expires_at,s.active,\n                   COALESCE(s.deleted,0) AS deleted,s.duration_minutes,q.title,q.total,\n                   COALESCE(s.variant_code,'') AS variant_code\n            FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id\n            WHERE s.id=%s\n        ", (session_id,))
+        cur.execute("""
+            SELECT s.id,s.owner_id,s.group_id,s.quiz_id,s.expires_at,s.active,
+                   COALESCE(s.deleted,0) AS deleted,s.duration_minutes,q.title,q.total,
+                   COALESCE(s.variant_code,'') AS variant_code
+            FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id
+            WHERE s.id=?
+        """, (session_id,))
         s = cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
@@ -2891,7 +3055,7 @@ def teacher_session_start(session_id: str, user_id: int):
         first_name = "Telegram User"
         username = ""
         existing = cur.execute(
-            'SELECT id, started_at, finished_at, score, total, percent FROM teacher_participants WHERE session_id=%s AND user_id=%s ORDER BY id LIMIT 1',
+            "SELECT id, started_at, finished_at, score, total, percent FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1",
             (session_id, user_id),
         ).fetchone()
         if existing:
@@ -2901,9 +3065,17 @@ def teacher_session_start(session_id: str, user_id: int):
                 raise HTTPException(status_code=409, detail=teacher_text(user_id, "session_already_completed"))
             # If the student simply reopens an unfinished test, preserve the
             # original start time so the server-side session timer cannot reset.
-            cur.execute('\n                UPDATE teacher_participants\n                SET first_name=%s, username=%s, total=%s\n                WHERE id=%s\n            ', (first_name, username, s["total"], existing[0]))
+            cur.execute("""
+                UPDATE teacher_participants
+                SET first_name=?, username=?, total=?
+                WHERE id=?
+            """, (first_name, username, s["total"], existing[0]))
         else:
-            cur.execute('\n                INSERT INTO teacher_participants\n                (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at)\n                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,0)\n            ', (session_id,user_id,first_name,username,0,s["total"],0,now))
+            cur.execute("""
+                INSERT INTO teacher_participants
+                (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at)
+                VALUES (?,?,?,?,?,?,?,?,0)
+            """, (session_id,user_id,first_name,username,0,s["total"],0,now))
         return dict(s)
     data = teacher_db_write(_write)
     return {"status":"ok", "session_id":data["id"], "quiz_id":data["quiz_id"],
@@ -2914,8 +3086,8 @@ def teacher_session_start(session_id: str, user_id: int):
 
 @app.get("/api/teacher-session-quiz")
 def teacher_session_quiz(session_id: str, user_id: int):
-    conn=teacher_db_connect(); conn.row_factory=db.Row; cur=conn.cursor()
-    cur.execute("SELECT s.quiz_id, q.title, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=%s AND COALESCE(s.deleted,0)=0", (session_id,))
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT s.quiz_id, q.title, s.expires_at, s.active, COALESCE(s.variant_code,'') AS variant_code, q.quiz_json FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND COALESCE(s.deleted,0)=0", (session_id,))
     row=cur.fetchone()
     if not row: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
     access = _student_can_access_session(conn, session_id, user_id)
@@ -2941,12 +3113,12 @@ class TeacherSubmitRequest(BaseModel):
 
 @app.post("/api/teacher-submit")
 def teacher_submit(req: TeacherSubmitRequest):
-    conn=teacher_db_connect(); conn.row_factory=db.Row; cur=conn.cursor()
-    cur.execute('SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id=%s', (req.session_id,)); s=cur.fetchone()
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id=?", (req.session_id,)); s=cur.fetchone()
     if not s: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
     now=int(time.time())
     if s["deleted"]: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
-    cur.execute('SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id=%s AND user_id=%s ORDER BY id LIMIT 1', (req.session_id, req.user_id))
+    cur.execute("SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
     existing_participant = cur.fetchone()
     # Timer 00:00 da avtomatik yuborilgan natija ham server tomonidan qabul qilinadi,
     # lekin faqat o'quvchi sessiya tugashidan oldin kirgan bo'lsa. Bu kechikkan
@@ -2962,9 +3134,9 @@ def teacher_submit(req: TeacherSubmitRequest):
         # student. A duplicate/retry must never overwrite the completed result.
         if int(existing_participant[2] or 0) > 0:
             conn.close(); raise HTTPException(status_code=409, detail=teacher_text(req.user_id, "session_already_completed"))
-        cur.execute('UPDATE teacher_participants SET first_name=%s, username=%s, score=%s, total=%s, percent=%s, finished_at=%s WHERE id=%s', (*values[:5], values[6], existing_participant[0]))
+        cur.execute("UPDATE teacher_participants SET first_name=?, username=?, score=?, total=?, percent=?, finished_at=? WHERE id=?", (*values[:5], values[6], existing_participant[0]))
     else:
-        cur.execute('INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)', (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
+        cur.execute("INSERT INTO teacher_participants (session_id,user_id,first_name,username,score,total,percent,started_at,finished_at) VALUES (?,?,?,?,?,?,?,?,?)", (req.session_id,req.user_id,req.first_name[:100],req.username[:100],req.score,req.total,req.percent,now,now))
     conn.commit(); conn.close(); return {"status":"ok"}
 
 
@@ -2972,11 +3144,11 @@ def teacher_submit(req: TeacherSubmitRequest):
 def teacher_session_results(session_id: str, user_id: int):
     require_teacher(user_id)
     def _read(conn):
-        conn.row_factory=db.Row; cur=conn.cursor()
-        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=%s AND s.owner_id=%s AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
+        conn.row_factory=sqlite3.Row; cur=conn.cursor()
+        cur.execute("SELECT s.quiz_id, q.title, s.code, s.expires_at, COALESCE(s.source_type,'group_test') AS source_type, COALESCE(s.assignment_id,'') AS assignment_id FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,user_id)); s=cur.fetchone()
         if not s:
             raise HTTPException(status_code=404, detail=teacher_text(user_id, "session_not_found"))
-        cur.execute('SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id=%s ORDER BY percent DESC, score DESC, finished_at ASC', (session_id,)); rows=cur.fetchall()
+        cur.execute("SELECT first_name, username, score, total, percent, started_at, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC, finished_at ASC", (session_id,)); rows=cur.fetchall()
         active_students = sum(1 for r in rows if int(r["started_at"] or 0) > 0 and int(r["finished_at"] or 0) == 0)
         completed_students = sum(1 for r in rows if int(r["finished_at"] or 0) > 0)
         return dict(s), rows, active_students, completed_students
@@ -2985,9 +3157,9 @@ def teacher_session_results(session_id: str, user_id: int):
 
 def _teacher_export_rows(session_id, owner_id):
     require_teacher(owner_id)
-    conn=teacher_db_connect(); conn.row_factory=db.Row; cur=conn.cursor()
-    cur.execute('SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=%s AND s.owner_id=%s AND COALESCE(s.deleted,0)=0', (session_id,owner_id)); s=cur.fetchone()
-    cur.execute('SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=%s ORDER BY percent DESC, score DESC', (session_id,)); rows=cur.fetchall(); conn.close()
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("SELECT s.code, q.title FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=? AND s.owner_id=? AND COALESCE(s.deleted,0)=0", (session_id,owner_id)); s=cur.fetchone()
+    cur.execute("SELECT first_name, username, score, total, percent, finished_at FROM teacher_participants WHERE session_id=? ORDER BY percent DESC, score DESC", (session_id,)); rows=cur.fetchall(); conn.close()
     if not s: raise HTTPException(status_code=404, detail=teacher_text(owner_id, "session_not_found"))
     return s, rows
 
@@ -3045,11 +3217,12 @@ def teacher_export(session_id: str, user_id: int, format: str):
 
 @app.get("/api/flashcards")
 def get_flashcards(user_id: int):
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        'SELECT id, front, back FROM flashcards WHERE user_id = %s ORDER BY'
+        "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY"
         " created_at DESC",
         (user_id,),
     )
@@ -3062,12 +3235,12 @@ def get_flashcards(user_id: int):
 @app.post("/api/create-flashcard")
 def create_flashcard(req: FlashcardCreateRequest):
     add_user_to_db(req.user_id)
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     cursor.execute(
-        'SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = %s',
+        "SELECT status, premium_until, flashcard_free_used, created_at FROM users WHERE user_id = ?",
         (req.user_id,),
     )
     u = cursor.fetchone()
@@ -3077,7 +3250,7 @@ def create_flashcard(req: FlashcardCreateRequest):
     # 30 kunlik bepul davr tugagan bo'lsa, uchala hisoblagichni reset qilamiz.
     if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
         cursor.execute(
-            'UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = %s WHERE user_id = %s',
+            "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, req.user_id),
         )
         conn.commit()
@@ -3106,7 +3279,7 @@ def create_flashcard(req: FlashcardCreateRequest):
 
     card_id = f"c_{int(time.time())}_{os.urandom(2).hex()}"
     cursor.execute(
-        'INSERT INTO flashcards VALUES (%s, %s, %s, %s, %s)',
+        "INSERT INTO flashcards VALUES (?, ?, ?, ?, ?)",
         (card_id, req.user_id, req.front, req.back, int(time.time())),
     )
     conn.commit()
@@ -3118,10 +3291,11 @@ def create_flashcard(req: FlashcardCreateRequest):
 
 @app.delete("/api/delete-flashcard")
 def delete_flashcard(card_id: str, user_id: int):
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        'DELETE FROM flashcards WHERE id = %s AND user_id = %s', (card_id, user_id)
+        "DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id)
     )
     conn.commit()
     conn.close()
@@ -3130,10 +3304,11 @@ def delete_flashcard(card_id: str, user_id: int):
 
 @app.get("/api/quiz-detail")
 def get_quiz_detail(quiz_id: str):
-    conn = db.connect()
-    conn.row_factory = db.Row
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute('SELECT title, quiz_json FROM quizzes WHERE id = %s', (quiz_id,))
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("SELECT title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
@@ -3143,10 +3318,11 @@ def get_quiz_detail(quiz_id: str):
 
 @app.post("/api/update-progress")
 def update_progress(data: ProgressUpdateRequest):
-    conn = db.connect()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
-        'UPDATE quizzes SET answered = total, last_score = %s, last_percent = %s'
+        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
         " WHERE id = ? AND user_id = ?",
         (data.correct_count, data.percent, data.quiz_id, data.user_id),
     )
@@ -3158,10 +3334,11 @@ def update_progress(data: ProgressUpdateRequest):
 @app.delete("/api/delete-quiz")
 def delete_quiz(quiz_id: str, user_id: int):
     try:
-        conn = db.connect()
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         cursor = conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
-            'DELETE FROM quizzes WHERE id = %s AND user_id = %s', (quiz_id, user_id)
+            "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
         )
         conn.commit()
         conn.close()
@@ -3203,13 +3380,14 @@ async def startup_event():
 # ==================================================================
 
 # DB Sozlamalari
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL Railway Variables ichida topilmadi")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-news_engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=int(os.getenv("PG_NEWS_POOL_SIZE", "5")), max_overflow=int(os.getenv("PG_NEWS_MAX_OVERFLOW", "10")))
+if DATABASE_URL.startswith("sqlite"):
+    news_engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    news_engine = create_engine(DATABASE_URL)
 
 NewsSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=news_engine)
 NewsBase = declarative_base()
