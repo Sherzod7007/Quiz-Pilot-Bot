@@ -610,6 +610,15 @@ def init_db():
 
 init_db()
 
+# --- HYBRID DATABASE V1 ---
+# SQLite remains the MASTER database and all existing application code stays unchanged.
+# PostgreSQL is an asynchronous mirror. Any PostgreSQL error must never stop SQLite/app requests.
+try:
+    import hybrid_sync
+    hybrid_sync.start(DB_PATH)
+except Exception as hybrid_db_error:
+    logging.exception("Hybrid PostgreSQL mirror could not start; SQLite continues normally: %s", hybrid_db_error)
+
 
 class QuizItem(BaseModel):
     question: str = Field(description="Savol matni")
