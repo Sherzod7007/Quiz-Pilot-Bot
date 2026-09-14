@@ -77,6 +77,85 @@ def _pg_type(sqlite_type):
             return value
     return "TEXT"
 
+
+def _value_requires_text(value):
+    """True when a SQLite value cannot safely be represented by a numeric PostgreSQL type."""
+    if value is None or isinstance(value, (int, float, bool)):
+        return False
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return False
+    text = str(value).strip()
+    if not text:
+        return True
+    # Accept integer/decimal/exponent forms only. IDs like q_..., fc_..., ts_... require TEXT.
+    return re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text) is None
+
+def _mirror_type(sqlite_conn, table, column):
+    """
+    SQLite is dynamically typed. Some legacy Quiz Pilot tables declare an ID as INTEGER
+    but contain text IDs (q_..., fc_..., ts_..., etc.). PostgreSQL is strict, so infer
+    TEXT from real SQLite values when necessary.
+    """
+    declared = _pg_type(column[2])
+    if declared in ("BIGINT", "DOUBLE PRECISION", "NUMERIC"):
+        name = column[1].replace('"', '""')
+        tbl = table.replace('"', '""')
+        rows = sqlite_conn.execute(
+            'SELECT "{}" FROM "{}" WHERE "{}" IS NOT NULL LIMIT 1000'.format(name, tbl, name)
+        ).fetchall()
+        if any(_value_requires_text(r[0]) for r in rows):
+            return "TEXT"
+    return declared
+
+def _postgres_column_types(cur, table):
+    cur.execute("""
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = %s
+    """, (table,))
+    return {row[0]: row[1] for row in cur.fetchall()}
+
+def _postgres_type_matches(current, desired):
+    current = (current or "").lower()
+    desired = desired.upper()
+    aliases = {
+        "BIGINT": {"bigint"},
+        "TEXT": {"text", "character varying", "character"},
+        "BYTEA": {"bytea"},
+        "DOUBLE PRECISION": {"double precision", "real"},
+        "NUMERIC": {"numeric", "decimal"},
+        "BOOLEAN": {"boolean"},
+        "TIMESTAMP": {"timestamp without time zone", "timestamp with time zone"},
+    }
+    return current in aliases.get(desired, {desired.lower()})
+
+def _reconcile_postgres_column_types(cur, sqlite_conn, table, columns):
+    """
+    Upgrade an existing MIRROR schema when an old deployment created a strict numeric
+    PostgreSQL column for a dynamically typed SQLite column containing text IDs.
+    Mirror data is disposable/rebuildable from SQLite MASTER.
+    """
+    existing = _postgres_column_types(cur, table)
+    for c in columns:
+        name = c[1]
+        desired = _mirror_type(sqlite_conn, table, c)
+        if name not in existing or _postgres_type_matches(existing[name], desired):
+            continue
+        # This migration intentionally changes only to TEXT. SQLite's dynamic typing
+        # can legitimately contain q_/fc_/ts_ identifiers in an INTEGER-declared column.
+        # Other declared-type differences are left unchanged to avoid destructive casts.
+        if desired != "TEXT":
+            continue
+        _log("warning", "migrating PostgreSQL mirror column %s.%s from %s to TEXT",
+             table, name, existing[name])
+        cur.execute(sql.SQL(
+            "ALTER TABLE {} ALTER COLUMN {} TYPE TEXT USING {}::text"
+        ).format(
+            sql.Identifier(table),
+            sql.Identifier(name),
+            sql.Identifier(name),
+        ))
+
 def _index_name(table, pks):
     return re.sub(r"[^A-Za-z0-9_]+", "_", "hybrid_uq_%s_%s" % (table, "_".join(pks)))[:60]
 
@@ -126,10 +205,11 @@ def ensure_postgres_schema(sqlite_conn):
                 if not columns:
                     continue
 
+                mirror_types = {c[1]: _mirror_type(sqlite_conn, table, c) for c in columns}
                 defs = [
                     sql.SQL("{} {}").format(
                         sql.Identifier(c[1]),
-                        sql.SQL(_pg_type(c[2]))
+                        sql.SQL(mirror_types[c[1]])
                     )
                     for c in columns
                 ]
@@ -147,8 +227,13 @@ def ensure_postgres_schema(sqlite_conn):
                     ).format(
                         sql.Identifier(table),
                         sql.Identifier(c[1]),
-                        sql.SQL(_pg_type(c[2]))
+                        sql.SQL(mirror_types[c[1]])
                     ))
+
+                # Existing PostgreSQL mirror tables may have been created by an older
+                # version using SQLite's declared type only. Reconcile them with actual
+                # SQLite values before any upsert/index operation.
+                _reconcile_postgres_column_types(cur, sqlite_conn, table, columns)
 
                 pks = _pk_columns(columns)
                 if pks:
