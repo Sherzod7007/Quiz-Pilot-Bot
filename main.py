@@ -1171,6 +1171,30 @@ def handle_admin_decision(call):
 # --- FASTAPI ENDPOINTS ---
 app = FastAPI()
 
+# --- HYBRID V2 DATABASE DIAGNOSTIC (ADMIN ONLY / READ-ONLY) ---
+@app.get("/api/admin/hybrid-db-check")
+def hybrid_db_check(
+    user_id: int,
+    table_name: Optional[str] = None,
+    record_id: Optional[str] = None,
+):
+    """SQLite MASTER va PostgreSQL MIRROR holatini o'qish uchun diagnostika."""
+    if ADMIN_ID is None or int(user_id) != int(ADMIN_ID):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    try:
+        import hybrid_sync
+        return hybrid_sync.diagnostic_snapshot(
+            DB_PATH,
+            table_name=table_name,
+            pk_value=record_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.exception("Hybrid DB diagnostic error")
+        raise HTTPException(status_code=500, detail=f"Hybrid DB diagnostic failed: {e}")
+
+
 # --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
 # Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
 # The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
