@@ -2143,9 +2143,27 @@ def teacher_create_group(req: TeacherGroupCreateRequest):
     description = (req.description or "")[:500]
     def _write(conn):
         code = _new_group_code(conn)
+
+        # Eski Railway bazalarida teacher_groups PRIMARY KEY ustuni `id` emas,
+        # boshqa nomda qolgan bo'lishi mumkin. Hybrid V2 trigger aynan haqiqiy
+        # PRIMARY KEY qiymatini outbox'ga yozadi; shuning uchun PK bo'sh qolsa
+        # NOT NULL xatosi chiqadi. Joriy va eski sxemalarni buzmasdan bir xil
+        # `gid` qiymatini haqiqiy PK ustuniga ham beramiz.
+        table_info = conn.execute("PRAGMA table_info(teacher_groups)").fetchall()
+        pk_columns = [row[1] for row in table_info if row[5]]
+        pk_column = pk_columns[0] if len(pk_columns) == 1 else "id"
+
+        columns = ["id", "owner_id", "name", "description", "join_code", "created_at", "active"]
+        values = [gid, req.user_id, name, description, code, now, 1]
+        if pk_column not in columns:
+            columns.insert(1, pk_column)
+            values.insert(1, gid)
+
+        placeholders = ",".join("?" for _ in columns)
+        quoted_columns = ",".join('"{}"'.format(col.replace('"', '""')) for col in columns)
         conn.execute(
-            "INSERT INTO teacher_groups (id,owner_id,name,description,join_code,created_at,active) VALUES (?,?,?,?,?,?,1)",
-            (gid, req.user_id, name, description, code, now),
+            "INSERT INTO teacher_groups ({}) VALUES ({})".format(quoted_columns, placeholders),
+            values,
         )
         return code
     code = teacher_db_write(_write)
