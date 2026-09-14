@@ -1,125 +1,337 @@
 # -*- coding: utf-8 -*-
-import os, sqlite3, threading, time, logging, re
+"""
+Quiz Pilot Professional Hybrid Database V2
+SQLite = MASTER / source of truth
+PostgreSQL = asynchronous MIRROR
+"""
+import logging
+import os
+import re
+import sqlite3
+import threading
+import time
 from psycopg2 import pool, sql
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+PG_URL = os.getenv("HYBRID_DATABASE_URL", "").strip()
 SYNC_INTERVAL = max(2, int(os.getenv("HYBRID_SYNC_INTERVAL", "5")))
-BATCH_SIZE = max(10, min(1000, int(os.getenv("HYBRID_SYNC_BATCH", "100"))))
-MAX_ATTEMPTS = max(1, int(os.getenv("HYBRID_SYNC_MAX_ATTEMPTS", "100")))
-_ENABLED = bool(DATABASE_URL)
+BATCH_SIZE = max(10, min(1000, int(os.getenv("HYBRID_SYNC_BATCH", "200"))))
+PG_POOL_MAX = max(1, min(20, int(os.getenv("HYBRID_PG_POOL_MAX", "5"))))
+MAX_BACKOFF = max(10, min(3600, int(os.getenv("HYBRID_MAX_BACKOFF", "300"))))
+
+_ENABLED = bool(PG_URL)
 _pg_pool = None
 _worker_started = False
 _stop = threading.Event()
 _lock = threading.Lock()
-TYPE_MAP={"INTEGER":"BIGINT","INT":"BIGINT","TEXT":"TEXT","REAL":"DOUBLE PRECISION","BLOB":"BYTEA","NUMERIC":"NUMERIC"}
+
+TYPE_MAP = {
+    "INT": "BIGINT", "CHAR": "TEXT", "CLOB": "TEXT", "TEXT": "TEXT",
+    "BLOB": "BYTEA", "REAL": "DOUBLE PRECISION", "FLOA": "DOUBLE PRECISION",
+    "DOUB": "DOUBLE PRECISION", "NUMERIC": "NUMERIC", "DECIMAL": "NUMERIC",
+    "BOOL": "BOOLEAN", "DATE": "TIMESTAMP", "TIME": "TIMESTAMP",
+}
+
+def _log(level, message, *args):
+    getattr(logging, level)("Hybrid V2 | " + message, *args)
 
 def _pg():
     global _pg_pool
-    if not _ENABLED: return None
+    if not _ENABLED:
+        return None
     if _pg_pool is None:
         with _lock:
             if _pg_pool is None:
-                _pg_pool=pool.ThreadedConnectionPool(1,max(2,int(os.getenv("HYBRID_PG_POOL_MAX","5"))),DATABASE_URL)
+                _pg_pool = pool.ThreadedConnectionPool(1, PG_POOL_MAX, dsn=PG_URL)
     return _pg_pool
-def _tables(c):
-    return [r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'hybrid_%'").fetchall()]
-def _cols(c,t): return c.execute(f'PRAGMA table_info("{t}")').fetchall()
-def _pk(cols): return next((c[1] for c in cols if c[5]),None)
-def _typ(t):
-    u=(t or "TEXT").upper()
-    return next((v for k,v in TYPE_MAP.items() if k in u),"TEXT")
 
-def ensure_postgres_schema(sc):
-    if not _ENABLED: return
-    p=_pg(); pc=p.getconn()
+def _sqlite_connect(path):
+    conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+def _tables(conn):
+    rows = conn.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'hybrid_%'
+        ORDER BY name
+    """).fetchall()
+    return [r[0] for r in rows]
+
+def _columns(conn, table):
+    return conn.execute('PRAGMA table_info("{}")'.format(table.replace('"', '""'))).fetchall()
+
+def _pk_columns(columns):
+    rows = [c for c in columns if c[5]]
+    rows.sort(key=lambda c: c[5])
+    return [c[1] for c in rows]
+
+def _single_pk(columns):
+    pks = _pk_columns(columns)
+    return pks[0] if len(pks) == 1 else None
+
+def _pg_type(sqlite_type):
+    t = (sqlite_type or "TEXT").upper()
+    for key, value in TYPE_MAP.items():
+        if key in t:
+            return value
+    return "TEXT"
+
+def _index_name(table, pks):
+    return re.sub(r"[^A-Za-z0-9_]+", "_", "hybrid_uq_%s_%s" % (table, "_".join(pks)))[:60]
+
+def ensure_postgres_schema(sqlite_conn):
+    pg = _pg()
+    pg_conn = pg.getconn()
     try:
-        with pc.cursor() as cur:
-            for t in _tables(sc):
-                cols=_cols(sc,t)
-                defs=[sql.SQL("{} {}").format(sql.Identifier(c[1]),sql.SQL(_typ(c[2]))) for c in cols]
-                cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(sql.Identifier(t),sql.SQL(", ").join(defs)))
-                for c in cols:
-                    cur.execute(sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(sql.Identifier(t),sql.Identifier(c[1]),sql.SQL(_typ(c[2]))))
-        pc.commit()
+        with pg_conn.cursor() as cur:
+            for table in _tables(sqlite_conn):
+                columns = _columns(sqlite_conn, table)
+                if not columns:
+                    continue
+                defs = [sql.SQL("{} {}").format(sql.Identifier(c[1]), sql.SQL(_pg_type(c[2]))) for c in columns]
+                cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
+                    sql.Identifier(table), sql.SQL(", ").join(defs)))
+                for c in columns:
+                    cur.execute(sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(
+                        sql.Identifier(table), sql.Identifier(c[1]), sql.SQL(_pg_type(c[2]))))
+                pks = _pk_columns(columns)
+                if pks:
+                    cur.execute(sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({})").format(
+                        sql.Identifier(_index_name(table, pks)),
+                        sql.Identifier(table),
+                        sql.SQL(", ").join(map(sql.Identifier, pks))))
+        pg_conn.commit()
     except Exception:
-        pc.rollback(); raise
-    finally: p.putconn(pc)
+        pg_conn.rollback()
+        raise
+    finally:
+        pg.putconn(pg_conn)
 
-def _install_outbox(c):
-    c.execute("CREATE TABLE IF NOT EXISTS hybrid_sync_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, pk_name TEXT NOT NULL, pk_value TEXT NOT NULL, operation TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_hybrid_outbox_id ON hybrid_sync_outbox(id)")
-    for t in _tables(c):
-        pk=_pk(_cols(c,t))
-        if not pk: continue
-        safe=re.sub(r'[^a-zA-Z0-9_]','_',t)
-        for op,ref in (("INSERT","NEW"),("UPDATE","NEW"),("DELETE","OLD")):
-            trig=f"hybrid_{safe}_{op.lower()}"
-            q=f'''CREATE TRIGGER IF NOT EXISTS "{trig}" AFTER {op} ON "{t}" BEGIN
-            INSERT INTO hybrid_sync_outbox(table_name,pk_name,pk_value,operation,attempts,created_at)
-            VALUES ('{t}','{pk}',CAST({ref}."{pk}" AS TEXT),'{op}',0,CAST(strftime('%s','now') AS INTEGER)); END'''
-            c.execute(q)
-    c.commit()
+def _drop_v1_triggers(conn):
+    rows = conn.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='trigger' AND name LIKE 'hybrid_%'
+    """).fetchall()
+    for row in rows:
+        conn.execute('DROP TRIGGER IF EXISTS "{}"'.format(row[0].replace('"', '""')))
 
-def _initial_enqueue(c):
-    c.execute("CREATE TABLE IF NOT EXISTS hybrid_sync_state (key TEXT PRIMARY KEY, value TEXT)")
-    if c.execute("SELECT 1 FROM hybrid_sync_state WHERE key='initial_enqueue_v1'").fetchone(): return
-    now=int(time.time())
-    for t in _tables(c):
-        pk=_pk(_cols(c,t))
-        if not pk: continue
-        rows=c.execute(f'SELECT "{pk}" FROM "{t}"').fetchall()
-        c.executemany("INSERT INTO hybrid_sync_outbox(table_name,pk_name,pk_value,operation,attempts,created_at) VALUES (?,?,?,?,0,?)",[(t,pk,str(r[0]),"UPSERT",now) for r in rows])
-    c.execute("INSERT OR REPLACE INTO hybrid_sync_state(key,value) VALUES('initial_enqueue_v1','1')"); c.commit()
+def _migrate_outbox(conn):
+    _drop_v1_triggers(conn)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hybrid_sync_outbox_v2 (
+            table_name TEXT NOT NULL,
+            pk_name TEXT NOT NULL,
+            pk_value TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL,
+            next_retry_at INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            PRIMARY KEY (table_name, pk_name, pk_value)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_hybrid_v2_ready
+        ON hybrid_sync_outbox_v2(next_retry_at, updated_at)
+    """)
+    has_v1 = conn.execute("""
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='hybrid_sync_outbox'
+    """).fetchone()
+    if has_v1:
+        rows = conn.execute("""
+            SELECT table_name, pk_name, pk_value, operation, created_at
+            FROM hybrid_sync_outbox ORDER BY id
+        """).fetchall()
+        for r in rows:
+            conn.execute("""
+                INSERT INTO hybrid_sync_outbox_v2
+                (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error)
+                VALUES (?,?,?,?,0,?,0,NULL)
+                ON CONFLICT(table_name,pk_name,pk_value) DO UPDATE SET
+                    operation=excluded.operation, attempts=0,
+                    updated_at=excluded.updated_at, next_retry_at=0,last_error=NULL
+            """, (r[0], r[1], str(r[2]), r[3], r[4] or int(time.time())))
+        conn.execute("DELETE FROM hybrid_sync_outbox")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS hybrid_sync_state (
+            key TEXT PRIMARY KEY, value TEXT
+        )
+    """)
 
-def _sync_one(sc,cur,item):
-    _,t,pk,pv,op=item
-    # Mirror is deliberately DELETE+INSERT instead of ON CONFLICT so it also works
-    # with pre-existing PostgreSQL tables that were created without PK/UNIQUE constraints.
-    cur.execute(sql.SQL("DELETE FROM {} WHERE {}=%s").format(sql.Identifier(t),sql.Identifier(pk)),(pv,))
-    if op=="DELETE": return
-    row=sc.execute(f'SELECT * FROM "{t}" WHERE "{pk}"=?',(pv,)).fetchone()
-    if row is None: return
-    names=[d[0] for d in sc.execute(f'SELECT * FROM "{t}" LIMIT 0').description]
-    vals=list(row)
-    q=sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
-        sql.Identifier(t),sql.SQL(", ").join(map(sql.Identifier,names)),
-        sql.SQL(", ").join([sql.SQL("%s")]*len(names)))
-    cur.execute(q,vals)
+def _install_v2_triggers(conn):
+    for table in _tables(conn):
+        pk = _single_pk(_columns(conn, table))
+        if not pk:
+            _log("warning", "table %s skipped: no single-column primary key", table)
+            continue
+        safe = re.sub(r"[^A-Za-z0-9_]+", "_", table)[:40]
+        for op, ref in (("INSERT","NEW"),("UPDATE","NEW"),("DELETE","OLD")):
+            trigger = "hybrid_v2_%s_%s" % (safe, op.lower())
+            statement = """
+                CREATE TRIGGER IF NOT EXISTS "{trigger}"
+                AFTER {op} ON "{table}"
+                BEGIN
+                    INSERT INTO hybrid_sync_outbox_v2
+                    (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error)
+                    VALUES ('{table_lit}','{pk_lit}',CAST({ref}."{pk}" AS TEXT),
+                            '{op}',0,CAST(strftime('%s','now') AS INTEGER),0,NULL)
+                    ON CONFLICT(table_name,pk_name,pk_value) DO UPDATE SET
+                        operation=excluded.operation, attempts=0,
+                        updated_at=excluded.updated_at,next_retry_at=0,last_error=NULL;
+                END
+            """.format(
+                trigger=trigger, op=op,
+                table=table.replace('"','""'), table_lit=table.replace("'","''"),
+                pk=pk.replace('"','""'), pk_lit=pk.replace("'","''"), ref=ref)
+            conn.execute(statement)
+
+def _initial_enqueue_v2(conn):
+    if conn.execute("SELECT value FROM hybrid_sync_state WHERE key='initial_enqueue_v2'").fetchone():
+        return 0
+    now = int(time.time())
+    total = 0
+    for table in _tables(conn):
+        pk = _single_pk(_columns(conn, table))
+        if not pk:
+            continue
+        rows = conn.execute('SELECT "{}" FROM "{}"'.format(
+            pk.replace('"','""'), table.replace('"','""'))).fetchall()
+        conn.executemany("""
+            INSERT INTO hybrid_sync_outbox_v2
+            (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error)
+            VALUES (?,?,?,'UPSERT',0,?,0,NULL)
+            ON CONFLICT(table_name,pk_name,pk_value) DO UPDATE SET
+                operation='UPSERT',attempts=0,updated_at=excluded.updated_at,
+                next_retry_at=0,last_error=NULL
+        """, [(table, pk, str(r[0]), now) for r in rows])
+        total += len(rows)
+    conn.execute("""
+        INSERT OR REPLACE INTO hybrid_sync_state(key,value)
+        VALUES('initial_enqueue_v2','1')
+    """)
+    return total
+
+def _row_for_sync(sqlite_conn, item):
+    table, pk, value = item["table_name"], item["pk_name"], item["pk_value"]
+    names = [c[1] for c in _columns(sqlite_conn, table)]
+    row = sqlite_conn.execute('SELECT * FROM "{}" WHERE "{}"=?'.format(
+        table.replace('"','""'), pk.replace('"','""')), (value,)).fetchone()
+    return names, None if row is None else [row[n] for n in names]
+
+def _upsert_one(cur, table, pk_name, names, values):
+    updates = [n for n in names if n != pk_name]
+    action = (sql.SQL("DO UPDATE SET ") + sql.SQL(", ").join(
+        sql.SQL("{}=EXCLUDED.{}").format(sql.Identifier(n), sql.Identifier(n))
+        for n in updates)) if updates else sql.SQL("DO NOTHING")
+    query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) {}").format(
+        sql.Identifier(table),
+        sql.SQL(", ").join(map(sql.Identifier, names)),
+        sql.SQL(", ").join(sql.Placeholder() for _ in names),
+        sql.Identifier(pk_name), action)
+    cur.execute(query, values)
+
+def _sync_item(sqlite_conn, pg_conn, item):
+    table, pk, value, op = item["table_name"], item["pk_name"], item["pk_value"], item["operation"]
+    with pg_conn.cursor() as cur:
+        if op == "DELETE":
+            cur.execute(sql.SQL("DELETE FROM {} WHERE {}=%s").format(
+                sql.Identifier(table), sql.Identifier(pk)), (value,))
+            return
+        names, values = _row_for_sync(sqlite_conn, item)
+        if values is None:
+            cur.execute(sql.SQL("DELETE FROM {} WHERE {}=%s").format(
+                sql.Identifier(table), sql.Identifier(pk)), (value,))
+            return
+        _upsert_one(cur, table, pk, names, values)
+
+def _mark_success(conn, item):
+    conn.execute("""
+        DELETE FROM hybrid_sync_outbox_v2
+        WHERE table_name=? AND pk_name=? AND pk_value=?
+    """, (item["table_name"], item["pk_name"], item["pk_value"]))
+
+def _mark_failure(conn, item, error):
+    attempts = int(item["attempts"] or 0) + 1
+    delay = min(MAX_BACKOFF, 2 ** min(attempts, 8))
+    conn.execute("""
+        UPDATE hybrid_sync_outbox_v2
+        SET attempts=?,next_retry_at=?,last_error=?
+        WHERE table_name=? AND pk_name=? AND pk_value=?
+    """, (attempts, int(time.time()) + delay, str(error)[:1000],
+          item["table_name"], item["pk_name"], item["pk_value"]))
 
 def sync_once(path):
-    if not _ENABLED: return False
-    sc=sqlite3.connect(path,timeout=30); sc.row_factory=sqlite3.Row; p=_pg(); pc=None
+    if not _ENABLED:
+        return {"synced":0,"failed":0,"pending":0}
+    sc = _sqlite_connect(path)
+    pg = _pg()
+    pc = None
+    synced = failed = 0
     try:
-        rows=sc.execute("SELECT id,table_name,pk_name,pk_value,operation FROM hybrid_sync_outbox ORDER BY id LIMIT ?",(BATCH_SIZE,)).fetchall()
-        if not rows: return True
-        pc=p.getconn()
-        try:
-            with pc.cursor() as cur:
-                for r in rows: _sync_one(sc,cur,r)
-            pc.commit()
-            sc.executemany("DELETE FROM hybrid_sync_outbox WHERE id=?",[(r[0],) for r in rows]); sc.commit(); return True
-        except Exception as e:
-            pc.rollback(); logging.warning("Hybrid PostgreSQL sync retry: %s",e)
-            sc.executemany("UPDATE hybrid_sync_outbox SET attempts=attempts+1 WHERE id=?",[(r[0],) for r in rows]); sc.execute("DELETE FROM hybrid_sync_outbox WHERE attempts>?",(MAX_ATTEMPTS,)); sc.commit(); return False
+        rows = sc.execute("""
+            SELECT table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at
+            FROM hybrid_sync_outbox_v2
+            WHERE next_retry_at<=?
+            ORDER BY updated_at LIMIT ?
+        """, (int(time.time()), BATCH_SIZE)).fetchall()
+        if not rows:
+            return {"synced":0,"failed":0,"pending":0}
+        pc = pg.getconn()
+        for item in rows:
+            try:
+                _sync_item(sc, pc, item)
+                pc.commit()
+                _mark_success(sc, item)
+                synced += 1
+            except Exception as exc:
+                pc.rollback()
+                _mark_failure(sc, item, exc)
+                failed += 1
+        sc.commit()
+        pending = sc.execute("SELECT COUNT(*) FROM hybrid_sync_outbox_v2").fetchone()[0]
+        if synced:
+            _log("info", "synced=%s failed=%s pending=%s", synced, failed, pending)
+        elif failed:
+            _log("warning", "sync failed=%s pending=%s (retry scheduled)", failed, pending)
+        return {"synced":synced,"failed":failed,"pending":pending}
     finally:
-        if pc is not None: p.putconn(pc)
+        if pc is not None:
+            pg.putconn(pc)
         sc.close()
 
 def _worker(path):
-    logging.info("Hybrid DB worker started | SQLite MASTER | PostgreSQL MIRROR | interval=%ss",SYNC_INTERVAL)
+    _log("info", "worker started | SQLite MASTER | PostgreSQL MIRROR | interval=%ss | batch=%s",
+         SYNC_INTERVAL, BATCH_SIZE)
     while not _stop.wait(SYNC_INTERVAL):
-        try: sync_once(path)
-        except Exception as e: logging.warning("Hybrid DB worker error: %s",e)
+        try:
+            sync_once(path)
+        except Exception as exc:
+            _log("warning", "worker error (SQLite continues normally): %s", exc)
 
 def start(path):
     global _worker_started
     if not _ENABLED:
-        logging.info("Hybrid DB disabled: DATABASE_URL not set; SQLite standalone."); return False
+        _log("info", "disabled: HYBRID_DATABASE_URL not set; SQLite standalone.")
+        return False
     try:
-        sc=sqlite3.connect(path,timeout=30); _install_outbox(sc); ensure_postgres_schema(sc); _initial_enqueue(sc); sc.close()
-    except Exception as e:
-        logging.exception("Hybrid DB init failed; SQLite continues normally: %s",e); return False
+        sc = _sqlite_connect(path)
+        try:
+            _migrate_outbox(sc)
+            _install_v2_triggers(sc)
+            initial = _initial_enqueue_v2(sc)
+            sc.commit()
+            ensure_postgres_schema(sc)
+        finally:
+            sc.close()
+        _log("info", "enabled | SQLite MASTER | PostgreSQL MIRROR | initial_pending=%s", initial)
+    except Exception as exc:
+        _log("exception", "initialization failed; SQLite continues normally: %s", exc)
+        return False
     with _lock:
         if not _worker_started:
-            _worker_started=True; threading.Thread(target=_worker,args=(path,),daemon=True,name="HybridPostgresMirror").start()
+            _worker_started = True
+            threading.Thread(target=_worker, args=(path,), daemon=True,
+                             name="QuizPilotHybridV2").start()
     return True
