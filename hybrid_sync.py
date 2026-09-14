@@ -478,6 +478,136 @@ def sync_once(path):
             pg.putconn(pc)
         sc.close()
 
+
+def diagnostic_snapshot(path, table_name=None, pk_value=None):
+    """
+    Read-only Hybrid V2 diagnostic.
+    Compares SQLite MASTER and PostgreSQL MIRROR table row counts and,
+    optionally, one record identified by its single-column primary key.
+    """
+    result = {
+        "enabled": bool(_ENABLED),
+        "mode": "SQLite MASTER / PostgreSQL MIRROR",
+        "sqlite": {},
+        "postgresql": {},
+        "tables": [],
+        "mismatches": [],
+        "outbox": {},
+    }
+    sc = _sqlite_connect(path)
+    try:
+        result["outbox"] = {
+            "pending": sc.execute(
+                "SELECT COUNT(*) FROM hybrid_sync_outbox_v2"
+            ).fetchone()[0] if sc.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hybrid_sync_outbox_v2'"
+            ).fetchone() else 0,
+            "failed": sc.execute(
+                "SELECT COUNT(*) FROM hybrid_sync_outbox_v2 WHERE attempts > 0"
+            ).fetchone()[0] if sc.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hybrid_sync_outbox_v2'"
+            ).fetchone() else 0,
+        }
+
+        tables = _tables(sc)
+        if table_name:
+            if table_name not in tables:
+                raise ValueError("SQLite table not found: %s" % table_name)
+            tables = [table_name]
+
+        result["sqlite"]["database"] = path
+        result["sqlite"]["table_count"] = len(tables)
+
+        if not _ENABLED:
+            result["postgresql"]["connected"] = False
+            for table in tables:
+                count = sc.execute(
+                    'SELECT COUNT(*) FROM "{}"'.format(table.replace('"','""'))
+                ).fetchone()[0]
+                result["tables"].append({
+                    "table": table, "sqlite_count": count,
+                    "postgresql_count": None, "match": False
+                })
+            return result
+
+        pg = _pg()
+        pc = pg.getconn()
+        try:
+            result["postgresql"]["connected"] = True
+            with pc.cursor() as cur:
+                for table in tables:
+                    sqlite_count = sc.execute(
+                        'SELECT COUNT(*) FROM "{}"'.format(table.replace('"','""'))
+                    ).fetchone()[0]
+                    pg_count = None
+                    pg_error = None
+                    try:
+                        cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(
+                            sql.Identifier(table)
+                        ))
+                        pg_count = cur.fetchone()[0]
+                    except Exception as exc:
+                        pc.rollback()
+                        pg_error = str(exc)
+
+                    match = (pg_error is None and sqlite_count == pg_count)
+                    row = {
+                        "table": table,
+                        "sqlite_count": sqlite_count,
+                        "postgresql_count": pg_count,
+                        "match": match,
+                    }
+                    if pg_error:
+                        row["postgresql_error"] = pg_error
+                    result["tables"].append(row)
+                    if not match:
+                        result["mismatches"].append(table)
+
+                if table_name and pk_value is not None:
+                    columns = _columns(sc, table_name)
+                    pk = _single_pk(columns)
+                    if not pk:
+                        result["record"] = {
+                            "checked": False,
+                            "reason": "Table has no single-column primary key"
+                        }
+                    else:
+                        sqlite_row = sc.execute(
+                            'SELECT * FROM "{}" WHERE "{}"=?'.format(
+                                table_name.replace('"','""'), pk.replace('"','"')
+                            ), (str(pk_value),)
+                        ).fetchone()
+                        try:
+                            cur.execute(sql.SQL(
+                                "SELECT * FROM {} WHERE {}=%s"
+                            ).format(sql.Identifier(table_name), sql.Identifier(pk)),
+                            (str(pk_value),))
+                            pg_row = cur.fetchone()
+                            pg_columns = [d[0] for d in cur.description] if cur.description else []
+                            pg_data = dict(zip(pg_columns, pg_row)) if pg_row else None
+                            result["record"] = {
+                                "checked": True,
+                                "table": table_name,
+                                "pk": pk,
+                                "pk_value": str(pk_value),
+                                "sqlite_found": sqlite_row is not None,
+                                "postgresql_found": pg_row is not None,
+                                "sqlite_data": dict(sqlite_row) if sqlite_row else None,
+                                "postgresql_data": pg_data,
+                            }
+                        except Exception as exc:
+                            pc.rollback()
+                            result["record"] = {
+                                "checked": False,
+                                "table": table_name,
+                                "error": str(exc),
+                            }
+        finally:
+            pg.putconn(pc)
+    finally:
+        sc.close()
+    return result
+
 def _worker(path):
     _log("info", "worker started | SQLite MASTER | PostgreSQL MIRROR | interval=%ss | batch=%s",
          SYNC_INTERVAL, BATCH_SIZE)
