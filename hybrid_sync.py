@@ -80,6 +80,42 @@ def _pg_type(sqlite_type):
 def _index_name(table, pks):
     return re.sub(r"[^A-Za-z0-9_]+", "_", "hybrid_uq_%s_%s" % (table, "_".join(pks)))[:60]
 
+def _deduplicate_postgres_keys(cur, table, pks):
+    """
+    PostgreSQL mirror may contain duplicate rows left by an older Hybrid version.
+    SQLite is the MASTER, so removing duplicate mirror rows is safe.
+    Keep one copy; current SQLite rows are re-upserted afterwards.
+    """
+    if not pks:
+        return 0
+
+    conditions = sql.SQL(" AND ").join(
+        sql.SQL("a.{} IS NOT DISTINCT FROM b.{}").format(
+            sql.Identifier(pk), sql.Identifier(pk)
+        )
+        for pk in pks
+    )
+
+    query = sql.SQL(
+        "DELETE FROM {table} AS a USING {table} AS b "
+        "WHERE a.ctid < b.ctid AND ({conditions})"
+    ).format(
+        table=sql.Identifier(table),
+        conditions=conditions,
+    )
+
+    cur.execute(query)
+    removed = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    if removed:
+        _log(
+            "warning",
+            "removed %s duplicate mirror row(s) from %s before UNIQUE index",
+            removed,
+            table,
+        )
+    return removed
+
+
 def ensure_postgres_schema(sqlite_conn):
     pg = _pg()
     pg_conn = pg.getconn()
@@ -89,24 +125,52 @@ def ensure_postgres_schema(sqlite_conn):
                 columns = _columns(sqlite_conn, table)
                 if not columns:
                     continue
-                defs = [sql.SQL("{} {}").format(sql.Identifier(c[1]), sql.SQL(_pg_type(c[2]))) for c in columns]
-                cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {} ({})").format(
-                    sql.Identifier(table), sql.SQL(", ").join(defs)))
+
+                defs = [
+                    sql.SQL("{} {}").format(
+                        sql.Identifier(c[1]),
+                        sql.SQL(_pg_type(c[2]))
+                    )
+                    for c in columns
+                ]
+
+                cur.execute(sql.SQL(
+                    "CREATE TABLE IF NOT EXISTS {} ({})"
+                ).format(
+                    sql.Identifier(table),
+                    sql.SQL(", ").join(defs)
+                ))
+
                 for c in columns:
-                    cur.execute(sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}").format(
-                        sql.Identifier(table), sql.Identifier(c[1]), sql.SQL(_pg_type(c[2]))))
+                    cur.execute(sql.SQL(
+                        "ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} {}"
+                    ).format(
+                        sql.Identifier(table),
+                        sql.Identifier(c[1]),
+                        sql.SQL(_pg_type(c[2]))
+                    ))
+
                 pks = _pk_columns(columns)
                 if pks:
-                    cur.execute(sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({})").format(
+                    # Older mirror versions could leave duplicate rows in PostgreSQL.
+                    # SQLite is MASTER, so deduplicating the MIRROR is safe.
+                    _deduplicate_postgres_keys(cur, table, pks)
+
+                    cur.execute(sql.SQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({})"
+                    ).format(
                         sql.Identifier(_index_name(table, pks)),
                         sql.Identifier(table),
-                        sql.SQL(", ").join(map(sql.Identifier, pks))))
+                        sql.SQL(", ").join(map(sql.Identifier, pks))
+                    ))
+
         pg_conn.commit()
     except Exception:
         pg_conn.rollback()
         raise
     finally:
         pg.putconn(pg_conn)
+
 
 def _drop_v1_triggers(conn):
     rows = conn.execute("""
