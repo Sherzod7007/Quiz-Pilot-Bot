@@ -333,6 +333,7 @@ def sync_once(path):
     pg = _pg()
     pc = None
     synced = failed = 0
+    failure_details = {}
     try:
         rows = sc.execute("""
             SELECT table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at
@@ -353,12 +354,39 @@ def sync_once(path):
                 pc.rollback()
                 _mark_failure(sc, item, exc)
                 failed += 1
+
+                # Railway logda asl PostgreSQL/psycopg2 xatosini ko'rsatish uchun
+                # bir xil xatolarni bitta batch ichida jamlaymiz.
+                error_text = " ".join(str(exc).split())[:1000]
+                key = (
+                    item["table_name"], item["pk_name"], item["operation"],
+                    type(exc).__name__, error_text
+                )
+                if key not in failure_details:
+                    failure_details[key] = {
+                        "count": 0,
+                        "pk_value": item["pk_value"],
+                        "attempts": int(item["attempts"] or 0) + 1,
+                    }
+                failure_details[key]["count"] += 1
+
         sc.commit()
         pending = sc.execute("SELECT COUNT(*) FROM hybrid_sync_outbox_v2").fetchone()[0]
-        if synced:
-            _log("info", "synced=%s failed=%s pending=%s", synced, failed, pending)
-        elif failed:
-            _log("warning", "sync failed=%s pending=%s (retry scheduled)", failed, pending)
+
+        if failure_details:
+            for (table, pk_name, operation, exc_type, error_text), detail in list(failure_details.items())[:10]:
+                _log(
+                    "warning",
+                    "sync item failed | table=%s | %s=%s | op=%s | attempts=%s | count=%s | %s: %s",
+                    table, pk_name, detail["pk_value"], operation, detail["attempts"],
+                    detail["count"], exc_type, error_text
+                )
+            if len(failure_details) > 10:
+                _log("warning", "sync failure summary truncated: %s different error group(s)", len(failure_details))
+
+        if synced or failed:
+            level = "info" if failed == 0 else "warning"
+            _log(level, "sync summary | synced=%s failed=%s pending=%s", synced, failed, pending)
         return {"synced":synced,"failed":failed,"pending":pending}
     finally:
         if pc is not None:
