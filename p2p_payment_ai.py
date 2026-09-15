@@ -13,6 +13,8 @@ import queue
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+import hashlib
+import re
 
 from google import genai
 from google.genai import types as genai_types
@@ -23,10 +25,17 @@ UZ_TZ = timezone(timedelta(hours=5))
 PAYMENT_GEMINI_API_KEYS = [
     k.strip() for k in os.getenv("PAYMENT_GEMINI_API_KEYS", "").split(",") if k.strip()
 ]
-PAYMENT_GEMINI_MODEL = os.getenv("PAYMENT_GEMINI_MODEL", "gemini-2.5-flash").strip()
+PAYMENT_GEMINI_MODEL = os.getenv("PAYMENT_GEMINI_MODEL", "gemini-3.6-flash").strip()
+PAYMENT_GEMINI_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "").split(",") if m.strip()
+]
 PAYMENT_OCR_MAX_CONCURRENT = max(1, int(os.getenv("PAYMENT_OCR_MAX_CONCURRENT", "2")))
 PAYMENT_OCR_QUEUE_MAX = max(PAYMENT_OCR_MAX_CONCURRENT, int(os.getenv("PAYMENT_OCR_QUEUE_MAX", "100")))
-PAYMENT_OCR_MAX_RETRIES = max(1, min(3, int(os.getenv("PAYMENT_OCR_MAX_RETRIES", "2"))))
+PAYMENT_OCR_MAX_RETRIES = max(1, min(6, int(os.getenv("PAYMENT_OCR_MAX_RETRIES", "4"))))
+PAYMENT_OCR_RETRY_BASE_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_BASE_SECONDS", "30")))
+PAYMENT_OCR_RETRY_MAX_SECONDS = max(PAYMENT_OCR_RETRY_BASE_SECONDS, int(os.getenv("PAYMENT_OCR_RETRY_MAX_SECONDS", "300")))
+PAYMENT_OCR_RETRY_SCAN_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_SCAN_SECONDS", "10")))
+P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
 PAYMENT_OCR_MAX_IMAGE_MB = max(1, int(os.getenv("PAYMENT_OCR_MAX_IMAGE_MB", "8")))
 PAYMENT_OCR_DAILY_MAX_REQUESTS = max(1, int(os.getenv("PAYMENT_OCR_DAILY_MAX_REQUESTS", "200")))
 PAYMENT_OCR_MONTHLY_MAX_REQUESTS = max(1, int(os.getenv("PAYMENT_OCR_MONTHLY_MAX_REQUESTS", "5000")))
@@ -107,6 +116,10 @@ def init_db():
         estimated_cost_usd REAL DEFAULT 0,
         created_at INTEGER NOT NULL,
         processed_at INTEGER DEFAULT 0,
+        next_retry_at INTEGER DEFAULT 0,
+        image_sha256 TEXT DEFAULT '',
+        attempts INTEGER DEFAULT 0,
+        last_error TEXT DEFAULT '',
         UNIQUE(tx_id)
     )""")
     conn.execute("""CREATE TABLE IF NOT EXISTS p2p_ai_budget (
@@ -125,6 +138,10 @@ def init_db():
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN attempts INTEGER DEFAULT 0")
     if "last_error" not in cols:
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN last_error TEXT DEFAULT ''")
+    if "next_retry_at" not in cols:
+        conn.execute("ALTER TABLE p2p_receipts ADD COLUMN next_retry_at INTEGER DEFAULT 0")
+    if "image_sha256" not in cols:
+        conn.execute("ALTER TABLE p2p_receipts ADD COLUMN image_sha256 TEXT DEFAULT ''")
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_status ON p2p_receipts(status, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_tx ON p2p_receipts(transaction_id)")
@@ -219,9 +236,9 @@ def enqueue_receipt(tx_id, user_id, file_id):
         row = conn.execute("SELECT status FROM p2p_receipts WHERE tx_id=?", (tx_id,)).fetchone()
         if row and row["status"] in ("analyzed", "approved", "rejected", "review"):
             return False, "already_processed"
-        conn.execute("INSERT OR IGNORE INTO p2p_receipts (tx_id,user_id,telegram_file_id,status,created_at) VALUES (?,?,?,?,?)",
+        conn.execute("INSERT OR IGNORE INTO p2p_receipts (tx_id,user_id,telegram_file_id,status,created_at,next_retry_at) VALUES (?,?,?,?,?,0)",
                      (tx_id, user_id, file_id, "queued", _now()))
-        conn.execute("UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='' WHERE tx_id=? AND status IN ('waiting_capacity','error')",
+        conn.execute("UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='', next_retry_at=0 WHERE tx_id=? AND status IN ('waiting_capacity','error','retry_wait','budget_blocked')",
                      (file_id, tx_id))
         conn.commit()
     finally:
@@ -275,16 +292,27 @@ def _parse_response(text):
         raise
 
 
-def _vision(file_bytes, mime_type):
-    if not PAYMENT_GEMINI_API_KEYS:
-        raise RuntimeError("PAYMENT_GEMINI_API_KEYS sozlanmagan")
+def _is_transient_error(exc):
+    text = str(exc).upper()
+    return any(token in text for token in (
+        "503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "502", "504",
+        "DEADLINE_EXCEEDED", "TIMEOUT", "TIMED OUT", "TEMPORARY"
+    ))
+
+
+def _retry_delay(attempt):
+    # Persistent exponential backoff: 30s, 60s, 120s, 240s... capped at 5m by default.
+    return min(PAYMENT_OCR_RETRY_MAX_SECONDS, PAYMENT_OCR_RETRY_BASE_SECONDS * (2 ** max(0, attempt - 1)))
+
+
+def _vision_once(file_bytes, mime_type, model, api_key):
     prompt = """
 You analyze a payment receipt image. Extract only visible facts; never invent missing values.
 Return JSON matching the requested schema.
 Rules:
 - amount: numeric payment amount, 0 if unknown.
 - currency: visible currency, e.g. UZS.
-- transaction_id: visible transaction/operation/reference ID; empty if absent.
+- transaction_id: visible bank transaction/operation/reference ID; empty if absent.
 - transaction_date/time: visible date/time as text.
 - recipient_card_last4: ONLY the last 4 digits of the recipient card if visible; empty otherwise.
 - recipient_name and bank_or_app: visible values only.
@@ -293,36 +321,50 @@ Rules:
 - reason: concise explanation of missing/ambiguous data.
 Do not claim that a receipt is authentic. OCR is not bank verification.
 """
+    client = genai.Client(api_key=api_key)
+    return client.models.generate_content(
+        model=model,
+        contents=[prompt, genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)],
+        config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ReceiptAIResult,
+            temperature=0,
+        ),
+    )
+
+
+def _vision(file_bytes, mime_type, attempt_number):
+    if not PAYMENT_GEMINI_API_KEYS:
+        raise RuntimeError("PAYMENT_GEMINI_API_KEYS sozlanmagan")
+
+    models = [PAYMENT_GEMINI_MODEL] + PAYMENT_GEMINI_FALLBACK_MODELS
     last_error = None
-    for attempt in range(PAYMENT_OCR_MAX_RETRIES):
+    for model in models:
+        # Rotate keys for every model/attempt. With multiple keys this avoids repeatedly
+        # hitting the same provider key during a transient outage.
         key_idx, api_key = _next_key()
         if not api_key:
-            break
+            continue
         acquired = _semaphore.acquire(timeout=120)
         if not acquired:
-            last_error = "OCR concurrency limit"
+            last_error = RuntimeError("OCR concurrency limit")
             continue
         try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=PAYMENT_GEMINI_MODEL,
-                contents=[prompt, genai_types.Part.from_bytes(data=file_bytes, mime_type=mime_type)],
-                config=genai_types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ReceiptAIResult,
-                    temperature=0,
-                ),
-            )
+            response = _vision_once(file_bytes, mime_type, model, api_key)
             result = _parse_response(response.text)
             inp, out = _extract_usage(response)
-            return result, key_idx, inp, out
+            return result, key_idx, inp, out, model
         except Exception as exc:
-            last_error = str(exc)
-            logging.warning("P2P Gemini Vision xatosi | key=%s | attempt=%s | %s", key_idx, attempt + 1, exc)
-            time.sleep(min(4, 0.75 * (2 ** attempt)))
+            last_error = exc
+            logging.warning(
+                "P2P Gemini Vision xatosi | model=%s | key=%s | receipt_attempt=%s | %s",
+                model, key_idx, attempt_number, exc
+            )
+            if not _is_transient_error(exc):
+                raise
         finally:
             _semaphore.release()
-    raise RuntimeError(last_error or "Gemini Vision ishlamadi")
+    raise RuntimeError(str(last_error or "Gemini Vision ishlamadi"))
 
 
 def _mark(receipt_id, **fields):
@@ -403,8 +445,8 @@ def _approve(tx_id, user_id):
         if cur.rowcount != 1:
             return False, "payment_race"
         # Localized display is handled by the existing status endpoint. Store canonical plan.
-        cur.execute("UPDATE users SET status=?, plan_key=?, premium_until=? WHERE user_id=?",
-                    (f"PRO ✨ ({plan})", plan, until, user_id))
+        cur.execute("UPDATE users SET status=?, plan_key=?, premium_until=?, premium_source=? WHERE user_id=?",
+                    (f"PRO ✨ ({plan})", plan, until, "paid", user_id))
         conn.commit()
         return True, plan
     except Exception:
@@ -419,8 +461,8 @@ def _claim(tx_id):
     try:
         cur = conn.cursor()
         cur.execute("BEGIN IMMEDIATE")
-        row = cur.execute("SELECT status, attempts FROM p2p_receipts WHERE tx_id=?", (tx_id,)).fetchone()
-        if not row or row["status"] not in ("queued", "waiting_capacity", "error"):
+        row = cur.execute("SELECT status, attempts, next_retry_at FROM p2p_receipts WHERE tx_id=?", (tx_id,)).fetchone()
+        if not row or row["status"] not in ("queued", "waiting_capacity", "error", "retry_wait", "budget_blocked") or int(row["next_retry_at"] or 0) > _now():
             conn.rollback()
             return False
         cur.execute("UPDATE p2p_receipts SET status='processing', attempts=COALESCE(attempts,0)+1, reason='', last_error='' WHERE tx_id=?", (tx_id,))
@@ -433,21 +475,63 @@ def _claim(tx_id):
         conn.close()
 
 
-def _recover_queued():
+def _recover_queued(force=False):
     conn = _connect()
     try:
-        rows = conn.execute("SELECT tx_id,user_id,telegram_file_id FROM p2p_receipts WHERE status IN ('queued','waiting_capacity') ORDER BY created_at LIMIT ?", (PAYMENT_OCR_QUEUE_MAX,)).fetchall()
+        now = _now()
+        statuses = "('queued','waiting_capacity','retry_wait','budget_blocked')" if force else "('waiting_capacity','retry_wait','budget_blocked')"
+        rows = conn.execute(
+            f"SELECT receipt_id,tx_id,user_id,telegram_file_id,status FROM p2p_receipts "
+            f"WHERE status IN {statuses} AND (next_retry_at IS NULL OR next_retry_at<=?) "
+            f"ORDER BY created_at LIMIT ?",
+            (now, PAYMENT_OCR_QUEUE_MAX)
+        ).fetchall()
     finally:
         conn.close()
+
     recovered = 0
     for row in rows:
-        try:
-            _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
-            recovered += 1
-        except queue.Full:
-            break
+        # For periodic retries, atomically mark a row queued only when we are about
+        # to put it into the in-memory queue. This prevents duplicate enqueueing.
+        if not force:
+            conn = _connect()
+            try:
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                cur.execute(
+                    "UPDATE p2p_receipts SET status='queued', next_retry_at=0 WHERE receipt_id=? AND status=? AND (next_retry_at IS NULL OR next_retry_at<=?)",
+                    (row["receipt_id"], row["status"], now)
+                )
+                if cur.rowcount != 1:
+                    conn.rollback()
+                    continue
+                try:
+                    _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
+                except queue.Full:
+                    conn.rollback()
+                    break
+                conn.commit()
+                recovered += 1
+            finally:
+                conn.close()
+        else:
+            try:
+                _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
+                recovered += 1
+            except queue.Full:
+                break
     if recovered:
-        logging.info("P2P OCR recovery: %s queued receipt(s) restored after restart", recovered)
+        logging.info("P2P OCR recovery: %s receipt(s) restored to worker queue", recovered)
+    return recovered
+
+
+def _retry_scheduler():
+    while True:
+        try:
+            _recover_queued(force=False)
+        except Exception:
+            logging.exception("P2P OCR retry scheduler error")
+        time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
 def _process(item):
@@ -461,20 +545,40 @@ def _process(item):
 
     allowed, reason = _budget_reserve()
     if not allowed:
-        _mark_by_tx(tx_id, status="budget_blocked", reason=reason)
-        _notify_admin(f"⚠️ P2P AI budget/limitga yetdi. TX: {tx_id}\nSabab: {reason}\nTo'lov avtomatik tasdiqlanmadi.")
+        # Do not lose a valid customer's receipt when the AI budget is exhausted.
+        # Keep it persistent and retry automatically; never ask the customer to pay again.
+        _mark_by_tx(tx_id, status="budget_blocked", reason=reason, next_retry_at=_now() + 3600)
+        if _get_attempts(tx_id) == 1:
+            _notify_user(user_id, "⏳ Chekingiz saqlandi. AI tekshiruv limiti vaqtincha to'ldi; tizim avtomatik qayta tekshiradi. Sizdan qayta to'lov talab qilinmaydi.")
+        logging.warning("P2P OCR budget blocked | tx=%s | user=%s | reason=%s", tx_id, user_id, reason)
         return
 
     try:
         tg_file = _bot.get_file(file_id)
         data = _bot.download_file(tg_file.file_path)
         if len(data) > PAYMENT_OCR_MAX_IMAGE_MB * 1024 * 1024:
-            raise RuntimeError("Chek rasmi belgilangan hajm limitidan katta")
+            raise ValueError("Chek rasmi belgilangan hajm limitidan katta")
         mime = "image/jpeg"
         if str(tg_file.file_path).lower().endswith(".png"):
             mime = "image/png"
 
-        result, key_idx, inp, out = _vision(data, mime)
+        image_hash = hashlib.sha256(data).hexdigest()
+        conn = _connect()
+        try:
+            duplicate_image = conn.execute(
+                "SELECT tx_id FROM p2p_receipts WHERE image_sha256=? AND tx_id<>? AND status IN ('processing','analyzed','approved','review','rejected') LIMIT 1",
+                (image_hash, tx_id)
+            ).fetchone()
+        finally:
+            conn.close()
+        if duplicate_image:
+            _mark_by_tx(tx_id, status="rejected", reason="Aynan shu chek rasmi avval yuborilgan", image_sha256=image_hash, processed_at=_now())
+            _notify_user(user_id, "❌ Bu chek rasmi avval yuborilgan. Tarif avtomatik faollashtirilmadi.")
+            return
+        _mark_by_tx(tx_id, image_sha256=image_hash)
+
+        current_attempt = _get_attempts(tx_id)
+        result, key_idx, inp, out, used_model = _vision(data, mime, current_attempt)
         cost = _estimate_cost(inp, out)
         _budget_add_cost(cost)
         _mark_by_tx(tx_id, status="analyzed", amount=result.amount, currency=result.currency,
@@ -482,29 +586,42 @@ def _process(item):
                      transaction_time=result.transaction_time, recipient_card_last4=result.recipient_card_last4,
                      recipient_name=result.recipient_name, bank_or_app=result.bank_or_app,
                      confidence=result.confidence, reason=result.reason, ai_key_index=key_idx,
-                     ai_input_tokens=inp, ai_output_tokens=out, estimated_cost_usd=cost, processed_at=_now())
+                     ai_input_tokens=inp, ai_output_tokens=out, estimated_cost_usd=cost,
+                     processed_at=_now(), next_retry_at=0)
 
         expected = _expected_amount(pay["tariff_price"])
         amount_ok = abs(_parse_amount(result.amount) - expected) < 0.01
         conf_ok = result.confidence >= 0.85
         receipt_ok = bool(result.is_receipt)
         txid_ok = bool(result.transaction_id.strip())
-        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok:
-            _mark_by_tx(tx_id, status="review", reason=(result.reason or "AI tekshiruvi yetarli emas"))
+        expected_card = _last4(P2P_CARD_NUMBER)
+        actual_card = _last4(result.recipient_card_last4)
+        card_ok = bool(expected_card) and bool(actual_card) and expected_card == actual_card
+        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok:
+            reasons = []
+            if not receipt_ok: reasons.append("chek aniqlanmadi")
+            if not amount_ok: reasons.append(f"summa mos emas: {result.amount} != {expected}")
+            if not conf_ok: reasons.append(f"confidence past: {result.confidence:.2f}")
+            if not txid_ok: reasons.append("transaction ID topilmadi")
+            if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
+            reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
+            _mark_by_tx(tx_id, status="review", reason=reason_text)
             _notify_admin(
-                f"⚠️ P2P TO'LOV — QO'CHIMCHA TEKSHIRUV KERAK\n\n"
+                f"⚠️ P2P TO'LOV — QO'SHIMCHA TEKSHIRUV KERAK\n\n"
                 f"TX: {tx_id}\nUser: {user_id}\n"
                 f"Kutilgan summa: {pay['tariff_price']}\nAI summa: {result.amount}\n"
+                f"Karta: {actual_card or 'yo-q'} / kutilgan oxiri: {expected_card or 'sozlanmagan'}\n"
                 f"Confidence: {result.confidence:.2f}\nTransaction ID: {result.transaction_id or 'yo-q'}\n"
-                f"Sabab: {result.reason or 'Qoidaga mos kelmadi'}"
+                f"Model: {used_model}\nSabab: {reason_text}"
             )
             return
 
-        # Prevent reusing the same transaction identifier across different receipts.
         conn = _connect()
         try:
-            duplicate = conn.execute("SELECT tx_id FROM p2p_receipts WHERE transaction_id=? AND tx_id<>? AND status IN ('analyzed','approved') LIMIT 1",
-                                     (result.transaction_id.strip(), tx_id)).fetchone()
+            duplicate = conn.execute(
+                "SELECT tx_id FROM p2p_receipts WHERE transaction_id=? AND tx_id<>? AND status IN ('analyzed','approved','review') LIMIT 1",
+                (result.transaction_id.strip(), tx_id)
+            ).fetchone()
         finally:
             conn.close()
         if duplicate:
@@ -514,14 +631,42 @@ def _process(item):
 
         ok, info = _approve(tx_id, user_id)
         if ok:
-            _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now())
+            _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
             _notify_user(user_id, "🎉 To'lov tasdiqlandi! PRO status avtomatik faollashtirildi. 👑")
-            logging.info("P2P payment auto-approved | tx=%s | user=%s | cost=$%.6f", tx_id, user_id, cost)
+            logging.info("P2P payment auto-approved | tx=%s | user=%s | model=%s | cost=$%.6f", tx_id, user_id, used_model, cost)
         else:
             _mark_by_tx(tx_id, status="review", reason=info)
     except Exception as exc:
-        _mark_by_tx(tx_id, status="error", reason=str(exc), processed_at=_now())
-        _notify_admin(f"⚠️ P2P AI xatosi\nTX: {tx_id}\nUser: {user_id}\n{str(exc)[:800]}")
+        attempts = _get_attempts(tx_id)
+        transient = _is_transient_error(exc)
+        if transient and attempts < PAYMENT_OCR_MAX_RETRIES:
+            delay = _retry_delay(attempts)
+            _mark_by_tx(tx_id, status="retry_wait", reason="Vaqtinchalik AI xatosi; avtomatik qayta uriniladi", last_error=str(exc), next_retry_at=_now() + delay)
+            logging.warning("P2P OCR temporary failure | tx=%s | attempt=%s/%s | retry_in=%ss | %s", tx_id, attempts, PAYMENT_OCR_MAX_RETRIES, delay, exc)
+            if attempts == 1:
+                _notify_user(user_id, "⏳ Chekingiz saqlandi. AI xizmati vaqtincha band, tekshiruv avtomatik qayta uriniladi. Sizdan qayta to'lov talab qilinmaydi.")
+        else:
+            # Keep the receipt recoverable rather than losing a real customer's payment.
+            # After the normal retry budget is exhausted, back off for 5 minutes and
+            # continue automatically; no repeated admin spam for a temporary outage.
+            delay = PAYMENT_OCR_RETRY_MAX_SECONDS
+            _mark_by_tx(tx_id, status="retry_wait" if transient else "error", reason=str(exc)[:1000], last_error=str(exc)[:2000], next_retry_at=_now() + delay)
+            if not transient or attempts == PAYMENT_OCR_MAX_RETRIES:
+                _notify_admin(f"⚠️ P2P AI xatosi\nTX: {tx_id}\nUser: {user_id}\nAttempt: {attempts}\n{str(exc)[:800]}")
+
+
+def _get_attempts(tx_id):
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT attempts FROM p2p_receipts WHERE tx_id=?", (tx_id,)).fetchone()
+        return int(row["attempts"] or 0) if row else 0
+    finally:
+        conn.close()
+
+
+def _last4(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits[-4:] if len(digits) >= 4 else ""
 
 
 def _mark_by_tx(tx_id, **fields):
@@ -560,13 +705,15 @@ def start():
         for idx in range(PAYMENT_OCR_MAX_CONCURRENT):
             threading.Thread(target=_worker, name=f"p2p-ocr-{idx+1}", daemon=True).start()
         _started = True
-        _recover_queued()
+        _recover_queued(force=True)
+        threading.Thread(target=_retry_scheduler, name="p2p-ocr-retry-scheduler", daemon=True).start()
 
 
 def get_status():
     return {
         "configured": bool(PAYMENT_GEMINI_API_KEYS),
         "model": PAYMENT_GEMINI_MODEL,
+        "fallback_models": PAYMENT_GEMINI_FALLBACK_MODELS,
         "queue_size": _queue.qsize(),
         "queue_limit": PAYMENT_OCR_QUEUE_MAX,
         "budget": budget_status(),
