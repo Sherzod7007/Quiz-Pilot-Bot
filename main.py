@@ -729,6 +729,9 @@ def init_news_master_db():
 init_news_master_db()
 
 
+# --- FASTAPI ENDPOINTS ---
+app = FastAPI()
+
 class NewsCreateSchema(BaseModel):
     title_uz: str = Field(min_length=1, max_length=255)
     content_uz: str = Field(min_length=1)
@@ -1384,8 +1387,6 @@ def handle_admin_decision(call):
     conn.close()
 
 
-# --- FASTAPI ENDPOINTS ---
-app = FastAPI()
 
 # --- HYBRID V2 DATABASE DIAGNOSTIC (ADMIN ONLY / READ-ONLY) ---
 @app.get("/api/admin/hybrid-db-check")
