@@ -144,23 +144,6 @@ def _reconcile_postgres_column_types(cur, sqlite_conn, table, columns):
         # This migration intentionally changes only to TEXT. SQLite's dynamic typing
         # can legitimately contain q_/fc_/ts_ identifiers in an INTEGER-declared column.
         # Other declared-type differences are left unchanged to avoid destructive casts.
-        current_type = (existing[name] or "").lower()
-
-        # News.created_at is an INTEGER Unix timestamp in SQLite MASTER.
-        # Older News versions created the PostgreSQL mirror column as TIMESTAMP,
-        # so convert that legacy column safely instead of retrying the same row forever.
-        if desired == "BIGINT" and current_type in {"timestamp without time zone", "timestamp with time zone"}:
-            _log("warning", "migrating PostgreSQL mirror column %s.%s from %s to BIGINT",
-                 table, name, existing[name])
-            cur.execute(sql.SQL(
-                "ALTER TABLE {} ALTER COLUMN {} TYPE BIGINT USING EXTRACT(EPOCH FROM {})::BIGINT"
-            ).format(
-                sql.Identifier(table),
-                sql.Identifier(name),
-                sql.Identifier(name),
-            ))
-            continue
-
         if desired != "TEXT":
             continue
         _log("warning", "migrating PostgreSQL mirror column %s.%s from %s to TEXT",
