@@ -33,6 +33,7 @@ import random
 import secrets
 from copy import deepcopy
 from pathlib import Path
+from deep_translator import GoogleTranslator
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime
@@ -609,30 +610,228 @@ def init_db():
 
 init_db()
 
-# News MASTER jadvali Hybrid worker ishga tushishidan OLDIN mavjud bo‘lishi kerak.
-# Shunda Hybrid V2 uning INSERT/UPDATE/DELETE operatsiyalarini ham PostgreSQL MIRRORga
-# kuzata oladi. To‘liq News migratsiyasi va indekslar keyinroq init_news_table()da bajariladi.
-try:
-    _news_bootstrap_conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    _news_bootstrap_conn.execute("PRAGMA busy_timeout=30000")
-    _news_bootstrap_conn.execute("""
-        CREATE TABLE IF NOT EXISTS news (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title_uz TEXT NOT NULL,
-            content_uz TEXT NOT NULL,
-            title_ru TEXT,
-            content_ru TEXT,
-            title_en TEXT,
-            content_en TEXT,
-            created_at INTEGER NOT NULL
-        )
-    """)
-    _news_bootstrap_conn.commit()
-finally:
+# ==================================================================
+# YANGILIKLAR TIZIMI — SQLite MASTER + avtomatik UZ/RU/EN tarjima
+# ==================================================================
+# Muhim: News alohida app.db yoki PostgreSQL'da emas, asosiy DB_PATH'dagi
+# SQLite MASTER bazada saqlanadi. Shu sabab Hybrid V2 uni ham avtomatik mirror qiladi.
+
+NEWS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS news (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title_uz TEXT NOT NULL,
+    content_uz TEXT NOT NULL,
+    title_ru TEXT,
+    content_ru TEXT,
+    title_en TEXT,
+    content_en TEXT,
+    created_at INTEGER NOT NULL DEFAULT 0
+)
+"""
+
+
+def _news_columns(conn):
+    return {row[1]: row[2] for row in conn.execute("PRAGMA table_info(news)").fetchall()}
+
+
+def init_news_master_db():
+    """Create/migrate the News table in SQLite MASTER before Hybrid starts."""
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout=30000")
     try:
-        _news_bootstrap_conn.close()
-    except Exception:
-        pass
+        conn.execute(NEWS_TABLE_SQL)
+        columns = _news_columns(conn)
+
+        # Legacy News installations may have been created with SQLAlchemy DateTime.
+        # Hybrid V2 uses INTEGER Unix timestamps in SQLite MASTER, so rebuild only
+        # this disposable/small table when the old created_at type is incompatible.
+        created_type = (columns.get("created_at") or "").upper()
+        if "INT" not in created_type:
+            conn.execute("ALTER TABLE news RENAME TO news_legacy_migration")
+            conn.execute(NEWS_TABLE_SQL)
+            legacy_rows = conn.execute("""
+                SELECT id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at
+                FROM news_legacy_migration ORDER BY id
+            """).fetchall()
+            for row in legacy_rows:
+                raw_ts = row[7]
+                if isinstance(raw_ts, (int, float)):
+                    ts = int(raw_ts)
+                elif raw_ts:
+                    try:
+                        ts = int(datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp())
+                    except Exception:
+                        ts = int(time.time())
+                else:
+                    ts = int(time.time())
+                conn.execute("""
+                    INSERT OR IGNORE INTO news
+                    (id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at)
+                    VALUES (?,?,?,?,?,?,?,?)
+                """, (*row[:7], ts))
+            conn.execute("DROP TABLE news_legacy_migration")
+            columns = _news_columns(conn)
+
+        # Keep the schema forward-compatible with older News rows.
+        for name, sql_type in {
+            "title_ru": "TEXT", "content_ru": "TEXT",
+            "title_en": "TEXT", "content_en": "TEXT",
+            "created_at": "INTEGER NOT NULL DEFAULT 0",
+        }.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE news ADD COLUMN {name} {sql_type}")
+
+        # One-time migration from the previous standalone app.db News store.
+        legacy_path = str(Path(DB_PATH).with_name("app.db"))
+        master_abs = os.path.abspath(DB_PATH)
+        legacy_abs = os.path.abspath(legacy_path)
+        if legacy_abs != master_abs and os.path.exists(legacy_path):
+            try:
+                legacy = sqlite3.connect(legacy_path, timeout=10, check_same_thread=False)
+                legacy.row_factory = sqlite3.Row
+                legacy_cols = {r[1] for r in legacy.execute("PRAGMA table_info(news)").fetchall()}
+                if {"id", "title_uz", "content_uz"}.issubset(legacy_cols):
+                    rows = legacy.execute("""
+                        SELECT id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at
+                        FROM news ORDER BY id
+                    """).fetchall()
+                    for row in rows:
+                        raw_ts = row["created_at"]
+                        if isinstance(raw_ts, (int, float)):
+                            ts = int(raw_ts)
+                        elif raw_ts:
+                            try:
+                                ts = int(datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")).timestamp())
+                            except Exception:
+                                ts = int(time.time())
+                        else:
+                            ts = int(time.time())
+                        conn.execute("""
+                            INSERT OR IGNORE INTO news
+                            (id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at)
+                            VALUES (?,?,?,?,?,?,?,?)
+                        """, (row["id"], row["title_uz"], row["content_uz"],
+                               row["title_ru"] if "title_ru" in legacy_cols else "",
+                               row["content_ru"] if "content_ru" in legacy_cols else "",
+                               row["title_en"] if "title_en" in legacy_cols else "",
+                               row["content_en"] if "content_en" in legacy_cols else "", ts))
+                legacy.close()
+            except Exception as migration_error:
+                logging.warning("Legacy News app.db migration skipped: %s", migration_error)
+
+        conn.execute("UPDATE news SET created_at=? WHERE created_at IS NULL OR created_at=0", (int(time.time()),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Must happen before hybrid_sync.start(), so News gets V2 triggers/outbox too.
+init_news_master_db()
+
+
+# --- FASTAPI ENDPOINTS ---
+app = FastAPI()
+
+class NewsCreateSchema(BaseModel):
+    title_uz: str = Field(min_length=1, max_length=255)
+    content_uz: str = Field(min_length=1)
+
+
+def translate_to_ru_and_en(text_uz: str):
+    if not text_uz or not text_uz.strip():
+        return "", ""
+    try:
+        text_ru = GoogleTranslator(source="uz", target="ru").translate(text_uz)
+    except Exception as e:
+        logging.warning("[RU Tarjima Xatosi]: %s", e)
+        text_ru = text_uz
+
+    try:
+        text_en = GoogleTranslator(source="uz", target="en").translate(text_uz)
+    except Exception as e:
+        logging.warning("[EN Tarjima Xatosi]: %s", e)
+        text_en = text_uz
+
+    return text_ru, text_en
+
+
+@app.post("/api/news")
+def create_news_api(news_data: NewsCreateSchema):
+    title_ru, title_en = translate_to_ru_and_en(news_data.title_uz)
+    content_ru, content_en = translate_to_ru_and_en(news_data.content_uz)
+    now = int(time.time())
+
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout=30000")
+    try:
+        cur = conn.execute("""
+            INSERT INTO news
+            (title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at)
+            VALUES (?,?,?,?,?,?,?)
+        """, (news_data.title_uz, news_data.content_uz,
+              title_ru, content_ru, title_en, content_en, now))
+        news_id = cur.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "status": "success",
+        "data": {
+            "id": news_id,
+            "title_uz": news_data.title_uz,
+            "content_uz": news_data.content_uz,
+            "title_ru": title_ru,
+            "content_ru": content_ru,
+            "title_en": title_en,
+            "content_en": content_en,
+            "created_at": now,
+        },
+    }
+
+
+@app.get("/api/news")
+def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
+    # Foydalanuvchining saqlangan ilova tili News uchun ustuvor.
+    if user_id is not None:
+        lang = get_user_lang(user_id)
+    else:
+        lang = lang if lang in ("uz", "ru", "en") else "uz"
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    try:
+        rows = conn.execute("""
+            SELECT id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at
+            FROM news ORDER BY created_at DESC, id DESC LIMIT 100
+        """).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for row in rows:
+        if lang == "ru":
+            title = row["title_ru"] or row["title_uz"]
+            content = row["content_ru"] or row["content_uz"]
+        elif lang == "en":
+            title = row["title_en"] or row["title_uz"]
+            content = row["content_en"] or row["content_uz"]
+        else:
+            title = row["title_uz"]
+            content = row["content_uz"]
+
+        ts = int(row["created_at"] or 0)
+        created_text = time.strftime("%d-%m-%Y %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""  # Uzbekistan (UTC+5)
+        result.append({
+            "id": row["id"],
+            "title": title,
+            "content": content,
+            "created_at": created_text,
+        })
+
+    return {"status": "success", "data": result}
+
+
 
 # --- HYBRID DATABASE V1 ---
 # SQLite remains the MASTER database and all existing application code stays unchanged.
@@ -1192,8 +1391,6 @@ def handle_admin_decision(call):
     conn.close()
 
 
-# --- FASTAPI ENDPOINTS ---
-app = FastAPI()
 
 # --- HYBRID V2 DATABASE DIAGNOSTIC (ADMIN ONLY / READ-ONLY) ---
 @app.get("/api/admin/hybrid-db-check")
@@ -3451,307 +3648,6 @@ async def startup_event():
 
 
     # ==================================================================
-# YANGILIKLAR TIZIMI VA AVTO-TARJIMA BO'LIMI
-#
-# News ham asosiy SQLite MASTER bazasida saqlanadi. Bu muhim:
-# Hybrid arxitekturamizda SQLite = MASTER, PostgreSQL = MIRROR.
-# Alohida app.db/SQLAlchemy bazasi ishlatilsa, News Hybrid sync tarkibidan chiqib qoladi.
-
-NEWS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS news (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title_uz TEXT NOT NULL,
-    content_uz TEXT NOT NULL,
-    title_ru TEXT,
-    content_ru TEXT,
-    title_en TEXT,
-    content_en TEXT,
-    created_at INTEGER NOT NULL
-)
-"""
-
-
-def init_news_table():
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute(NEWS_TABLE_SQL)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_news_created_at ON news(created_at DESC)")
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _legacy_news_timestamp(value):
-    if value is None:
-        return int(time.time())
-    if isinstance(value, (int, float)):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return int(time.time())
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-        try:
-            return int(datetime.strptime(text, fmt).timestamp())
-        except ValueError:
-            pass
-    return int(time.time())
-
-
-def migrate_legacy_news():
-    """Import News from the old standalone app.db once, without touching existing rows."""
-    candidates = []
-    for path in ("app.db", "/data/app.db"):
-        if os.path.abspath(path) != os.path.abspath(DB_PATH) and os.path.exists(path):
-            candidates.append(path)
-
-    if not candidates:
-        return
-
-    target = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    target.row_factory = sqlite3.Row
-    try:
-        target.execute("PRAGMA busy_timeout=30000")
-        for legacy_path in candidates:
-            try:
-                legacy = sqlite3.connect(legacy_path, timeout=10, check_same_thread=False)
-                legacy.row_factory = sqlite3.Row
-                try:
-                    exists = legacy.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='news'"
-                    ).fetchone()
-                    if not exists:
-                        continue
-                    rows = legacy.execute(
-                        "SELECT id, title_uz, content_uz, title_ru, content_ru, title_en, content_en, created_at "
-                        "FROM news ORDER BY id"
-                    ).fetchall()
-                    imported = 0
-                    for row in rows:
-                        # Keep the old numeric ID where possible. If an ID already exists,
-                        # SQLite's INSERT OR IGNORE leaves the MASTER row untouched.
-                        target.execute(
-                            "INSERT OR IGNORE INTO news "
-                            "(id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at) "
-                            "VALUES (?,?,?,?,?,?,?,?)",
-                            (
-                                row["id"], row["title_uz"], row["content_uz"],
-                                row["title_ru"], row["content_ru"], row["title_en"],
-                                row["content_en"], _legacy_news_timestamp(row["created_at"]),
-                            ),
-                        )
-                        imported += target.total_changes > 0
-                    target.commit()
-                    if rows:
-                        logging.info("News legacy migration: %s row(s) checked from %s", len(rows), legacy_path)
-                finally:
-                    legacy.close()
-            except Exception as exc:
-                logging.warning("News legacy migration skipped for %s: %s", legacy_path, exc)
-    finally:
-        target.close()
-
-
-init_news_table()
-migrate_legacy_news()
-
-
-NEWS_TRANSLATION_INTERVAL = max(10, int(os.getenv("NEWS_TRANSLATION_INTERVAL", "15")))
-NEWS_TRANSLATION_RETRY_DELAY = max(30, int(os.getenv("NEWS_TRANSLATION_RETRY_DELAY", "60")))
-news_translation_lock = threading.Lock()
-
-
-def _next_google_api_key():
-    global current_key_index
-    if not GOOGLE_API_KEYS:
-        return None
-    with key_lock:
-        key = GOOGLE_API_KEYS[current_key_index % len(GOOGLE_API_KEYS)].strip()
-        current_key_index = (current_key_index + 1) % len(GOOGLE_API_KEYS)
-    return key
-
-
-def translate_news_with_gemini(title_uz: str, content_uz: str):
-    """Translate one News item in ONE protected Gemini request."""
-    if not GOOGLE_API_KEYS:
-        logging.error("News translation: GOOGLE_API_KEYS topilmadi")
-        return None
-
-    prompt = f"""Translate the following Uzbek News item into Russian and English.
-Return ONLY valid JSON with exactly these four string fields:
-"title_ru", "content_ru", "title_en", "content_en".
-Preserve meaning, tone, paragraph breaks, and emojis. Do not add explanations.
-
-UZBEK TITLE:
-{title_uz}
-
-UZBEK CONTENT:
-{content_uz}"""
-
-    # Only one News translation at a time. The existing Gemini semaphore also
-    # protects the whole application's Gemini traffic.
-    with news_translation_lock:
-        if not gemini_semaphore.acquire(timeout=max(10, AI_REQUEST_TIMEOUT)):
-            logging.warning("News translation: Gemini slot kutish vaqti tugadi")
-            return None
-        try:
-            attempts = max(1, min(len(GOOGLE_API_KEYS), AI_RETRY_PER_KEY))
-            last_error = None
-            for _ in range(attempts):
-                api_key = _next_google_api_key()
-                if not api_key:
-                    break
-                try:
-                    client = genai.Client(api_key=api_key)
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=prompt,
-                        config=genai_types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            temperature=0.2,
-                        ),
-                    )
-                    data = json.loads((response.text or "").strip())
-                    required = ("title_ru", "content_ru", "title_en", "content_en")
-                    if all(isinstance(data.get(k), str) and data[k].strip() for k in required):
-                        return {k: data[k].strip() for k in required}
-                    last_error = "Gemini JSON fields incomplete"
-                except Exception as e:
-                    last_error = str(e)
-                    logging.warning("News translation Gemini xatosi: %s", e)
-            logging.warning("News translation failed after protected retries: %s", last_error)
-            return None
-        finally:
-            gemini_semaphore.release()
-
-
-def _news_translation_worker():
-    """Lightweight daemon worker; never blocks API requests."""
-    logging.info("News translation worker started | interval=%ss", NEWS_TRANSLATION_INTERVAL)
-    while True:
-        try:
-            conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=30000")
-            rows = conn.execute(
-                """SELECT id,title_uz,content_uz FROM news
-                   WHERE (title_ru IS NULL OR title_ru=''
-                       OR content_ru IS NULL OR content_ru=''
-                       OR title_en IS NULL OR title_en=''
-                       OR content_en IS NULL OR content_en=''
-                       OR title_ru=title_uz OR content_ru=content_uz
-                       OR title_en=title_uz OR content_en=content_uz)
-                   ORDER BY id ASC LIMIT 1"""
-            ).fetchall()
-            conn.close()
-
-            if not rows:
-                time.sleep(NEWS_TRANSLATION_INTERVAL)
-                continue
-
-            row = rows[0]
-            translated = translate_news_with_gemini(row["title_uz"], row["content_uz"])
-            if translated:
-                conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-                conn.execute("PRAGMA busy_timeout=30000")
-                conn.execute(
-                    """UPDATE news SET title_ru=?,content_ru=?,title_en=?,content_en=? WHERE id=?""",
-                    (translated["title_ru"], translated["content_ru"],
-                     translated["title_en"], translated["content_en"], row["id"]),
-                )
-                conn.commit()
-                conn.close()
-                logging.info("News translation completed | id=%s | ru=True | en=True", row["id"])
-            else:
-                # Back off after quota/rate-limit errors; never hammer Google.
-                time.sleep(NEWS_TRANSLATION_RETRY_DELAY)
-        except Exception as e:
-            logging.warning("News translation worker error: %s", e)
-            time.sleep(NEWS_TRANSLATION_RETRY_DELAY)
-
-
-threading.Thread(target=_news_translation_worker, name="news-translation-worker", daemon=True).start()
-
-
-class NewsCreateSchema(BaseModel):
-    title_uz: str = Field(min_length=1, max_length=255)
-    content_uz: str = Field(min_length=1, max_length=10000)
-
-
-@app.post("/api/news")
-def create_news_api(news_data: NewsCreateSchema):
-    """Admin writes Uzbek News immediately; RU/EN are translated asynchronously."""
-    title_uz = news_data.title_uz.strip()
-    content_uz = news_data.content_uz.strip()
-    if not title_uz or not content_uz:
-        raise HTTPException(status_code=400, detail="title_uz and content_uz are required")
-
-    # NULL means translation pending. Never publish Uzbek as a RU/EN fallback.
-    now = int(time.time())
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("PRAGMA busy_timeout=30000")
-        cur = conn.execute(
-            "INSERT INTO news (title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at) VALUES (?,?,?,?,?,?,?)",
-            (title_uz, content_uz, None, None, None, None, now),
-        )
-        conn.commit()
-        news_id = cur.lastrowid
-    finally:
-        conn.close()
-
-    return {"status":"success", "data": {
-        "id": news_id, "title_uz": title_uz, "content_uz": content_uz,
-        "title_ru": None, "content_ru": None, "title_en": None, "content_en": None,
-        "created_at": datetime.fromtimestamp(now).strftime("%d-%m-%Y %H:%M"),
-        "translation_status": "pending"
-    }}
-
-
-@app.get("/api/news")
-def get_news_api(lang: str = Query("uz"), limit: int = Query(20, ge=1, le=100)):
-    """Return News localized to the language selected by the current Mini App user."""
-    lang = lang if lang in ("uz", "ru", "en") else "uz"
-
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("PRAGMA busy_timeout=30000")
-        rows = conn.execute(
-            "SELECT id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at "
-            "FROM news ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    finally:
-        conn.close()
-
-    result = []
-    for item in rows:
-        if lang == "ru":
-            title = item["title_ru"] or "Перевод подготавливается..."
-            content = item["content_ru"] or "Перевод подготавливается. Пожалуйста, откройте новости немного позже."
-        elif lang == "en":
-            title = item["title_en"] or "Translation is being prepared..."
-            content = item["content_en"] or "The translation is being prepared. Please open News again shortly."
-        else:
-            title = item["title_uz"]
-            content = item["content_uz"]
-
-        created_at = item["created_at"]
-        try:
-            created_text = datetime.fromtimestamp(int(created_at)).strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            created_text = str(created_at or "")
-
-        result.append({
-            "id": item["id"],
-            "title": title,
-            "content": content,
-            "created_at": created_text,
-        })
-
-    return {"status": "success", "data": result, "lang": lang}
-    if __name__ == "__main__":
-        port = int(os.environ.get("PORT", 8080))
-        uvicorn.run(app, host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
