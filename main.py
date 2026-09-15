@@ -817,7 +817,7 @@ def get_news_api(lang: str = Query("uz")):
             content = row["content_uz"]
 
         ts = int(row["created_at"] or 0)
-        created_text = time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else ""
+        created_text = time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""  # Uzbekistan (UTC+5)
         result.append({
             "id": row["id"],
             "title": title,
