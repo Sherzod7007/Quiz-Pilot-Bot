@@ -39,6 +39,9 @@ from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime
 from fastapi import Depends, Query
 
+# P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
+import p2p_payment_ai
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -152,6 +155,7 @@ TARIFFS = {
 FREE_QUIZ_LIMIT = 3
 FREE_PUBLIC_LIMIT = 3
 FREE_FLASHCARD_LIMIT = 3
+P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
     return bool(status and "PRO" in status and premium_until and int(time.time()) <= premium_until)
@@ -372,7 +376,8 @@ def init_db():
         last_public_free_notice_cycle INTEGER DEFAULT 0,
         last_flashcard_free_notice_cycle INTEGER DEFAULT 0,
         last_free_reset_notice_cycle INTEGER DEFAULT 0,
-        paid_limit_notice_until INTEGER DEFAULT 0)""")
+        paid_limit_notice_until INTEGER DEFAULT 0,
+        premium_source TEXT DEFAULT 'paid')""")
 
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
@@ -425,6 +430,12 @@ def init_db():
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {_col} INTEGER DEFAULT 0;")
             except Exception:
                 pass
+
+    if "premium_source" not in columns:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN premium_source TEXT DEFAULT 'paid';")
+        except Exception:
+            pass
 
     # NULL bo'lib qolgan eski qiymatlarni avtomatik to'g'rilash
     cursor.execute("UPDATE users SET free_used = 0 WHERE free_used IS NULL;")
@@ -1109,6 +1120,9 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
             tariff_price=tariff_price,
             tx_id=tx_id
         )
+        if P2P_CARD_NUMBER:
+            card_label = {"uz": "💳 To'lov uchun karta", "ru": "💳 Карта для оплаты", "en": "💳 Payment card"}.get(user_lang, "💳 To'lov uchun karta")
+            msg_text += f"\n\n{card_label}: `{P2P_CARD_NUMBER}`"
 
         bot.send_message(user_id, msg_text, parse_mode="Markdown")
     except Exception as e:
@@ -1246,64 +1260,151 @@ def handle_support_reply_callback(call):
         logging.error(f"Admin reply callback xatosi: {e}")
         bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
+# --- ADMIN BONUS PREMIUM ---
+def _admin_only(message):
+    return bool(ADMIN_ID and int(message.from_user.id) == int(ADMIN_ID))
+
+
+@bot.message_handler(commands=["bonus"])
+def admin_bonus_command(message):
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 3:
+        bot.send_message(message.chat.id, "Format: /bonus USER_ID KUN\nMisol: /bonus 123456789 30")
+        return
+    try:
+        target_id = int(parts[1])
+        days = int(parts[2])
+        if days <= 0 or days > 3650:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID son, KUN esa 1–3650 oralig'ida bo'lishi kerak.")
+        return
+
+    add_user_to_db(target_id)
+    now = int(time.time())
+    duration = days * 24 * 3600
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA busy_timeout=30000")
+        row = cur.execute("SELECT status, plan_key, premium_until FROM users WHERE user_id=?", (target_id,)).fetchone()
+        old_until = int(row["premium_until"] or 0) if row else 0
+        old_active = bool(row and is_active_paid_status(row["status"] or "", old_until))
+        new_until = max(now, old_until) + duration if old_active else now + duration
+        if old_active and (row["plan_key"] or "") in TARIFFS:
+            # Existing paid/teacher plan: extend it without destroying its plan type.
+            cur.execute("UPDATE users SET premium_until=? WHERE user_id=?", (new_until, target_id))
+        else:
+            cur.execute(
+                "UPDATE users SET status=?, plan_key=?, premium_until=?, premium_source=? WHERE user_id=?",
+                ("PRO ✨ (Admin Bonus)", "bonus", new_until, "admin_bonus", target_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    uz_time = time.strftime("%d.%m.%Y %H:%M", time.gmtime(new_until + 5 * 3600))
+    bot.send_message(message.chat.id, f"🎁 Bonus berildi.\n👤 User: {target_id}\n⏰ Gacha: {uz_time}\n📅 Muddat: {days} kun")
+    try:
+        lang = get_user_lang(target_id)
+        texts = {
+            "uz": f"🎁 Sizga administrator tomonidan {days} kunlik bepul Premium berildi!\n\n⏰ Gacha: {uz_time}\n👑 Status: PRO ✨ (Admin Bonus)",
+            "ru": f"🎁 Администратор предоставил вам бесплатный Premium на {days} дней!\n\n⏰ До: {uz_time}\n👑 Статус: PRO ✨ (Admin Bonus)",
+            "en": f"🎁 The administrator granted you {days} days of free Premium!\n\n⏰ Until: {uz_time}\n👑 Status: PRO ✨ (Admin Bonus)",
+        }
+        bot.send_message(target_id, texts.get(lang, texts["uz"]))
+    except Exception:
+        pass
+
+
+@bot.message_handler(commands=["bonus_revoke"])
+def admin_bonus_revoke_command(message):
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        bot.send_message(message.chat.id, "Format: /bonus_revoke USER_ID")
+        return
+    try:
+        target_id = int(parts[1])
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID noto'g'ri.")
+        return
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT premium_source FROM users WHERE user_id=?", (target_id,)).fetchone()
+        if not row or row["premium_source"] != "admin_bonus":
+            bot.send_message(message.chat.id, "ℹ️ Bu foydalanuvchida alohida Admin Bonus topilmadi.")
+            return
+        conn.execute("UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, premium_source='paid' WHERE user_id=?", (target_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    bot.send_message(message.chat.id, f"✅ Admin Bonus bekor qilindi: {target_id}")
+
+
+@bot.message_handler(commands=["payment_ai_status"])
+def admin_payment_ai_status(message):
+    if not _admin_only(message):
+        return
+    st = p2p_payment_ai.get_status()
+    b = st["budget"]
+    bot.send_message(message.chat.id,
+        "🧾 P2P AI STATUS\n\n"
+        f"Model: {st['model']}\n"
+        f"API keys: {'Sozlangan' if st['configured'] else 'Sozlanmagan'}\n"
+        f"Queue: {st['queue_size']}/{st['queue_limit']}\n"
+        f"Bugungi AI so'rovlar: {b.get('daily_requests',0)}/{b.get('daily_limit',0)}\n"
+        f"Oylik AI so'rovlar: {b.get('monthly_requests',0)}/{b.get('monthly_request_limit',0)}\n"
+        f"Oylik taxminiy xarajat: ${b.get('monthly_spend_usd',0.0):.4f}\n"
+        f"Budget: ${b.get('monthly_budget_usd',0.0):.2f}")
+
+
 # --- ISHONCHLI TO'LOV CHEKI QABUL QILISH (STABLE PHOTO HANDLER) ---
 @bot.message_handler(content_types=["photo"])
 def handle_receipt_photo(message):
+    """Receive a P2P receipt and enqueue it for isolated Gemini Vision processing."""
     user_id = message.from_user.id
     user_lang = get_user_lang(user_id)
 
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
-        (user_id,)
-    )
-    pending_pay = cursor.fetchone()
-    conn.close()
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    try:
+        pending_pay = conn.execute(
+            "SELECT tx_id, tariff_name, tariff_price FROM payments WHERE user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+            (user_id,)
+        ).fetchone()
+    finally:
+        conn.close()
 
     if not pending_pay:
-        return  # Kutilayotgan to'lov yo'q bo'lsa javob berilmaydi
+        return
 
-    tx_id, tariff_name, tariff_price = pending_pay
-
-    username = f"@{message.from_user.username}" if message.from_user.username else "Mavjud emas"
-    first_name = message.from_user.first_name
+    tx_id = pending_pay["tx_id"]
     file_id = message.photo[-1].file_id
-
-    admin_markup = telebot.types.InlineKeyboardMarkup()
-    btn_approve = telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"p_app_{tx_id}_{user_id}")
-    btn_reject = telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p_rej_{tx_id}_{user_id}")
-    admin_markup.row(btn_approve, btn_reject)
-
-    # Admin uchun tarif nomi foydalanuvchi tilidan qat'i nazar doim O'zbek tilida ko'rsatiladi.
-    plan_key = get_plan_key(tariff_name)
-    admin_tariff_name = localized_tariff_name(plan_key, "uz") if plan_key else tariff_name
-
-    admin_text = (
-        f"💰 YANGI TO'LOV SO'ROVI!\n\n"
-        f"👤 Foydalanuvchi: {first_name} ({username})\n"
-        f"🆔 Telegram ID: {user_id}\n"
-        f"🌐 Til kodi: {user_lang.upper()}\n"
-        f"📦 Tanlangan Tarif: {admin_tariff_name}\n"
-        f"💵 To'lov Summasi: {tariff_price}\n"
-        f"🧩 Tranzaksiya ID: {tx_id}\n\n"
-        f"Chek to'g'riligini tekshiring va pastdagi tugmalardan birini bosing."
-    )
-
-    target_admin = ADMIN_ID if ADMIN_ID else user_id
-
-    try:
-        bot.send_photo(
-            target_admin,
-            file_id,
-            caption=admin_text,
-            parse_mode="Markdown",
-            reply_markup=admin_markup,
-        )
-        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_received"])
-    except Exception as e:
-        logging.error(f"Admin ga rasm yuborishda xatolik yuz berdi: {e}")
-        bot.send_message(message.chat.id, MESSAGES[user_lang]["receipt_error"])
+    queued, reason = p2p_payment_ai.enqueue_receipt(tx_id, user_id, file_id)
+    if queued:
+        # We intentionally do not wait for Gemini here. The Telegram handler stays fast.
+        try:
+            bot.send_message(
+                message.chat.id,
+                "⏳ Chekingiz qabul qilindi. AI tekshiruvi navbatga qo'yildi. To'lov avtomatik tekshiriladi.",
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            bot.send_message(
+                message.chat.id,
+                "⚠️ Hozir AI tekshiruv navbati to'lib qoldi. Chekingiz saqlandi, keyinroq qayta ishlanadi.",
+            )
+        except Exception:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
@@ -1350,8 +1451,8 @@ def handle_admin_decision(call):
         cursor.execute("UPDATE payments SET status = 'approved' WHERE tx_id = ?", (tx_id,))
         display_name = localized_tariff_name(plan_key, user_lang)
         cursor.execute(
-            "UPDATE users SET status = ?, plan_key = ?, premium_until = ? WHERE user_id = ?",
-            (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, user_id),
+            "UPDATE users SET status = ?, plan_key = ?, premium_until = ?, premium_source = ? WHERE user_id = ?",
+            (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, "paid", user_id),
         )
         conn.commit()
 
@@ -1521,7 +1622,7 @@ def get_premium_status(user_id: int):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at "
+        "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at, premium_source "
         "FROM users WHERE user_id = ?",
         (user_id,),
     )
@@ -1545,6 +1646,7 @@ def get_premium_status(user_id: int):
     user_status = row["status"] or "Oddiy foydalanuvchi"
     plan_key = row["plan_key"] or get_plan_key(user_status)
     premium_until = row["premium_until"] or 0
+    premium_source = row["premium_source"] or "paid"
     free_used = row["free_used"] if row["free_used"] is not None else 0
     public_free_used = row["public_free_used"] if row["public_free_used"] is not None else 0
     flashcard_free_used = row["flashcard_free_used"] if row["flashcard_free_used"] is not None else 0
@@ -1554,7 +1656,7 @@ def get_premium_status(user_id: int):
     if is_active_paid_status(user_status, premium_until):
         pass
     elif "PRO" in user_status and premium_until > 0 and now > premium_until:
-        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0 WHERE user_id = ?", (user_id,))
+        cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0, premium_source = 'paid' WHERE user_id = ?", (user_id,))
         conn.commit()
         user_status, plan_key, premium_until = "Oddiy foydalanuvchi", "", 0
 
@@ -1574,7 +1676,10 @@ def get_premium_status(user_id: int):
     lang = get_user_lang(user_id)
     display_status = user_status
     if is_paid:
-        display_status = f"PRO ✨ ({localized_tariff_name(plan_key, lang)})"
+        if premium_source == "admin_bonus" or plan_key == "bonus":
+            display_status = "PRO ✨ (Admin Bonus)"
+        else:
+            display_status = f"PRO ✨ ({localized_tariff_name(plan_key, lang)})"
         uzbek_time = time.gmtime(premium_until + 5 * 3600)
         readable_date = time.strftime("%d.%m.%Y %H:%M", uzbek_time)
         if lang == "ru": display_status += f" (До: {readable_date})"
@@ -3642,6 +3747,13 @@ async def api_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_event():
+    # P2P OCR is an isolated background subsystem. It never blocks the bot/event loop.
+    try:
+        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
+        p2p_payment_ai.start()
+    except Exception as p2p_error:
+        # Payment OCR failure must never stop Quiz Pilot startup.
+        logging.exception("P2P Payment AI could not start; normal app continues: %s", p2p_error)
     threading.Thread(target=start_bot_polling, daemon=True).start()
     threading.Thread(target=limit_notification_worker, daemon=True).start()
 
