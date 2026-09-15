@@ -26,6 +26,7 @@ import sqlite3
 import telebot
 import threading
 import time
+from queue import Queue, Empty
 from typing import List, Optional
 import uvicorn
 import uuid
@@ -737,57 +738,258 @@ class NewsCreateSchema(BaseModel):
     content_uz: str = Field(min_length=1)
 
 
-def translate_to_ru_and_en(text_uz: str):
+def translate_news_text(text_uz: str, target: str) -> str:
+    """Reliable News translation with a small retry budget.
+    Returns an empty string on failure so GET can repair it later instead of
+    permanently storing Uzbek as RU/EN.
+    """
     if not text_uz or not text_uz.strip():
-        return "", ""
-    try:
-        text_ru = GoogleTranslator(source="uz", target="ru").translate(text_uz)
-    except Exception as e:
-        logging.warning("[RU Tarjima Xatosi]: %s", e)
-        text_ru = text_uz
+        return ""
 
-    try:
-        text_en = GoogleTranslator(source="uz", target="en").translate(text_uz)
-    except Exception as e:
-        logging.warning("[EN Tarjima Xatosi]: %s", e)
-        text_en = text_uz
+    last_error = None
+    for attempt in range(2):
+        try:
+            # auto source detection is more tolerant of punctuation/emojis.
+            translated = GoogleTranslator(source="auto", target=target).translate(text_uz)
+            if translated and translated.strip():
+                # If the translator returned the exact Uzbek input, retry once
+                # using the explicit Uzbek source before accepting it.
+                if translated.strip() == text_uz.strip() and attempt == 0:
+                    raise RuntimeError("Translator returned unchanged source text")
+                return translated.strip()
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                time.sleep(0.7)
 
-    return text_ru, text_en
+    logging.warning("[News %s tarjima xatosi]: %s", target.upper(), last_error)
+    return ""
+
+
+# ==================================================================
+# PROFESSIONAL NEWS TRANSLATION WORKER
+# ==================================================================
+# Muhim arxitektura qoidasi:
+# 1) Foydalanuvchi /api/news GET qilganda HECH QACHON tarjimon chaqirilmaydi.
+# 2) Admin News yaratganda faqat UZ matn SQLite MASTER'ga darhol yoziladi.
+# 3) RU/EN tarjimalar bitta background worker orqali navbat bilan bajariladi.
+# 4) Shu sabab tarjima sekinlashsa ham foydalanuvchi requesti 40-60 soniya kutmaydi.
+# 5) Queue bounded: serverda cheksiz translation task yig'ilib qolmaydi.
+
+NEWS_TRANSLATION_QUEUE_SIZE = max(10, int(os.getenv("NEWS_TRANSLATION_QUEUE_SIZE", "100")))
+NEWS_TRANSLATION_DELAY = max(0.0, float(os.getenv("NEWS_TRANSLATION_DELAY", "0.25")))
+news_translation_queue = Queue(maxsize=NEWS_TRANSLATION_QUEUE_SIZE)
+news_translation_enqueued = set()
+news_translation_lock = threading.Lock()
+news_translation_worker_started = False
+
+
+def _translation_missing_or_same(source_uz: str, translated: str) -> bool:
+    if not translated or not translated.strip():
+        return True
+    return translated.strip() == (source_uz or "").strip()
+
+
+def translate_news_text(text_uz: str, target: str) -> str:
+    """Translate one News field. Called ONLY by the background worker."""
+    if not text_uz or not text_uz.strip():
+        return ""
+
+    last_error = None
+    for attempt in range(2):
+        try:
+            translated = GoogleTranslator(source="auto", target=target).translate(text_uz)
+            if translated and translated.strip():
+                if translated.strip() == text_uz.strip() and attempt == 0:
+                    raise RuntimeError("Translator returned unchanged source text")
+                return translated.strip()
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                time.sleep(0.7)
+
+    logging.warning("[News %s tarjima xatosi]: %s", target.upper(), last_error)
+    return ""
+
+
+def enqueue_news_translation(news_id: int) -> bool:
+    """Add a News row to the single translation worker without blocking requests."""
+    try:
+        news_id = int(news_id)
+    except Exception:
+        return False
+    with news_translation_lock:
+        if news_id in news_translation_enqueued:
+            return True
+        try:
+            news_translation_queue.put_nowait(news_id)
+        except Exception:
+            logging.warning("News translation queue full; id=%s will be retried by worker scan", news_id)
+            return False
+        news_translation_enqueued.add(news_id)
+        return True
+
+
+def _save_news_translations(news_id: int, title_ru: str, content_ru: str, title_en: str, content_en: str):
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout=10000")
+    try:
+        conn.execute("""UPDATE news
+                       SET title_ru=?, content_ru=?, title_en=?, content_en=?
+                       WHERE id=?""",
+                     (title_ru, content_ru, title_en, content_en, news_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def process_news_translation(news_id: int):
+    """Translate one News row in the background, never inside a user GET request."""
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
+    try:
+        row = conn.execute("""SELECT id,title_uz,content_uz,title_ru,content_ru,title_en,content_en
+                             FROM news WHERE id=?""", (news_id,)).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return
+
+    title_ru = row["title_ru"] or ""
+    content_ru = row["content_ru"] or ""
+    title_en = row["title_en"] or ""
+    content_en = row["content_en"] or ""
+
+    # Only fill missing fields. Existing correct translations are never overwritten.
+    if _translation_missing_or_same(row["title_uz"], title_ru):
+        title_ru = translate_news_text(row["title_uz"], "ru") or title_ru
+        if NEWS_TRANSLATION_DELAY:
+            time.sleep(NEWS_TRANSLATION_DELAY)
+    if _translation_missing_or_same(row["content_uz"], content_ru):
+        content_ru = translate_news_text(row["content_uz"], "ru") or content_ru
+        if NEWS_TRANSLATION_DELAY:
+            time.sleep(NEWS_TRANSLATION_DELAY)
+    if _translation_missing_or_same(row["title_uz"], title_en):
+        title_en = translate_news_text(row["title_uz"], "en") or title_en
+        if NEWS_TRANSLATION_DELAY:
+            time.sleep(NEWS_TRANSLATION_DELAY)
+    if _translation_missing_or_same(row["content_uz"], content_en):
+        content_en = translate_news_text(row["content_uz"], "en") or content_en
+
+    _save_news_translations(news_id, title_ru, content_ru, title_en, content_en)
+    logging.info("News translation completed | id=%s | ru=%s | en=%s",
+                 news_id,
+                 bool(title_ru and content_ru),
+                 bool(title_en and content_en))
+
+
+def _scan_missing_news_translations(limit=20):
+    """Queue a small bounded batch of incomplete News rows."""
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
+    try:
+        rows = conn.execute("""SELECT id FROM news
+                              WHERE title_ru IS NULL OR title_ru='' OR content_ru IS NULL OR content_ru=''
+                                 OR title_en IS NULL OR title_en='' OR content_en IS NULL OR content_en=''
+                                 OR title_ru=title_uz OR content_ru=content_uz
+                                 OR title_en=title_uz OR content_en=content_uz
+                              ORDER BY id ASC LIMIT ?""", (max(1, int(limit)),)).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        enqueue_news_translation(row["id"])
+
+
+def news_translation_worker():
+    logging.info("News translation worker started | queue=%s", NEWS_TRANSLATION_QUEUE_SIZE)
+    while True:
+        try:
+            news_id = news_translation_queue.get(timeout=2)
+        except Empty:
+            # Also repairs old rows gradually, without making startup expensive.
+            try:
+                _scan_missing_news_translations(limit=5)
+            except Exception as e:
+                logging.warning("News translation scan error: %s", e)
+            continue
+
+        try:
+            process_news_translation(news_id)
+        except Exception as e:
+            logging.exception("News translation worker error | id=%s: %s", news_id, e)
+        finally:
+            with news_translation_lock:
+                news_translation_enqueued.discard(news_id)
+            news_translation_queue.task_done()
+            # Keep the queue moving, but never flood the translator.
+            if NEWS_TRANSLATION_DELAY:
+                time.sleep(NEWS_TRANSLATION_DELAY)
+
+
+def start_news_translation_worker():
+    global news_translation_worker_started
+    with news_translation_lock:
+        if news_translation_worker_started:
+            return
+        news_translation_worker_started = True
+    threading.Thread(target=news_translation_worker, name="news-translation", daemon=True).start()
+    _scan_missing_news_translations(limit=20)
+
+
+def translate_to_ru_and_en(text_uz: str):
+    """Compatibility helper. New News code uses the background worker instead."""
+    return ("", "")
 
 
 @app.post("/api/news")
 def create_news_api(news_data: NewsCreateSchema):
-    title_ru, title_en = translate_to_ru_and_en(news_data.title_uz)
-    content_ru, content_en = translate_to_ru_and_en(news_data.content_uz)
+    # User/admin request is intentionally NOT blocked by translation.
     now = int(time.time())
-
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout=10000")
     try:
         cur = conn.execute("""
             INSERT INTO news
             (title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at)
             VALUES (?,?,?,?,?,?,?)
-        """, (news_data.title_uz, news_data.content_uz,
-              title_ru, content_ru, title_en, content_en, now))
+        """, (news_data.title_uz, news_data.content_uz, "", "", "", "", now))
         news_id = cur.lastrowid
         conn.commit()
     finally:
         conn.close()
 
+    # Non-blocking: translation continues in the background.
+    enqueue_news_translation(news_id)
+
     return {
         "status": "success",
+        "translation_status": "queued",
         "data": {
             "id": news_id,
             "title_uz": news_data.title_uz,
             "content_uz": news_data.content_uz,
-            "title_ru": title_ru,
-            "content_ru": content_ru,
-            "title_en": title_en,
-            "content_en": content_en,
+            "title_ru": "",
+            "content_ru": "",
+            "title_en": "",
+            "content_en": "",
             "created_at": now,
         },
     }
+
+
+@app.get("/api/news-latest")
+def get_news_latest_api():
+    """Ultra-light News badge check: returns only the newest News id."""
+    conn = sqlite3.connect(DB_PATH, timeout=5, check_same_thread=False)
+    conn.execute("PRAGMA busy_timeout=5000")
+    try:
+        latest_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM news").fetchone()[0]
+    finally:
+        conn.close()
+    return {"status": "success", "latest_id": int(latest_id or 0)}
 
 
 @app.get("/api/news")
@@ -797,9 +999,10 @@ def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
         lang = get_user_lang(user_id)
     else:
         lang = lang if lang in ("uz", "ru", "en") else "uz"
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA busy_timeout=10000")
     try:
         rows = conn.execute("""
             SELECT id,title_uz,content_uz,title_ru,content_ru,title_en,content_en,created_at
@@ -821,7 +1024,7 @@ def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
             content = row["content_uz"]
 
         ts = int(row["created_at"] or 0)
-        created_text = time.strftime("%d-%m-%Y %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""  # Uzbekistan (UTC+5)
+        created_text = time.strftime("%d-%m-%Y %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""
         result.append({
             "id": row["id"],
             "title": title,
@@ -830,7 +1033,6 @@ def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
         })
 
     return {"status": "success", "data": result}
-
 
 
 # --- HYBRID DATABASE V1 ---
@@ -3644,6 +3846,7 @@ async def api_exception_handler(request: Request, exc: Exception):
 async def startup_event():
     threading.Thread(target=start_bot_polling, daemon=True).start()
     threading.Thread(target=limit_notification_worker, daemon=True).start()
+    start_news_translation_worker()
 
 
 
