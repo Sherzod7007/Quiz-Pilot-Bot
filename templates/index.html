@@ -1425,7 +1425,7 @@
         }
 
         async function fetchNewsItems() {
-            const response = await fetch(`${BASE_URL}/api/news?lang=${encodeURIComponent(currentLang)}&_t=${Date.now()}`, {
+            const response = await fetch(`${BASE_URL}/api/news?user_id=${userId}&lang=${encodeURIComponent(currentLang)}&_t=${Date.now()}`, {
                 cache: 'no-store'
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
