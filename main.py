@@ -791,8 +791,12 @@ def create_news_api(news_data: NewsCreateSchema):
 
 
 @app.get("/api/news")
-def get_news_api(lang: str = Query("uz")):
-    lang = lang if lang in ("uz", "ru", "en") else "uz"
+def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
+    # Foydalanuvchining saqlangan ilova tili News uchun ustuvor.
+    if user_id is not None:
+        lang = get_user_lang(user_id)
+    else:
+        lang = lang if lang in ("uz", "ru", "en") else "uz"
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
@@ -817,7 +821,7 @@ def get_news_api(lang: str = Query("uz")):
             content = row["content_uz"]
 
         ts = int(row["created_at"] or 0)
-        created_text = time.strftime("%Y-%m-%d %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""  # Uzbekistan (UTC+5)
+        created_text = time.strftime("%d-%m-%Y %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""  # Uzbekistan (UTC+5)
         result.append({
             "id": row["id"],
             "title": title,
