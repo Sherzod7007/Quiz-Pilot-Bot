@@ -412,13 +412,26 @@ def _mark_failure(conn, item, error):
           item["table_name"], item["pk_name"], item["pk_value"]))
 
 def sync_once(path):
+    """Sync one bounded batch with one PostgreSQL transaction.
+
+    SQLite remains the MASTER. PostgreSQL work is asynchronous. Each item gets
+    its own SAVEPOINT so one bad row does not abort the whole batch, while one
+    final COMMIT greatly reduces PostgreSQL round-trips under load.
+
+    If the process dies after PostgreSQL COMMIT but before the SQLite outbox is
+    cleared, replay is safe because mirror rows are upserted/deleted by their
+    primary key and therefore the operation is idempotent.
+    """
     if not _ENABLED:
-        return {"synced":0,"failed":0,"pending":0}
+        return {"synced": 0, "failed": 0, "pending": 0}
+
     sc = _sqlite_connect(path)
     pg = _pg()
     pc = None
     synced = failed = 0
+    success_items = []
     failure_details = {}
+
     try:
         rows = sc.execute("""
             SELECT table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at
@@ -426,53 +439,119 @@ def sync_once(path):
             WHERE next_retry_at<=?
             ORDER BY updated_at LIMIT ?
         """, (int(time.time()), BATCH_SIZE)).fetchall()
+
         if not rows:
-            return {"synced":0,"failed":0,"pending":0}
+            pending = sc.execute(
+                "SELECT COUNT(*) FROM hybrid_sync_outbox_v2"
+            ).fetchone()[0]
+            return {"synced": 0, "failed": 0, "pending": pending}
+
         pc = pg.getconn()
-        for item in rows:
-            try:
-                _sync_item(sc, pc, item)
-                pc.commit()
-                _mark_success(sc, item)
-                synced += 1
-            except Exception as exc:
-                pc.rollback()
-                _mark_failure(sc, item, exc)
-                failed += 1
+        try:
+            with pc.cursor() as cur:
+                # Explicit durability: committed mirror data should survive a
+                # PostgreSQL restart. This is the default, but keeping it explicit
+                # prevents a future connection-level setting from weakening it.
+                cur.execute("SET LOCAL synchronous_commit = on")
 
-                # Railway logda asl PostgreSQL/psycopg2 xatosini ko'rsatish uchun
-                # bir xil xatolarni bitta batch ichida jamlaymiz.
-                error_text = " ".join(str(exc).split())[:1000]
-                key = (
-                    item["table_name"], item["pk_name"], item["operation"],
-                    type(exc).__name__, error_text
-                )
-                if key not in failure_details:
-                    failure_details[key] = {
-                        "count": 0,
-                        "pk_value": item["pk_value"],
-                        "attempts": int(item["attempts"] or 0) + 1,
-                    }
-                failure_details[key]["count"] += 1
+                for item in rows:
+                    try:
+                        # Isolate a bad row while keeping the rest of this batch.
+                        cur.execute("SAVEPOINT hybrid_item")
+                        _sync_item(sc, pc, item)
+                        cur.execute("RELEASE SAVEPOINT hybrid_item")
+                        success_items.append(item)
+                        synced += 1
+                    except Exception as exc:
+                        try:
+                            cur.execute("ROLLBACK TO SAVEPOINT hybrid_item")
+                            cur.execute("RELEASE SAVEPOINT hybrid_item")
+                        except Exception:
+                            # Connection-level failure: abort the entire PG
+                            # transaction and let the worker retry later.
+                            pc.rollback()
+                            raise
 
+                        _mark_failure(sc, item, exc)
+                        failed += 1
+
+                        error_text = " ".join(str(exc).split())[:1000]
+                        key = (
+                            item["table_name"], item["pk_name"], item["operation"],
+                            type(exc).__name__, error_text
+                        )
+                        if key not in failure_details:
+                            failure_details[key] = {
+                                "count": 0,
+                                "pk_value": item["pk_value"],
+                                "attempts": int(item["attempts"] or 0) + 1,
+                            }
+                        failure_details[key]["count"] += 1
+
+            # One PostgreSQL COMMIT for the whole bounded batch.
+            pc.commit()
+        except Exception as exc:
+            pc.rollback()
+            # PostgreSQL did not commit, so SQLite must not acknowledge any
+            # supposedly successful rows. Their outbox records remain/revert.
+            success_items = []
+            synced = 0
+            raise exc
+
+        # Acknowledge only after PostgreSQL has durably committed.
+        # If the process dies between these deletes and the SQLite COMMIT, the
+        # rows are retried and the PostgreSQL upsert/delete remains idempotent.
+        for item in success_items:
+            _mark_success(sc, item)
         sc.commit()
-        pending = sc.execute("SELECT COUNT(*) FROM hybrid_sync_outbox_v2").fetchone()[0]
+
+        pending = sc.execute(
+            "SELECT COUNT(*) FROM hybrid_sync_outbox_v2"
+        ).fetchone()[0]
 
         if failure_details:
             for (table, pk_name, operation, exc_type, error_text), detail in list(failure_details.items())[:10]:
                 _log(
                     "warning",
                     "sync item failed | table=%s | %s=%s | op=%s | attempts=%s | count=%s | %s: %s",
-                    table, pk_name, detail["pk_value"], operation, detail["attempts"],
-                    detail["count"], exc_type, error_text
+                    table, pk_name, detail["pk_value"], operation,
+                    detail["attempts"], detail["count"], exc_type, error_text
                 )
             if len(failure_details) > 10:
-                _log("warning", "sync failure summary truncated: %s different error group(s)", len(failure_details))
+                _log(
+                    "warning",
+                    "sync failure summary truncated: %s different error group(s)",
+                    len(failure_details),
+                )
 
         if synced or failed:
             level = "info" if failed == 0 else "warning"
-            _log(level, "sync summary | synced=%s failed=%s pending=%s", synced, failed, pending)
-        return {"synced":synced,"failed":failed,"pending":pending}
+            _log(
+                level,
+                "sync summary | synced=%s failed=%s pending=%s",
+                synced, failed, pending,
+            )
+
+        return {"synced": synced, "failed": failed, "pending": pending}
+
+    except Exception as exc:
+        _log(
+            "warning",
+            "batch sync transaction failed; SQLite remains MASTER: %s",
+            exc,
+        )
+        try:
+            sc.rollback()
+        except Exception:
+            pass
+        try:
+            pending = sc.execute(
+                "SELECT COUNT(*) FROM hybrid_sync_outbox_v2"
+            ).fetchone()[0]
+        except Exception:
+            pending = -1
+        return {"synced": 0, "failed": failed, "pending": pending}
+
     finally:
         if pc is not None:
             pg.putconn(pc)
