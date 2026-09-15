@@ -737,22 +737,46 @@ class NewsCreateSchema(BaseModel):
     content_uz: str = Field(min_length=1)
 
 
-def translate_to_ru_and_en(text_uz: str):
+def translate_news_text(text_uz: str, target: str) -> str:
+    """Reliable News translation with a small retry budget.
+    Returns an empty string on failure so GET can repair it later instead of
+    permanently storing Uzbek as RU/EN.
+    """
     if not text_uz or not text_uz.strip():
-        return "", ""
-    try:
-        text_ru = GoogleTranslator(source="uz", target="ru").translate(text_uz)
-    except Exception as e:
-        logging.warning("[RU Tarjima Xatosi]: %s", e)
-        text_ru = text_uz
+        return ""
 
-    try:
-        text_en = GoogleTranslator(source="uz", target="en").translate(text_uz)
-    except Exception as e:
-        logging.warning("[EN Tarjima Xatosi]: %s", e)
-        text_en = text_uz
+    last_error = None
+    for attempt in range(2):
+        try:
+            # auto source detection is more tolerant of punctuation/emojis.
+            translated = GoogleTranslator(source="auto", target=target).translate(text_uz)
+            if translated and translated.strip():
+                # If the translator returned the exact Uzbek input, retry once
+                # using the explicit Uzbek source before accepting it.
+                if translated.strip() == text_uz.strip() and attempt == 0:
+                    raise RuntimeError("Translator returned unchanged source text")
+                return translated.strip()
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                time.sleep(0.7)
 
-    return text_ru, text_en
+    logging.warning("[News %s tarjima xatosi]: %s", target.upper(), last_error)
+    return ""
+
+
+def translate_to_ru_and_en(text_uz: str):
+    return (
+        translate_news_text(text_uz, "ru"),
+        translate_news_text(text_uz, "en"),
+    )
+
+
+def _translation_missing_or_same(source_uz: str, translated: str) -> bool:
+    """True when a RU/EN field needs a one-time repair."""
+    if not translated or not translated.strip():
+        return True
+    return translated.strip() == (source_uz or "").strip()
 
 
 @app.post("/api/news")
@@ -810,15 +834,78 @@ def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
 
     result = []
     for row in rows:
+        title = row["title_uz"]
+        content = row["content_uz"]
+
+        # Eski News yozuvlarida tarjima servisining vaqtinchalik xatosi sabab
+        # RU/EN maydonlariga UZ fallback tushib qolgan bo‘lishi mumkin.
+        # Foydalanuvchi RU yoki EN tilida News ochganda uni bir marta
+        # avtomatik qayta tarjima qilib, SQLite MASTER'ga saqlaymiz.
         if lang == "ru":
-            title = row["title_ru"] or row["title_uz"]
-            content = row["content_ru"] or row["content_uz"]
+            title = row["title_ru"] or ""
+            content = row["content_ru"] or ""
+
+            if _translation_missing_or_same(row["title_uz"], title):
+                repaired = translate_news_text(row["title_uz"], "ru")
+                if repaired:
+                    title = repaired
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+                        conn.execute("PRAGMA busy_timeout=30000")
+                        conn.execute("UPDATE news SET title_ru=? WHERE id=?", (repaired, row["id"]))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logging.warning("[News RU title save]: %s", e)
+
+            if _translation_missing_or_same(row["content_uz"], content):
+                repaired = translate_news_text(row["content_uz"], "ru")
+                if repaired:
+                    content = repaired
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+                        conn.execute("PRAGMA busy_timeout=30000")
+                        conn.execute("UPDATE news SET content_ru=? WHERE id=?", (repaired, row["id"]))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logging.warning("[News RU content save]: %s", e)
+
+            title = title or row["title_uz"]
+            content = content or row["content_uz"]
+
         elif lang == "en":
-            title = row["title_en"] or row["title_uz"]
-            content = row["content_en"] or row["content_uz"]
-        else:
-            title = row["title_uz"]
-            content = row["content_uz"]
+            title = row["title_en"] or ""
+            content = row["content_en"] or ""
+
+            if _translation_missing_or_same(row["title_uz"], title):
+                repaired = translate_news_text(row["title_uz"], "en")
+                if repaired:
+                    title = repaired
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+                        conn.execute("PRAGMA busy_timeout=30000")
+                        conn.execute("UPDATE news SET title_en=? WHERE id=?", (repaired, row["id"]))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logging.warning("[News EN title save]: %s", e)
+
+            if _translation_missing_or_same(row["content_uz"], content):
+                repaired = translate_news_text(row["content_uz"], "en")
+                if repaired:
+                    content = repaired
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+                        conn.execute("PRAGMA busy_timeout=30000")
+                        conn.execute("UPDATE news SET content_en=? WHERE id=?", (repaired, row["id"]))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logging.warning("[News EN content save]: %s", e)
+
+            title = title or row["title_uz"]
+            content = content or row["content_uz"]
 
         ts = int(row["created_at"] or 0)
         created_text = time.strftime("%d-%m-%Y %H:%M", time.gmtime(ts + 5 * 3600)) if ts else ""  # Uzbekistan (UTC+5)
