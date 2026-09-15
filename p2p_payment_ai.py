@@ -35,6 +35,7 @@ PAYMENT_OCR_MAX_RETRIES = max(1, min(6, int(os.getenv("PAYMENT_OCR_MAX_RETRIES",
 PAYMENT_OCR_RETRY_BASE_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_BASE_SECONDS", "30")))
 PAYMENT_OCR_RETRY_MAX_SECONDS = max(PAYMENT_OCR_RETRY_BASE_SECONDS, int(os.getenv("PAYMENT_OCR_RETRY_MAX_SECONDS", "300")))
 PAYMENT_OCR_RETRY_SCAN_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_SCAN_SECONDS", "10")))
+PAYMENT_OCR_PROCESSING_STALE_SECONDS = max(60, int(os.getenv("PAYMENT_OCR_PROCESSING_STALE_SECONDS", "900")))
 P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
 PAYMENT_OCR_MAX_IMAGE_MB = max(1, int(os.getenv("PAYMENT_OCR_MAX_IMAGE_MB", "8")))
 PAYMENT_OCR_DAILY_MAX_REQUESTS = max(1, int(os.getenv("PAYMENT_OCR_DAILY_MAX_REQUESTS", "200")))
@@ -144,6 +145,7 @@ def init_db():
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN image_sha256 TEXT DEFAULT ''")
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_status ON p2p_receipts(status, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_retry ON p2p_receipts(status, next_retry_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_tx ON p2p_receipts(transaction_id)")
     conn.commit()
     conn.close()
@@ -479,7 +481,19 @@ def _recover_queued(force=False):
     conn = _connect()
     try:
         now = _now()
-        statuses = "('queued','waiting_capacity','retry_wait','budget_blocked')" if force else "('waiting_capacity','retry_wait','budget_blocked')"
+        # If the container died while a receipt was processing, leave it recoverable.
+        # This is deliberately time-based so a live worker is not duplicated.
+        stale_before = now - PAYMENT_OCR_PROCESSING_STALE_SECONDS
+        conn.execute(
+            "UPDATE p2p_receipts SET status='retry_wait', reason='Worker restart recovery', next_retry_at=? "
+            "WHERE status='processing' AND created_at<=? AND (processed_at IS NULL OR processed_at=0)",
+            (now, stale_before)
+        )
+        conn.commit()
+        # Recover all durable states that are safe to retry. In particular,
+        # older production receipts may have been left in `error` by the
+        # previous P2P worker version; those must not be stranded forever.
+        statuses = "('queued','waiting_capacity','retry_wait','budget_blocked','error')" if force else "('waiting_capacity','retry_wait','budget_blocked','error')"
         rows = conn.execute(
             f"SELECT receipt_id,tx_id,user_id,telegram_file_id,status FROM p2p_receipts "
             f"WHERE status IN {statuses} AND (next_retry_at IS NULL OR next_retry_at<=?) "
@@ -515,11 +529,26 @@ def _recover_queued(force=False):
             finally:
                 conn.close()
         else:
+            conn = _connect()
             try:
-                _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                cur.execute(
+                    "UPDATE p2p_receipts SET status='queued', next_retry_at=0 WHERE receipt_id=? AND status=? AND (next_retry_at IS NULL OR next_retry_at<=?)",
+                    (row["receipt_id"], row["status"], now)
+                )
+                if cur.rowcount != 1:
+                    conn.rollback()
+                    continue
+                try:
+                    _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
+                except queue.Full:
+                    conn.rollback()
+                    break
+                conn.commit()
                 recovered += 1
-            except queue.Full:
-                break
+            finally:
+                conn.close()
     if recovered:
         logging.info("P2P OCR recovery: %s receipt(s) restored to worker queue", recovered)
     return recovered
