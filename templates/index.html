@@ -1400,7 +1400,7 @@
         }
 		// ===== Professional News tizimi =====
         const NEWS_STORAGE_KEY = () => `quiz_ai_news_seen_${userId}`;
-        const NEWS_POLL_MS = 120000; // 2 daqiqa: yengil polling
+        const NEWS_POLL_MS = 600000; // 10 daqiqa: faqat juda yengil latest-id polling
         let newsPollTimer = null;
         let newsRequestInFlight = false;
 
@@ -1434,25 +1434,30 @@
             return Array.isArray(rawData) ? rawData : (rawData ? [rawData] : []);
         }
 
+        async function fetchLatestNewsId() {
+            const response = await fetch(`${BASE_URL}/api/news-latest?_t=${Date.now()}`, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const result = await response.json();
+            return Number(result.latest_id || 0);
+        }
+
         async function checkNewsUpdates(markInitialBaseline = true) {
             if (newsRequestInFlight) return;
             if (document.visibilityState !== 'visible') return;
             newsRequestInFlight = true;
             try {
-                const items = await fetchNewsItems();
-                const latestId = latestNewsId(items);
+                // Badge uchun endi 100 ta News yuklanmaydi. Faqat bitta INTEGER (latest_id) olinadi.
+                const latestId = await fetchLatestNewsId();
                 const seenId = getSeenNewsId();
 
                 // Birinchi ochilishda mavjud eski News foydalanuvchiga "yangi" deb ko'rsatilmaydi.
-                // Agar ilova avval News yo'q paytda ochilgan bo'lsa, seenId=0 qoladi va keyingi
-                // birinchi News haqiqiy yangi xabar sifatida indikator chiqaradi.
                 if (markInitialBaseline && !localStorage.getItem(NEWS_STORAGE_KEY())) {
                     setSeenNewsId(latestId);
                     setNewsBadge(false);
                 } else {
                     setNewsBadge(latestId > seenId);
                 }
-                return items;
+                return latestId;
             } catch (error) {
                 console.warn('News tekshiruvida xatolik:', error);
                 return null;
@@ -1477,7 +1482,7 @@
 
             newsModal.style.display = 'flex';
             newsModal.setAttribute('aria-hidden', 'false');
-            container.innerHTML = '<div class="news-empty">Yuklanmoqda...</div>';
+            container.innerHTML = `<div class="news-empty">${currentLang === 'ru' ? 'Загрузка...' : currentLang === 'en' ? 'Loading...' : 'Yuklanmoqda...'}</div>`;
 
             try {
                 const items = await fetchNewsItems();
