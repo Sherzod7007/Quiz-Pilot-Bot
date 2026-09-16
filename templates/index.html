@@ -26,7 +26,7 @@
             background: var(--aero-bg);
             background-attachment: fixed;
             color: var(--text-color);
-            margin: 0; padding: 15px; padding-bottom: 95px;
+            margin: 0; padding: 15px; padding-bottom: 100px;
             -webkit-user-select: none; user-select: none;
             min-height: 100vh;
             box-sizing: border-border-box;
@@ -218,24 +218,83 @@
             box-shadow: 0 4px 15px rgba(0, 164, 239, 0.4);
         }
 
-        /* Bottom Aero Navigation Taskbar */
-        .bottom-nav { 
-            position: fixed; bottom: 0; left: 0; right: 0; height: 70px; 
-            background: rgba(10, 16, 26, 0.75);
-            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            display: flex; justify-content: space-around; 
-            border-top: 1px solid rgba(255, 255, 255, 0.25); 
-            align-items: center; z-index: 99; 
-            box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        /* Bottom Aero Floating Navigation — Telegram / iPhone inspired */
+        .bottom-nav {
+            position: fixed;
+            left: 50%;
+            bottom: calc(8px + env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            width: min(680px, calc(100% - 20px));
+            height: 70px;
+            padding: 5px;
+            box-sizing: border-box;
+            background: linear-gradient(180deg, rgba(35, 49, 66, 0.88) 0%, rgba(8, 17, 29, 0.92) 100%);
+            backdrop-filter: blur(22px) saturate(125%);
+            -webkit-backdrop-filter: blur(22px) saturate(125%);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 3px;
+            border: 1px solid rgba(210, 232, 250, 0.30);
+            border-top-color: rgba(255, 255, 255, 0.46);
+            border-radius: 22px;
+            z-index: 99;
+            box-shadow:
+                0 10px 30px rgba(0, 0, 0, 0.50),
+                0 2px 8px rgba(0, 0, 0, 0.30),
+                inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.28);
         }
-        .nav-item { 
-            display: flex; flex-direction: column; align-items: center; background: none; 
-            border: none; font-size: 11px; color: var(--text-hint); cursor: pointer; 
-            transition: all 0.2s ease;
+        .nav-item {
+            flex: 1 1 0;
+            min-width: 0;
+            height: 58px;
+            padding: 4px 2px 3px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 17px;
+            font-size: 10.5px;
+            line-height: 1.1;
+            font-weight: 600;
+            color: #aebdce;
+            cursor: pointer;
+            transition: transform 0.18s ease, color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+            -webkit-tap-highlight-color: transparent;
         }
-        .nav-item.active { color: #00d2ff; text-shadow: 0 0 8px rgba(0, 210, 255, 0.6); }
-        .nav-item.active .nav-icon { transform: translateY(-2px); filter: drop-shadow(0 0 5px #00d2ff); }
-        .nav-icon { font-size: 20px; margin-bottom: 4px; color: var(--text-hint); transition: transform 0.2s ease; }
+        .nav-item:active { transform: scale(0.94); }
+        .nav-item.active {
+            color: #00d2ff;
+            background: linear-gradient(180deg, rgba(0, 174, 255, 0.20) 0%, rgba(0, 103, 174, 0.12) 100%);
+            border-color: rgba(0, 210, 255, 0.38);
+            text-shadow: 0 0 8px rgba(0, 210, 255, 0.45);
+            box-shadow:
+                0 0 12px rgba(0, 174, 255, 0.16),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18);
+        }
+        .nav-item.active .nav-icon {
+            transform: translateY(-1px) scale(1.05);
+            filter: drop-shadow(0 0 5px rgba(0, 210, 255, 0.75));
+        }
+        .nav-icon {
+            display: block;
+            height: 28px;
+            line-height: 28px;
+            font-size: 21px;
+            margin-bottom: 1px;
+            color: var(--text-hint);
+            transition: transform 0.18s ease, filter 0.18s ease;
+        }
+        .nav-item.active .nav-icon { color: inherit; }
+
+        @media (max-width: 390px) {
+            .bottom-nav { width: calc(100% - 14px); bottom: calc(6px + env(safe-area-inset-bottom)); border-radius: 20px; }
+            .nav-item { height: 58px; font-size: 9.5px; border-radius: 15px; }
+            .nav-icon { font-size: 20px; height: 27px; line-height: 27px; }
+        }
 
 
         /* Yaratish: kattaroq promo slayder va mavzuga mos fon rasmlari. */
@@ -497,74 +556,37 @@
             transition: all 0.2s ease;
         }
         .lang-btn.active { border-color: #00d2ff; background: rgba(0, 120, 215, 0.3); color: #fff; box-shadow: 0 0 10px rgba(0, 210, 255, 0.3); }
-        /* Telefon uslubidagi ixcham Windows 7 Aero Glass switchlar. */
+        /* Ovoz/Vibratsiya ON holati Til tanlangan tugmasi kabi doimiy ko'rinadi. */
+        /* Compact Aero Glass controls — approximately 60% of the previous button width. */
         #vibration-toggle, #sound-toggle {
-            position: relative !important;
-            flex: 0 0 52px !important;
-            min-width: 52px !important;
-            width: 52px !important;
-            height: 30px !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border-radius: 16px !important;
-            border: 1px solid rgba(190, 215, 235, 0.30) !important;
-            background: linear-gradient(180deg, rgba(95, 108, 122, 0.62), rgba(18, 25, 34, 0.90)) !important;
-            box-shadow: inset 0 1px 2px rgba(255,255,255,.18), inset 0 -1px 2px rgba(0,0,0,.45), 0 2px 7px rgba(0,0,0,.35) !important;
-            color: transparent !important;
-            font-size: 0 !important;
-            line-height: 0 !important;
-            text-indent: -9999px !important;
-            display: block !important;
-            cursor: pointer;
-            overflow: hidden;
-            transition: border-color .22s ease, background .22s ease, box-shadow .22s ease;
-        }
-        #vibration-toggle::before, #sound-toggle::before {
-            content: '';
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            background: linear-gradient(145deg, #ffffff 0%, #f3f7fb 38%, #bfc9d4 100%);
-            border: 1px solid rgba(255,255,255,.75);
-            box-shadow: 0 1px 3px rgba(0,0,0,.50), inset 0 1px 1px rgba(255,255,255,.95), 0 0 2px rgba(180,220,255,.35);
-            transition: transform .22s cubic-bezier(.22,.8,.28,1), box-shadow .22s ease;
-        }
-        #vibration-toggle::after, #sound-toggle::after {
-            content: '';
-            position: absolute;
-            top: 4px;
-            left: 5px;
-            width: 18px;
-            height: 7px;
-            border-radius: 50%;
-            background: linear-gradient(180deg, rgba(255,255,255,.68), rgba(255,255,255,0));
-            pointer-events: none;
-            transition: transform .22s cubic-bezier(.22,.8,.28,1), opacity .22s ease;
+            min-width: 66px !important;
+            width: 66px !important;
+            height: 34px;
+            padding: 5px 9px !important;
+            border-radius: 17px !important;
+            border: 1px solid rgba(120, 190, 255, 0.28) !important;
+            background: linear-gradient(180deg, rgba(65, 80, 100, 0.48), rgba(10, 15, 24, 0.72)) !important;
+            color: #aeb8c5 !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), 0 2px 8px rgba(0,0,0,0.35) !important;
+            text-align: center !important;
+            justify-content: center !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            line-height: 1 !important;
+            transition: all 0.2s ease;
         }
         #vibration-toggle.active, #sound-toggle.active {
-            border-color: rgba(0, 210, 255, .78) !important;
-            background: linear-gradient(180deg, rgba(0, 157, 226, .88), rgba(0, 78, 142, .92)) !important;
-            box-shadow: inset 0 1px 2px rgba(255,255,255,.30), inset 0 -1px 2px rgba(0,30,60,.45), 0 0 7px rgba(0,210,255,.55), 0 0 14px rgba(0,150,255,.22) !important;
+            border-color: #00d2ff !important;
+            background: linear-gradient(180deg, rgba(0, 155, 235, 0.72), rgba(0, 75, 145, 0.72)) !important;
+            color: #fff !important;
+            box-shadow: 0 0 7px rgba(0,210,255,0.75), 0 0 15px rgba(0,160,255,0.38), inset 0 1px 0 rgba(255,255,255,0.45) !important;
+            text-shadow: 0 0 5px rgba(255,255,255,0.65);
         }
-        #vibration-toggle.active::before, #sound-toggle.active::before {
-            transform: translateX(22px);
-            box-shadow: 0 1px 4px rgba(0,0,0,.52), inset 0 1px 1px rgba(255,255,255,.98), 0 0 5px rgba(190,235,255,.65);
-        }
-        #vibration-toggle.active::after, #sound-toggle.active::after {
-            transform: translateX(22px);
-        }
-        #vibration-toggle:active::before, #sound-toggle:active::before {
-            transform: scale(.94);
-        }
-        #vibration-toggle.active:active::before, #sound-toggle.active:active::before {
-            transform: translateX(22px) scale(.94);
-        }
-        #vibration-toggle:focus-visible, #sound-toggle:focus-visible {
-            outline: 2px solid rgba(0,210,255,.72);
-            outline-offset: 2px;
+        #vibration-toggle:not(.active), #sound-toggle:not(.active) {
+            background: linear-gradient(180deg, rgba(55, 65, 80, 0.42), rgba(8, 12, 18, 0.72)) !important;
+            border-color: rgba(120, 190, 255, 0.20) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.32) !important;
+            color: #8f9aaa !important;
         }
         
         .fc-display { 
