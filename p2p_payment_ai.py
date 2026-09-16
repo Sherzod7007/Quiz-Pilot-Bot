@@ -303,6 +303,19 @@ def _parse_response(text):
         raise
 
 
+def _needs_payment_fallback(result):
+    """True when OCR result is too incomplete for an automatic payment decision.
+    Transaction ID is intentionally optional because some receipts do not show it.
+    """
+    return (
+        not bool(result.is_receipt)
+        or float(_parse_amount(result.amount)) <= 0
+        or not bool(_last4(result.recipient_card_last4))
+        or result.confidence < 0.85
+    )
+
+
+
 def _is_transient_error(exc):
     text = str(exc).upper()
     return any(token in text for token in (
@@ -354,6 +367,7 @@ def _vision(file_bytes, mime_type, attempt_number):
             models.append(model)
 
     last_error = None
+    best_incomplete = None
     for model in models:
         key_idx, api_key = _next_key()
         if not api_key:
@@ -373,6 +387,14 @@ def _vision(file_bytes, mime_type, attempt_number):
             response = _vision_once(file_bytes, mime_type, model, api_key)
             result = _parse_response(response.text)
             inp, out = _extract_usage(response)
+            if _needs_payment_fallback(result):
+                if best_incomplete is None or result.confidence > best_incomplete[0].confidence:
+                    best_incomplete = (result, key_idx, inp, out, model)
+                logging.warning(
+                    "P2P Gemini Vision incomplete result | model=%s | key=%s | receipt_attempt=%s | confidence=%.2f",
+                    model, key_idx, attempt_number, result.confidence
+                )
+                continue
             return result, key_idx, inp, out, model
         except Exception as exc:
             last_error = exc
@@ -388,6 +410,8 @@ def _vision(file_bytes, mime_type, attempt_number):
         finally:
             _semaphore.release()
 
+    if best_incomplete is not None:
+        return best_incomplete
     if last_error is None:
         raise RuntimeError("Gemini Vision uchun ishlaydigan API key/model topilmadi")
     if _is_transient_error(last_error):
@@ -684,16 +708,14 @@ def _process(item):
         amount_ok = abs(_parse_amount(result.amount) - expected) < 0.01
         conf_ok = result.confidence >= 0.85
         receipt_ok = bool(result.is_receipt)
-        txid_ok = bool(result.transaction_id.strip())
         expected_card = _last4(P2P_CARD_NUMBER)
         actual_card = _last4(result.recipient_card_last4)
         card_ok = bool(expected_card) and bool(actual_card) and expected_card == actual_card
-        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok:
+        if not receipt_ok or not amount_ok or not conf_ok or not card_ok:
             reasons = []
             if not receipt_ok: reasons.append("chek aniqlanmadi")
             if not amount_ok: reasons.append(f"summa mos emas: {result.amount} != {expected}")
             if not conf_ok: reasons.append(f"confidence past: {result.confidence:.2f}")
-            if not txid_ok: reasons.append("transaction ID topilmadi")
             if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
             reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
             _mark_by_tx(tx_id, status="review", reason=reason_text)
