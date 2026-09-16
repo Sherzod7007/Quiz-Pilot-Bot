@@ -1524,8 +1524,12 @@
                 const key = el.getAttribute('data-lang');
                 if (langPack[currentLang][key]) {
                     const value = langPack[currentLang][key];
-                    if (key === 'premium_pro_desc' && currentLang === 'uz') {
-                        el.innerHTML = value.replace('Eslatma:', '<span class="premium-note-highlight">Eslatma:</span>');
+                    if (key === 'premium_pro_desc') {
+                        // Eslatma / Примечание / Note — barcha tillarda bir xil sariq uslubda
+                        el.innerHTML = value.replace(
+                            /(Eslatma:|Примечание:|Note:)/,
+                            '<span class="premium-note-highlight">$1</span>'
+                        );
                     } else {
                         el.innerText = value;
                     }
