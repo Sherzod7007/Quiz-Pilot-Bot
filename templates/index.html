@@ -560,13 +560,13 @@
         /* ON/OFF matni faqat holatni JS uchun saqlaydi; ekranda ixcham switch ko'rinadi. */
         #vibration-toggle, #sound-toggle {
             position: relative !important;
-            flex: 0 0 46px !important;
-            min-width: 46px !important;
-            width: 46px !important;
-            height: 24px !important;
+            flex: 0 0 58px !important;
+            min-width: 58px !important;
+            width: 58px !important;
+            height: 30px !important;
             padding: 0 !important;
             margin: 0 !important;
-            border-radius: 13px !important;
+            border-radius: 16px !important;
             border: 1px solid rgba(170, 205, 235, 0.28) !important;
             background: linear-gradient(180deg, rgba(72, 87, 105, 0.60), rgba(12, 19, 29, 0.82)) !important;
             color: transparent !important;
@@ -588,10 +588,10 @@
         #vibration-toggle::before, #sound-toggle::before {
             content: "";
             position: absolute;
-            left: 2px;
-            top: 2px;
-            width: 18px;
-            height: 18px;
+            left: 3px;
+            top: 3px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
             background: linear-gradient(145deg, #ffffff 0%, #e5edf5 58%, #c4d0dc 100%);
             border: 1px solid rgba(255,255,255,0.72);
@@ -613,7 +613,7 @@
         }
 
         #vibration-toggle.active::before, #sound-toggle.active::before {
-            transform: translateX(22px);
+            transform: translateX(28px);
             box-shadow:
                 0 1px 4px rgba(0,0,0,0.42),
                 0 0 4px rgba(255,255,255,0.38),
@@ -4425,5 +4425,64 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             });
         };
     </script>
+
+
+<style id="compact-phone-switch-final">
+/* ===== ONLY: compact phone-style switches ===== */
+#settings-screen #vibration-toggle,
+#settings-screen #sound-toggle{
+    position:relative!important;
+    flex:0 0 46px!important;
+    min-width:46px!important;
+    width:46px!important;
+    height:24px!important;
+    padding:0!important;
+    margin:0!important;
+    box-sizing:border-box!important;
+    border-radius:999px!important;
+    border:1px solid rgba(255,255,255,.12)!important;
+    background:#20283a!important;
+    color:transparent!important;
+    font-size:0!important;
+    line-height:0!important;
+    display:inline-flex!important;
+    align-items:center!important;
+    justify-content:flex-start!important;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.35),0 2px 6px rgba(0,0,0,.25)!important;
+    -webkit-tap-highlight-color:transparent!important;
+    transition:background .2s ease,border-color .2s ease,box-shadow .2s ease,transform .15s ease!important;
+}
+#settings-screen #vibration-toggle::before,
+#settings-screen #sound-toggle::before{
+    content:""!important;
+    position:absolute!important;
+    left:2px!important;
+    top:2px!important;
+    width:18px!important;
+    height:18px!important;
+    border-radius:50%!important;
+    background:#f7f9ff!important;
+    border:0!important;
+    box-shadow:0 2px 5px rgba(0,0,0,.38),inset 0 1px 1px rgba(255,255,255,.95)!important;
+    transform:translateX(0)!important;
+    transition:transform .2s cubic-bezier(.2,.8,.2,1),box-shadow .2s ease!important;
+    z-index:2!important;
+}
+#settings-screen #vibration-toggle.active,
+#settings-screen #sound-toggle.active{
+    background:linear-gradient(90deg,#25c9ee,#6977ff)!important;
+    border-color:rgba(53,217,255,.6)!important;
+    box-shadow:0 0 8px rgba(53,217,255,.32),inset 0 1px 1px rgba(255,255,255,.22)!important;
+}
+#settings-screen #vibration-toggle.active::before,
+#settings-screen #sound-toggle.active::before{
+    transform:translateX(22px)!important;
+}
+#settings-screen #vibration-toggle:active,
+#settings-screen #sound-toggle:active{
+    transform:scale(.96)!important;
+}
+</style>
+
 </body>
 </html>
