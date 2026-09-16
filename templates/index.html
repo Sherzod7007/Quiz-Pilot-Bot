@@ -174,7 +174,23 @@
             position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
             background: var(--aero-bg); z-index: 1000; padding: 20px; display: none; overflow-y: auto; 
         }
-        .game-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 25px; }
+        .game-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 25px; gap: 12px; }
+        .game-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .random-btn {
+            width: 40px; height: 36px; padding: 0; border-radius: 9px;
+            border: 1px solid rgba(160, 190, 225, 0.32);
+            background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(0,0,0,0.28));
+            color: #d9e7f5; font-size: 21px; line-height: 1; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 3px 10px rgba(0,0,0,0.25);
+            transition: all .18s ease; -webkit-tap-highlight-color: transparent;
+        }
+        .random-btn:hover, .random-btn:active {
+            border-color: #00d2ff; background: linear-gradient(180deg, #0099ff, #005a9e);
+            color: #fff; box-shadow: 0 0 10px rgba(0,153,255,.5), inset 0 1px 0 rgba(255,255,255,.35);
+            transform: translateY(-1px);
+        }
+        .random-btn:active { transform: scale(.95); }
         .q-text { font-size: 20px; font-weight: 700; margin-bottom: 25px; line-height: 1.4; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
         .options-list { display: flex; flex-direction: column; gap: 12px; }
         
@@ -1009,7 +1025,10 @@
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
-            <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
+            <div class="game-header-right">
+                <button type="button" class="random-btn" onclick="randomizeQuiz()" aria-label="Random" title="Random">🔀</button>
+                <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
+            </div>
         </div>
         <div id="game-session-bar" class="game-session-bar" style="display:none;">
             <div id="game-session-meta" class="game-session-meta"></div>
@@ -2048,7 +2067,12 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 }
                 if (data && data.status === "ok" && data.quiz_json && data.quiz_json.quizzes) {
                     currentQuizId = quizId;
-                    currentQuizQuestions = data.quiz_json.quizzes;
+                    currentQuizQuestions = data.quiz_json.quizzes.map((q, idx) => ({
+                        ...q,
+                        options: Array.isArray(q.options) ? [...q.options] : [],
+                        _answered: false,
+                        _randomId: idx
+                    }));
                     currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
                     currentTeacherSessionId=sessionId||null;
                     const gameTitle = data.title || (sessionStart && sessionStart.title) || 'Test';
@@ -2066,12 +2090,19 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
         }
 
         function showQuestion() {
+            // Randomizatsiyadan keyin javob berilgan savollarni qayta ko'rsatmaymiz.
+            while (currentQuestionIdx < currentQuizQuestions.length && currentQuizQuestions[currentQuestionIdx]._answered) {
+                currentQuestionIdx++;
+            }
             if (currentQuestionIdx >= currentQuizQuestions.length) {
                 finishQuiz(); return;
             }
+
             isAnswered = false;
             const q = currentQuizQuestions[currentQuestionIdx];
-            document.getElementById('game-progress').innerText = `${currentLang === 'ru' ? 'Вопрос' : currentLang === 'en' ? 'Question' : 'Savol'}: ${currentQuestionIdx + 1}/${currentQuizQuestions.length}`;
+            const answeredCount = currentQuizQuestions.filter(item => item._answered).length;
+            const totalQuestions = currentQuizQuestions.length;
+            document.getElementById('game-progress').innerText = `${currentLang === 'ru' ? 'Вопрос' : currentLang === 'en' ? 'Question' : 'Savol'}: ${answeredCount + 1}/${totalQuestions}`;
             document.getElementById('question-text').innerText = q.question;
             
             const container = document.getElementById('options-container');
@@ -2080,7 +2111,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             
             const nextBtn = document.getElementById('next-question-btn');
             nextBtn.style.display = 'none';
-            nextBtn.innerText = (currentQuestionIdx === currentQuizQuestions.length - 1) ? langPack[currentLang].btn_finish : langPack[currentLang].btn_next;
+            nextBtn.innerText = (answeredCount === totalQuestions - 1) ? langPack[currentLang].btn_finish : langPack[currentLang].btn_next;
 
             const prefixes = ["A) ", "B) ", "C) ", "D) "];
             q.options.forEach((opt, idx) => {
@@ -2093,6 +2124,49 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             });
         }
 
+        function shuffleArrayDifferent(array) {
+            if (array.length < 2) return array.slice();
+            const original = array.slice();
+            let shuffled = array.slice();
+            for (let attempt = 0; attempt < 12; attempt++) {
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                if (shuffled.some((item, i) => item !== original[i])) return shuffled;
+                shuffled = array.slice();
+            }
+            // Juda kam uchraydigan holatda ham tartib albatta o'zgaradi.
+            [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+            return shuffled;
+        }
+
+        function shuffleQuestionOptions(q) {
+            if (!Array.isArray(q.options) || q.options.length < 2) return;
+            const pairs = q.options.map((text, idx) => ({ text, isCorrect: idx === q.correct_index }));
+            const shuffled = shuffleArrayDifferent(pairs);
+            q.options = shuffled.map(item => item.text);
+            q.correct_index = shuffled.findIndex(item => item.isCorrect);
+        }
+
+        function randomizeQuiz() {
+            if (quizFinished || !currentQuizQuestions.length) return;
+
+            // Savollar tartibi va har bir savolning javob variantlari har bosishda qayta aralashtiriladi.
+            currentQuizQuestions = shuffleArrayDifferent(currentQuizQuestions);
+            currentQuizQuestions.forEach(shuffleQuestionOptions);
+
+            // Javob berilgan savollar saqlanadi, faqat hali ishlanmagan savolga o'tiladi.
+            currentQuestionIdx = 0;
+            showQuestion();
+
+            const btn = document.querySelector('.random-btn');
+            if (btn) {
+                btn.style.transform = 'rotate(180deg) scale(.96)';
+                setTimeout(() => { btn.style.transform = ''; }, 180);
+            }
+        }
+
         function selectOption(btn, idx, correctIdx, explanation) {
             if (isAnswered) return;
             isAnswered = true;
@@ -2100,10 +2174,11 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             const buttons = container.getElementsByClassName('opt-btn');
             const expBox = document.getElementById('explanation-container');
 
+            const q = currentQuizQuestions[currentQuestionIdx];
             if (idx === correctIdx) {
-                btn.classList.add('correct'); correctAnswersCount++; playQuizSound('correct');
+                btn.classList.add('correct'); correctAnswersCount++; q._answered = true; playQuizSound('correct');
             } else {
-                btn.classList.add('wrong'); wrongAnswersCount++; playQuizSound('wrong');
+                btn.classList.add('wrong'); wrongAnswersCount++; q._answered = true; playQuizSound('wrong');
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
                 const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
                 expBox.innerText = `${expLabel} ` + (explanation || "...");
