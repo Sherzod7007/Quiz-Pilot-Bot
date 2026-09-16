@@ -1244,6 +1244,194 @@
         }
         /* ===== END CREATE SCREEN PREMIUM VISUAL PASS ===== */
 
+
+        /* ===== Library Premium Aero v3 — synced with the latest Library design ===== */
+        #library-screen .tabs{
+            display:flex;
+            align-items:center;
+            gap:2px;
+            height:70px;
+            padding:3px;
+            margin:0 0 14px !important;
+            box-sizing:border-box;
+            border-radius:18px;
+            background:linear-gradient(145deg,rgba(255,255,255,.105),rgba(5,12,22,.38));
+            border:1px solid rgba(185,210,235,.30);
+            border-top-color:rgba(255,255,255,.42);
+            box-shadow:0 7px 18px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.18);
+            overflow:hidden;
+        }
+        #library-screen .tabs .tab{
+            flex:1 1 0;
+            min-width:0;
+            height:62px;
+            padding:0 7px;
+            margin:0;
+            box-sizing:border-box;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border:1px solid transparent;
+            border-radius:14px;
+            background:transparent;
+            color:#b8c7d8;
+            font-size:14px;
+            font-weight:700;
+            white-space:nowrap;
+            box-shadow:none;
+            text-shadow:none;
+            transition:background .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease,transform .18s ease;
+        }
+        #library-screen .tabs .tab:hover{
+            background:rgba(255,255,255,.065);
+            color:#fff;
+        }
+        #library-screen .tabs .tab:active{transform:scale(.985)}
+        #library-screen .tabs .tab.active{
+            background:linear-gradient(180deg,rgba(10,170,244,.96) 0%,rgba(0,103,174,.96) 100%);
+            border-color:#00d2ff;
+            color:#fff;
+            box-shadow:0 0 14px rgba(0,153,255,.42),inset 0 1px 0 rgba(255,255,255,.48);
+            text-shadow:0 1px 2px rgba(0,0,0,.55);
+        }
+        #library-screen .tabs + .group-join-open-btn{
+            margin-top:0 !important;
+        }
+        #library-screen #group-join-open-btn{
+            min-height:60px;
+            height:60px;
+            margin:0 0 18px !important;
+            padding:0 16px;
+            border-radius:17px !important;
+            border:1px solid rgba(190,215,238,.27) !important;
+            border-top-color:rgba(255,255,255,.34) !important;
+            background:linear-gradient(145deg,rgba(50,64,80,.62),rgba(12,20,31,.72)) !important;
+            color:#b9c8d9;
+            font-size:15px;
+            font-weight:700;
+            box-shadow:0 7px 18px rgba(0,0,0,.19),inset 0 1px 0 rgba(255,255,255,.16) !important;
+        }
+        #library-screen #group-join-open-btn:hover{
+            color:#fff;
+            border-color:rgba(0,210,255,.48) !important;
+            box-shadow:0 0 12px rgba(0,153,255,.20),inset 0 1px 0 rgba(255,255,255,.20) !important;
+        }
+        #library-screen #group-join-open-btn.active{
+            background:linear-gradient(180deg,#0aa8f4,#0067aa) !important;
+            color:#fff;
+            border-color:#00d2ff !important;
+            box-shadow:0 0 14px rgba(0,153,255,.42),inset 0 1px 0 rgba(255,255,255,.48) !important;
+        }
+        #library-screen .quiz-card,
+        #library-screen .flash-card{
+            position:relative;
+            margin-bottom:16px;
+            padding:19px 20px 18px;
+            border-radius:18px;
+            background:linear-gradient(145deg,rgba(40,55,72,.74),rgba(12,20,31,.76));
+            border:1px solid rgba(190,215,238,.25);
+            border-top-color:rgba(255,255,255,.36);
+            box-shadow:0 9px 22px rgba(0,0,0,.23),inset 0 1px 0 rgba(255,255,255,.14);
+            transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+        }
+        #library-screen .quiz-card:hover,
+        #library-screen .flash-card:hover{
+            transform:translateY(-1px);
+            border-color:rgba(0,210,255,.38);
+            box-shadow:0 11px 24px rgba(0,0,0,.25),0 0 10px rgba(0,153,255,.07),inset 0 1px 0 rgba(255,255,255,.16);
+        }
+        #library-screen .card-top{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:10px;
+        }
+        #library-screen .card-title{
+            flex:1 1 auto;
+            min-width:0;
+            max-width:none;
+            margin:0;
+            font-size:17px;
+            line-height:1.25;
+            font-weight:800;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+        }
+        #library-screen .action-group{
+            flex:0 0 auto;
+            display:flex;
+            align-items:center;
+            gap:6px;
+        }
+        #library-screen .btn-circle,
+        #library-screen .btn-delete,
+        #library-screen .btn-public{
+            flex:0 0 48px;
+            width:48px;
+            height:48px;
+            padding:0;
+            border-radius:12px;
+            font-size:18px;
+            box-sizing:border-box;
+            background:linear-gradient(145deg,rgba(255,255,255,.13),rgba(0,0,0,.27));
+            border-color:rgba(175,205,232,.30);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 3px 8px rgba(0,0,0,.20);
+        }
+        #library-screen .btn-circle:hover,
+        #library-screen .btn-public:hover,
+        #library-screen .btn-delete:hover{
+            transform:translateY(-1px);
+            border-color:rgba(0,210,255,.60);
+            box-shadow:0 0 10px rgba(0,153,255,.24),inset 0 1px 0 rgba(255,255,255,.28);
+        }
+        #library-screen .progress-row{
+            margin-top:15px;
+            gap:10px;
+        }
+        #library-screen .progress-line-container{
+            height:9px;
+            margin-right:0;
+            border-radius:99px;
+            background:rgba(0,0,0,.42);
+            border-color:rgba(255,255,255,.09);
+        }
+        #library-screen .progress-line-bar{
+            background:linear-gradient(90deg,#00d2ff 0%,#0078d7 100%);
+            box-shadow:0 0 7px rgba(0,210,255,.55);
+        }
+        #library-screen .card-footer{
+            margin-top:13px !important;
+            padding-top:10px;
+            border-top:1px solid rgba(190,215,238,.10);
+            font-size:13px;
+            line-height:1.35;
+            color:#aebfd1;
+        }
+        #library-screen .fc-display{
+            margin:0;
+            min-height:72px;
+            box-sizing:border-box;
+            border-radius:14px;
+            border:1px solid rgba(190,215,238,.22);
+            background:linear-gradient(145deg,rgba(255,255,255,.075),rgba(0,0,0,.22));
+            padding:20px 16px;
+        }
+        #library-screen #lib-content-area > div[style*="text-align: center"]{
+            border-radius:16px;
+            border:1px solid rgba(190,215,238,.18);
+            background:rgba(255,255,255,.045);
+        }
+        @media(max-width:390px){
+            #library-screen .tabs{height:66px;border-radius:17px}
+            #library-screen .tabs .tab{height:58px;font-size:13px;padding:0 4px}
+            #library-screen #group-join-open-btn{height:58px;min-height:58px;margin-bottom:16px !important}
+            #library-screen .quiz-card,#library-screen .flash-card{padding:17px 16px 16px}
+            #library-screen .btn-circle,#library-screen .btn-delete,#library-screen .btn-public{flex-basis:44px;width:44px;height:44px;font-size:17px}
+            #library-screen .action-group{gap:5px}
+            #library-screen .card-title{font-size:16px}
+        }
+
 </style>
 </head>
 <body>
