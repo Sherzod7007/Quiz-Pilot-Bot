@@ -705,7 +705,7 @@
 </head>
 <body>
 
-    <div id="create-screen" class="screen">
+    <div id="create-screen" class="screen active">
         <div class="header" style="display: flex; justify-content: space-between; align-items: center;">
   <h1 data-lang="nav_create">Yangi Test</h1>
   
@@ -792,7 +792,7 @@
         </div>
     </div>
 
-    <div id="library-screen" class="screen active">
+    <div id="library-screen" class="screen">
         <div class="header">
             <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
             <span id="user-count-badge" class="user-badge">...</span>
@@ -1017,8 +1017,8 @@
     </div>
 
     <div class="bottom-nav">
-        <button id="nav-create" class="nav-item" onclick="switchScreen('create')"><span class="nav-icon">➕️</span><span data-lang="nav_create">Yaratish</span></button>
-        <button id="nav-library" class="nav-item active" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
+        <button id="nav-create" class="nav-item active" onclick="switchScreen('create')"><span class="nav-icon">➕️</span><span data-lang="nav_create">Yaratish</span></button>
+        <button id="nav-library" class="nav-item" onclick="switchScreen('library')"><span class="nav-icon">📚</span><span data-lang="nav_library">Kutubxona</span></button>
         <button id="nav-teacher" class="nav-item" style="display:none" onclick="switchScreen('teacher')"><span class="nav-icon">👨‍🏫</span><span data-lang="nav_teacher">O‘qituvchi</span></button>
         <button id="nav-settings" class="nav-item" onclick="switchScreen('settings')"><span class="nav-icon">⚙️</span><span data-lang="nav_settings">Sozlamalar</span></button>
         <button id="nav-premium" class="nav-item" onclick="switchScreen('premium')"><span class="nav-icon">👑</span><span data-lang="nav_premium">Premium</span></button>
