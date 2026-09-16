@@ -1902,7 +1902,15 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                     data.quizzes.forEach(quiz => {
                         const card = document.createElement('div');
                         card.className = 'quiz-card';
+                        card.style.cursor = 'pointer';
                         const canOpenPublic = data.is_paid || (data.public_remaining !== undefined && data.public_remaining > 0);
+                        card.addEventListener('click', (e) => {
+                            // Faqat kartochkaning bo'sh qismi bosilganda test ochiladi.
+                            // Play va boshqa tugmalar o'z funksiyasini saqlaydi.
+                            if (e.target.closest('button')) return;
+                            if (canOpenPublic) playQuiz(quiz.id, true);
+                            else showPublicLimitLocked();
+                        });
                         const action = canOpenPublic
                             ? `<button class="btn-circle" onclick="playQuiz('${quiz.id}', true)">${langPack[currentLang].public_open}</button>`
                             : `<button class="btn-circle" onclick="showPublicLimitLocked()">🔒</button>`;
