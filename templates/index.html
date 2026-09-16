@@ -1820,8 +1820,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 
                 let liveUsers = 0;
                 if (data && data.total_users !== undefined) liveUsers = data.total_users;
-                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
-                document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers} ${suffix}`;
+                document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers}`;
 
                 if (data && data.user_lang) {
                     currentLang = data.user_lang;
@@ -2566,8 +2565,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             function updateActiveUsersBadge(activeUsers) {
                 const badge = document.getElementById('user-count-badge');
                 if (!badge) return;
-                const suffix = langPack[currentLang].active_users_suffix || "faol foydalanuvchi";
-                badge.innerText = `🟢 ${Number(activeUsers) || 0} ${suffix}`;
+                badge.innerText = `🟢 ${Number(activeUsers) || 0}`;
             }
 
             async function sendActivityHeartbeat() {
