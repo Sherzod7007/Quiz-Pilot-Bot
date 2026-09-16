@@ -1391,9 +1391,14 @@ def handle_receipt_photo(message):
     if queued:
         # We intentionally do not wait for Gemini here. The Telegram handler stays fast.
         try:
+            receipt_received_messages = {
+                "uz": "⏳ Chekingiz qabul qilindi. AI tekshiruvi navbatga qo'yildi. To'lov avtomatik tekshiriladi.",
+                "ru": "⏳ Чек получен. Проверка AI поставлена в очередь. Платёж будет проверен автоматически.",
+                "en": "⏳ Your receipt has been received. AI verification has been queued. Your payment will be checked automatically.",
+            }
             bot.send_message(
                 message.chat.id,
-                "⏳ Chekingiz qabul qilindi. AI tekshiruvi navbatga qo'yildi. To'lov avtomatik tekshiriladi.",
+                receipt_received_messages.get(user_lang, receipt_received_messages["uz"]),
             )
         except Exception:
             pass
