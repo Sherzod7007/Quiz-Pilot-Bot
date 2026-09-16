@@ -974,199 +974,6 @@
             background:linear-gradient(145deg,rgba(0,145,225,.25),rgba(17,39,57,.72));
         }
 
-        /* ---------- Premium ---------- */
-        #premium-screen .p-status-box {
-            border-radius:18px;
-            padding:19px;
-            background:radial-gradient(circle at 50% 0%,rgba(255,215,0,.17),transparent 58%),linear-gradient(145deg,rgba(55,53,38,.66),rgba(16,20,27,.78));
-            border-color:rgba(255,215,0,.38);
-            box-shadow:0 12px 30px rgba(0,0,0,.26),0 0 18px rgba(255,215,0,.07),inset 0 1px 0 rgba(255,255,255,.18);
-        }
-        #premium-screen .p-pro-header {
-            border-radius:18px;
-            padding:19px;
-            background:linear-gradient(145deg,rgba(42,58,76,.72),rgba(9,16,27,.78));
-            border-color:rgba(190,215,238,.26);
-            box-shadow:0 10px 25px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.16);
-        }
-        #premium-screen .p-pro-header h3 { font-size:22px; }
-        #premium-screen .tariff-card {
-            border-radius:17px;
-            padding:16px;
-            background:linear-gradient(145deg,rgba(42,57,74,.72),rgba(12,20,31,.76));
-            border-color:rgba(190,215,238,.24);
-            box-shadow:0 9px 22px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.15);
-        }
-        /* Weekly tariff keeps the normal Aero Glass card style.
-           Only the small Popular badge remains highlighted. */
-        #premium-screen .tariff-card.popular {
-            border-color:rgba(190,215,238,.24);
-            background:linear-gradient(145deg,rgba(42,57,74,.72),rgba(12,20,31,.76));
-            box-shadow:0 9px 22px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.15);
-        }
-        #premium-screen .activate-btn {
-            border-radius:11px;
-            padding:9px 13px;
-            box-shadow:0 4px 12px rgba(255,140,0,.25),inset 0 1px 0 rgba(255,255,255,.55);
-        }
-
-        /* Keep compact floating navigation visually dominant but not oversized. */
-        .bottom-nav {
-            box-shadow:0 14px 34px rgba(0,0,0,.52),0 0 20px rgba(0,110,180,.07),inset 0 1px 0 rgba(255,255,255,.25),inset 0 -1px 0 rgba(0,0,0,.32);
-        }
-        .nav-item.active {
-            box-shadow:0 0 15px rgba(0,174,255,.18),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 7px rgba(0,0,0,.12);
-        }
-
-        @media (max-width:390px) {
-            #create-promo-carousel { height:145px; }
-            #create-promo-carousel .create-promo-title { font-size:18px; }
-            #create-promo-carousel .create-promo-desc { font-size:12.5px; }
-            #settings-screen .settings-box { padding:16px; }
-            #premium-screen .tariff-card { padding:14px; }
-        }
-
-
-        /* ===== CREATE SCREEN — PREMIUM AERO VISUAL PASS ===== */
-        #create-screen .header h1 {
-            letter-spacing:-.4px;
-            text-shadow:0 2px 10px rgba(0,210,255,.16), 0 1px 2px rgba(0,0,0,.7);
-        }
-        #create-screen .create-promo-carousel {
-            height:166px;
-            margin:2px 0 12px;
-            border-radius:18px;
-            border:1px solid rgba(125,210,255,.34);
-            box-shadow:inset 0 1px 0 rgba(255,255,255,.16), 0 10px 28px rgba(0,0,0,.28), 0 0 18px rgba(0,180,255,.06);
-            background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.08));
-        }
-        #create-screen .create-promo-slide {
-            padding:20px 22px 24px;
-            border-radius:18px;
-        }
-        #create-screen .create-promo-title {
-            font-size:21px;
-            line-height:1.22;
-            max-width:72%;
-            margin-bottom:8px;
-            text-shadow:0 2px 7px rgba(0,0,0,.78),0 0 12px rgba(0,210,255,.12);
-        }
-        #create-screen .create-promo-desc {
-            font-size:13.5px;
-            line-height:1.45;
-            max-width:68%;
-            color:#dbeaf8;
-        }
-        #create-screen .create-promo-dots { bottom:9px; }
-
-        #create-screen .input-title,
-        #create-screen .input-text {
-            border-radius:15px;
-            border:1px solid rgba(125,190,225,.30);
-            background:linear-gradient(180deg,rgba(32,48,65,.72),rgba(7,14,23,.78));
-            box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 5px 16px rgba(0,0,0,.18);
-            padding:14px 15px;
-        }
-        #create-screen .input-title {
-            min-height:49px;
-            margin-top:4px;
-            margin-bottom:10px;
-            font-size:15px;
-        }
-        #create-screen .input-title::placeholder,
-        #create-screen .input-text::placeholder { color:#91a4b7; opacity:1; }
-        #create-screen .input-title:focus,
-        #create-screen .input-text:focus {
-            border-color:rgba(0,210,255,.78);
-            box-shadow:0 0 0 2px rgba(0,210,255,.08),0 0 16px rgba(0,210,255,.22),inset 0 1px 0 rgba(255,255,255,.12);
-        }
-        #create-screen .upload-box {
-            position:relative;
-            min-height:82px;
-            box-sizing:border-box;
-            padding:17px 14px;
-            margin-bottom:9px;
-            border:1px solid rgba(125,190,225,.32);
-            border-radius:15px;
-            background:linear-gradient(180deg,rgba(39,57,76,.68),rgba(8,16,27,.78));
-            box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 6px 18px rgba(0,0,0,.20);
-            backdrop-filter:blur(14px);
-        }
-        #create-screen .upload-box::after {
-            content:"PDF  •  DOCX";
-            position:absolute;
-            right:12px;
-            top:10px;
-            padding:3px 7px;
-            border-radius:7px;
-            font-size:9px;
-            font-weight:800;
-            letter-spacing:.5px;
-            color:#9fdfff;
-            background:rgba(0,170,235,.10);
-            border:1px solid rgba(0,210,255,.18);
-        }
-        #create-screen .upload-box span:first-child {
-            font-size:31px !important;
-            margin-bottom:5px !important;
-            filter:drop-shadow(0 2px 4px rgba(0,0,0,.45));
-        }
-        #create-screen .upload-box:hover,
-        #create-screen .upload-box:active {
-            border-color:rgba(0,210,255,.72);
-            box-shadow:0 0 16px rgba(0,210,255,.16),inset 0 1px 0 rgba(255,255,255,.14);
-            transform:translateY(-1px);
-        }
-        #create-screen .create-form-content > div[style*="text-align: center"] {
-            margin:1px 0 8px !important;
-            font-size:11px !important;
-            color:#8195a9 !important;
-            position:relative;
-        }
-        #create-screen .create-form-content > div[style*="text-align: center"]::before,
-        #create-screen .create-form-content > div[style*="text-align: center"]::after {
-            content:""; display:inline-block; width:24%; height:1px; vertical-align:middle;
-            background:linear-gradient(90deg,transparent,rgba(135,175,210,.25)); margin:0 9px;
-        }
-        #create-screen .create-form-content > div[style*="text-align: center"]::after {
-            background:linear-gradient(90deg,rgba(135,175,210,.25),transparent);
-        }
-        #create-screen .input-text {
-            min-height:116px;
-            margin-bottom:10px;
-            font-size:14px;
-            line-height:1.5;
-        }
-        #create-screen .create-action-wrap { margin-top:1px; }
-        #create-screen #generate-btn {
-            min-height:50px;
-            border-radius:15px;
-            font-size:16px;
-            letter-spacing:.05px;
-            background:linear-gradient(180deg,#12b8f4 0%,#087fc1 48%,#05649e 100%);
-            border:1px solid rgba(105,232,255,.82);
-            box-shadow:0 7px 20px rgba(0,150,235,.28),0 0 14px rgba(0,210,255,.10),inset 0 1px 0 rgba(255,255,255,.48);
-        }
-        #create-screen #generate-btn:hover,
-        #create-screen #generate-btn:active {
-            transform:translateY(-1px);
-            box-shadow:0 9px 24px rgba(0,150,235,.34),0 0 20px rgba(0,210,255,.18),inset 0 1px 0 rgba(255,255,255,.55);
-        }
-        @media (max-height:720px) {
-            #create-screen .create-promo-carousel { height:148px; }
-            #create-screen .create-promo-title { font-size:19px; }
-            #create-screen .create-promo-desc { font-size:12.5px; }
-            #create-screen .upload-box { min-height:72px; padding:13px 12px; }
-            #create-screen .input-text { min-height:94px; }
-            #create-screen #generate-btn { min-height:46px; }
-        }
-        /* ===== END CREATE SCREEN PREMIUM VISUAL PASS ===== */
-
-
-        /* =========================================================
-           LIBRARY AERO PREMIUM — UI ONLY
-           Existing Library logic/functions are intentionally untouched.
-           ========================================================= */
         #library-screen .header {
             margin-bottom: 14px;
         }
@@ -1511,6 +1318,278 @@
             }
             #library-screen .quiz-card { padding: 13px; border-radius: 14px; }
         }
+
+
+
+        /* ---------- Teacher Premium Aero UI v2 ---------- */
+        #teacher-screen .teacher-screen-wrap{padding-bottom:82px}
+        #teacher-screen .header{margin-bottom:14px}
+        #teacher-screen .header h1{letter-spacing:.2px}
+        #teacher-screen .user-badge{color:#7ff5a1;background:rgba(40,167,69,.14);border-color:rgba(114,242,151,.34);box-shadow:0 0 12px rgba(40,167,69,.08),inset 0 1px 0 rgba(255,255,255,.18)}
+
+        #teacher-screen .teacher-hero{
+            position:relative;overflow:hidden;margin-bottom:12px;padding:17px 17px 16px;
+            border-radius:19px;border:1px solid rgba(0,210,255,.34);
+            background:radial-gradient(circle at 88% 15%,rgba(0,210,255,.18),transparent 34%),linear-gradient(145deg,rgba(0,145,225,.19),rgba(25,40,57,.74) 58%,rgba(9,17,27,.78));
+            box-shadow:0 12px 28px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.20),0 0 20px rgba(0,153,255,.06)
+        }
+        #teacher-screen .teacher-hero:after{content:"";position:absolute;right:-35px;top:-48px;width:150px;height:150px;border-radius:50%;border:1px solid rgba(0,210,255,.18);box-shadow:0 0 0 12px rgba(0,210,255,.025),0 0 0 24px rgba(0,210,255,.018);pointer-events:none}
+        #teacher-screen .teacher-hero h2{position:relative;z-index:1;font-size:20px;line-height:1.25;margin:0 0 6px;text-shadow:0 0 9px rgba(0,210,255,.24)}
+        #teacher-screen .teacher-hero p{position:relative;z-index:1;font-size:12.5px;line-height:1.48;color:#c4d5e6;max-width:96%}
+
+        #teacher-screen .teacher-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:12px}
+        #teacher-screen .teacher-feature{
+            position:relative;overflow:hidden;min-height:91px;padding:13px 12px 11px;text-align:left;
+            border-radius:16px;border:1px solid rgba(190,215,238,.24);
+            background:linear-gradient(145deg,rgba(48,64,82,.72),rgba(13,22,34,.78));
+            box-shadow:0 7px 17px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.14);
+        }
+        #teacher-screen .teacher-feature:before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.32),transparent);opacity:.75}
+        #teacher-screen .teacher-feature:hover{transform:translateY(-1px);border-color:rgba(0,210,255,.62);box-shadow:0 9px 20px rgba(0,0,0,.24),0 0 13px rgba(0,153,255,.13),inset 0 1px 0 rgba(255,255,255,.18)}
+        #teacher-screen .teacher-feature.active{border-color:rgba(0,210,255,.88)!important;background:radial-gradient(circle at 14% 0%,rgba(0,210,255,.20),transparent 48%),linear-gradient(145deg,rgba(0,145,225,.27),rgba(15,37,55,.80));box-shadow:0 0 10px rgba(0,153,255,.35),0 0 22px rgba(0,153,255,.13),inset 0 1px 0 rgba(255,255,255,.22)}
+        #teacher-screen .teacher-feature .tf-icon{width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin:0 0 8px;border-radius:11px;font-size:20px;background:linear-gradient(145deg,rgba(255,255,255,.13),rgba(0,0,0,.22));border:1px solid rgba(190,215,238,.24);box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 4px 9px rgba(0,0,0,.16)}
+        #teacher-screen .teacher-feature.active .tf-icon{border-color:rgba(0,210,255,.48);box-shadow:0 0 9px rgba(0,210,255,.18),inset 0 1px 0 rgba(255,255,255,.24)}
+        #teacher-screen .teacher-feature b{font-size:14px;line-height:1.2;margin-bottom:3px}
+        #teacher-screen .teacher-feature span:last-child{font-size:10.5px;line-height:1.3;color:#aebfd1!important}
+
+        #teacher-screen .teacher-section{
+            padding:15px;margin-bottom:11px;border-radius:17px;
+            background:linear-gradient(145deg,rgba(39,54,70,.72),rgba(10,18,28,.78));
+            border:1px solid rgba(190,215,238,.22);
+            box-shadow:0 9px 22px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.15)
+        }
+        #teacher-screen .teacher-section-title{font-size:16px;margin-bottom:11px}
+        #teacher-screen .teacher-section-title>span{display:flex;align-items:center;gap:6px}
+        #teacher-screen .teacher-mini-btn{min-height:32px;padding:6px 10px;border-radius:10px;background:linear-gradient(145deg,rgba(255,255,255,.11),rgba(0,0,0,.23));border-color:rgba(190,215,238,.24);box-shadow:inset 0 1px 0 rgba(255,255,255,.16)}
+        #teacher-screen .teacher-mini-btn:hover,#teacher-screen .teacher-mini-btn:active{border-color:rgba(0,210,255,.65);background:linear-gradient(180deg,rgba(0,153,255,.28),rgba(0,70,125,.34));box-shadow:0 0 9px rgba(0,153,255,.18),inset 0 1px 0 rgba(255,255,255,.22)}
+        #teacher-screen .input-card{
+            min-height:44px;padding:11px 12px;margin-bottom:9px;border-radius:11px;
+            background:linear-gradient(145deg,rgba(0,0,0,.29),rgba(20,32,45,.52));border-color:rgba(180,205,230,.23);
+            box-shadow:inset 0 2px 5px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.06)
+        }
+        #teacher-screen select.input-card{appearance:auto;-webkit-appearance:auto;color:#fff}
+        #teacher-screen .input-card:focus{border-color:#00d2ff;box-shadow:0 0 10px rgba(0,210,255,.25),inset 0 2px 5px rgba(0,0,0,.30)}
+        #teacher-screen .submit-btn{border-radius:11px;min-height:44px;padding:11px 13px;font-size:14px;box-shadow:0 5px 16px rgba(0,164,239,.28),inset 0 1px 0 rgba(255,255,255,.38)}
+        #teacher-screen .teacher-note{font-size:11.5px;line-height:1.48;color:#aebfd1}
+        #teacher-screen .teacher-subsection{margin-top:14px;padding-top:14px;border-top:1px solid rgba(180,205,230,.14)}
+
+        #teacher-screen .teacher-session-card{
+            padding:12px 11px 13px;margin-top:8px;border-radius:14px;
+            background:linear-gradient(145deg,rgba(46,62,79,.66),rgba(10,18,28,.78));
+            border-color:rgba(180,205,230,.20);box-shadow:0 6px 15px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.12)
+        }
+        #teacher-screen .teacher-session-card b{font-size:14px}
+        #teacher-screen .teacher-chip-row{gap:5px;margin:7px 0 0}
+        #teacher-screen .teacher-chip{padding:5px 8px;border-radius:9px;background:rgba(0,120,215,.14);border-color:rgba(0,210,255,.20);font-size:11px;color:#d4edf8}
+        #teacher-screen .teacher-session-actions{gap:6px;margin-top:9px}
+        #teacher-screen .teacher-group-delete-btn{width:32px;height:29px;right:10px;bottom:9px;border-radius:9px}
+
+        #teacher-screen .teacher-variants-panel{padding:15px;min-height:0}
+        #teacher-screen .variant-grid{gap:7px;margin:7px 0 12px}
+        #teacher-screen .variant-btn{min-height:43px;border-radius:11px;background:linear-gradient(145deg,rgba(255,255,255,.09),rgba(0,0,0,.23));border-color:rgba(190,215,238,.23);box-shadow:inset 0 1px 0 rgba(255,255,255,.13)}
+        #teacher-screen .variant-btn.active{background:linear-gradient(180deg,#0099ff,#005a9e);border-color:#00d2ff;box-shadow:0 0 10px rgba(0,153,255,.38),inset 0 1px 0 rgba(255,255,255,.35)}
+        #teacher-screen .teacher-export-row{gap:7px;margin-top:9px}
+        #teacher-screen .teacher-export-row .teacher-mini-btn{flex:1;min-width:120px}
+        #teacher-screen .teacher-empty{padding:18px 7px;font-size:12px}
+
+        @media(max-width:390px){
+            #teacher-screen .teacher-grid{gap:7px}
+            #teacher-screen .teacher-feature{min-height:87px;padding:11px 10px}
+            #teacher-screen .teacher-feature .tf-icon{width:31px;height:31px;font-size:18px;margin-bottom:6px}
+            #teacher-screen .teacher-feature b{font-size:13px}
+            #teacher-screen .teacher-feature span:last-child{font-size:10px}
+            #teacher-screen .teacher-hero{padding:15px}
+            #teacher-screen .teacher-hero h2{font-size:18px}
+            #teacher-screen .teacher-section{padding:13px}
+        }
+
+        /* ---------- Premium ---------- */
+        #premium-screen .p-status-box {
+            border-radius:18px;
+            padding:19px;
+            background:radial-gradient(circle at 50% 0%,rgba(255,215,0,.17),transparent 58%),linear-gradient(145deg,rgba(55,53,38,.66),rgba(16,20,27,.78));
+            border-color:rgba(255,215,0,.38);
+            box-shadow:0 12px 30px rgba(0,0,0,.26),0 0 18px rgba(255,215,0,.07),inset 0 1px 0 rgba(255,255,255,.18);
+        }
+        #premium-screen .p-pro-header {
+            border-radius:18px;
+            padding:19px;
+            background:linear-gradient(145deg,rgba(42,58,76,.72),rgba(9,16,27,.78));
+            border-color:rgba(190,215,238,.26);
+            box-shadow:0 10px 25px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.16);
+        }
+        #premium-screen .p-pro-header h3 { font-size:22px; }
+        #premium-screen .tariff-card {
+            border-radius:17px;
+            padding:16px;
+            background:linear-gradient(145deg,rgba(42,57,74,.72),rgba(12,20,31,.76));
+            border-color:rgba(190,215,238,.24);
+            box-shadow:0 9px 22px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.15);
+        }
+        /* Weekly tariff keeps the normal Aero Glass card style.
+           Only the small Popular badge remains highlighted. */
+        #premium-screen .tariff-card.popular {
+            border-color:rgba(190,215,238,.24);
+            background:linear-gradient(145deg,rgba(42,57,74,.72),rgba(12,20,31,.76));
+            box-shadow:0 9px 22px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.15);
+        }
+        #premium-screen .activate-btn {
+            border-radius:11px;
+            padding:9px 13px;
+            box-shadow:0 4px 12px rgba(255,140,0,.25),inset 0 1px 0 rgba(255,255,255,.55);
+        }
+
+        /* Keep compact floating navigation visually dominant but not oversized. */
+        .bottom-nav {
+            box-shadow:0 14px 34px rgba(0,0,0,.52),0 0 20px rgba(0,110,180,.07),inset 0 1px 0 rgba(255,255,255,.25),inset 0 -1px 0 rgba(0,0,0,.32);
+        }
+        .nav-item.active {
+            box-shadow:0 0 15px rgba(0,174,255,.18),inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 7px rgba(0,0,0,.12);
+        }
+
+        @media (max-width:390px) {
+            #create-promo-carousel { height:145px; }
+            #create-promo-carousel .create-promo-title { font-size:18px; }
+            #create-promo-carousel .create-promo-desc { font-size:12.5px; }
+            #settings-screen .settings-box { padding:16px; }
+            #premium-screen .tariff-card { padding:14px; }
+        }
+
+
+        /* ===== CREATE SCREEN — PREMIUM AERO VISUAL PASS ===== */
+        #create-screen .header h1 {
+            letter-spacing:-.4px;
+            text-shadow:0 2px 10px rgba(0,210,255,.16), 0 1px 2px rgba(0,0,0,.7);
+        }
+        #create-screen .create-promo-carousel {
+            height:166px;
+            margin:2px 0 12px;
+            border-radius:18px;
+            border:1px solid rgba(125,210,255,.34);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.16), 0 10px 28px rgba(0,0,0,.28), 0 0 18px rgba(0,180,255,.06);
+            background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(0,0,0,.08));
+        }
+        #create-screen .create-promo-slide {
+            padding:20px 22px 24px;
+            border-radius:18px;
+        }
+        #create-screen .create-promo-title {
+            font-size:21px;
+            line-height:1.22;
+            max-width:72%;
+            margin-bottom:8px;
+            text-shadow:0 2px 7px rgba(0,0,0,.78),0 0 12px rgba(0,210,255,.12);
+        }
+        #create-screen .create-promo-desc {
+            font-size:13.5px;
+            line-height:1.45;
+            max-width:68%;
+            color:#dbeaf8;
+        }
+        #create-screen .create-promo-dots { bottom:9px; }
+
+        #create-screen .input-title,
+        #create-screen .input-text {
+            border-radius:15px;
+            border:1px solid rgba(125,190,225,.30);
+            background:linear-gradient(180deg,rgba(32,48,65,.72),rgba(7,14,23,.78));
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.09),0 5px 16px rgba(0,0,0,.18);
+            padding:14px 15px;
+        }
+        #create-screen .input-title {
+            min-height:49px;
+            margin-top:4px;
+            margin-bottom:10px;
+            font-size:15px;
+        }
+        #create-screen .input-title::placeholder,
+        #create-screen .input-text::placeholder { color:#91a4b7; opacity:1; }
+        #create-screen .input-title:focus,
+        #create-screen .input-text:focus {
+            border-color:rgba(0,210,255,.78);
+            box-shadow:0 0 0 2px rgba(0,210,255,.08),0 0 16px rgba(0,210,255,.22),inset 0 1px 0 rgba(255,255,255,.12);
+        }
+        #create-screen .upload-box {
+            position:relative;
+            min-height:82px;
+            box-sizing:border-box;
+            padding:17px 14px;
+            margin-bottom:9px;
+            border:1px solid rgba(125,190,225,.32);
+            border-radius:15px;
+            background:linear-gradient(180deg,rgba(39,57,76,.68),rgba(8,16,27,.78));
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 6px 18px rgba(0,0,0,.20);
+            backdrop-filter:blur(14px);
+        }
+        #create-screen .upload-box::after {
+            content:"PDF  •  DOCX";
+            position:absolute;
+            right:12px;
+            top:10px;
+            padding:3px 7px;
+            border-radius:7px;
+            font-size:9px;
+            font-weight:800;
+            letter-spacing:.5px;
+            color:#9fdfff;
+            background:rgba(0,170,235,.10);
+            border:1px solid rgba(0,210,255,.18);
+        }
+        #create-screen .upload-box span:first-child {
+            font-size:31px !important;
+            margin-bottom:5px !important;
+            filter:drop-shadow(0 2px 4px rgba(0,0,0,.45));
+        }
+        #create-screen .upload-box:hover,
+        #create-screen .upload-box:active {
+            border-color:rgba(0,210,255,.72);
+            box-shadow:0 0 16px rgba(0,210,255,.16),inset 0 1px 0 rgba(255,255,255,.14);
+            transform:translateY(-1px);
+        }
+        #create-screen .create-form-content > div[style*="text-align: center"] {
+            margin:1px 0 8px !important;
+            font-size:11px !important;
+            color:#8195a9 !important;
+            position:relative;
+        }
+        #create-screen .create-form-content > div[style*="text-align: center"]::before,
+        #create-screen .create-form-content > div[style*="text-align: center"]::after {
+            content:""; display:inline-block; width:24%; height:1px; vertical-align:middle;
+            background:linear-gradient(90deg,transparent,rgba(135,175,210,.25)); margin:0 9px;
+        }
+        #create-screen .create-form-content > div[style*="text-align: center"]::after {
+            background:linear-gradient(90deg,rgba(135,175,210,.25),transparent);
+        }
+        #create-screen .input-text {
+            min-height:116px;
+            margin-bottom:10px;
+            font-size:14px;
+            line-height:1.5;
+        }
+        #create-screen .create-action-wrap { margin-top:1px; }
+        #create-screen #generate-btn {
+            min-height:50px;
+            border-radius:15px;
+            font-size:16px;
+            letter-spacing:.05px;
+            background:linear-gradient(180deg,#12b8f4 0%,#087fc1 48%,#05649e 100%);
+            border:1px solid rgba(105,232,255,.82);
+            box-shadow:0 7px 20px rgba(0,150,235,.28),0 0 14px rgba(0,210,255,.10),inset 0 1px 0 rgba(255,255,255,.48);
+        }
+        #create-screen #generate-btn:hover,
+        #create-screen #generate-btn:active {
+            transform:translateY(-1px);
+            box-shadow:0 9px 24px rgba(0,150,235,.34),0 0 20px rgba(0,210,255,.18),inset 0 1px 0 rgba(255,255,255,.55);
+        }
+        @media (max-height:720px) {
+            #create-screen .create-promo-carousel { height:148px; }
+            #create-screen .create-promo-title { font-size:19px; }
+            #create-screen .create-promo-desc { font-size:12.5px; }
+            #create-screen .upload-box { min-height:72px; padding:13px 12px; }
+            #create-screen .input-text { min-height:94px; }
+            #create-screen #generate-btn { min-height:46px; }
+        }
+        /* ===== END CREATE SCREEN PREMIUM VISUAL PASS ===== */
 
 </style>
 </head>
