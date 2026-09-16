@@ -26,14 +26,15 @@ PAYMENT_GEMINI_API_KEYS = [
     k.strip() for k in os.getenv("PAYMENT_GEMINI_API_KEYS", "").split(",") if k.strip()
 ]
 PAYMENT_GEMINI_MODEL = os.getenv("PAYMENT_GEMINI_MODEL", "gemini-3.6-flash").strip()
+_fallback_env = os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "gemini-2.5-flash")
 PAYMENT_GEMINI_FALLBACK_MODELS = [
-    m.strip() for m in os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "").split(",") if m.strip()
+    m.strip() for m in _fallback_env.split(",") if m.strip()
 ]
 PAYMENT_OCR_MAX_CONCURRENT = max(1, int(os.getenv("PAYMENT_OCR_MAX_CONCURRENT", "2")))
 PAYMENT_OCR_QUEUE_MAX = max(PAYMENT_OCR_MAX_CONCURRENT, int(os.getenv("PAYMENT_OCR_QUEUE_MAX", "100")))
 PAYMENT_OCR_MAX_RETRIES = max(1, min(6, int(os.getenv("PAYMENT_OCR_MAX_RETRIES", "4"))))
-PAYMENT_OCR_RETRY_BASE_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_BASE_SECONDS", "30")))
-PAYMENT_OCR_RETRY_MAX_SECONDS = max(PAYMENT_OCR_RETRY_BASE_SECONDS, int(os.getenv("PAYMENT_OCR_RETRY_MAX_SECONDS", "300")))
+PAYMENT_OCR_RETRY_BASE_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_BASE_SECONDS", "20")))
+PAYMENT_OCR_RETRY_MAX_SECONDS = max(PAYMENT_OCR_RETRY_BASE_SECONDS, int(os.getenv("PAYMENT_OCR_RETRY_MAX_SECONDS", "600")))
 PAYMENT_OCR_RETRY_SCAN_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_SCAN_SECONDS", "10")))
 PAYMENT_OCR_PROCESSING_STALE_SECONDS = max(60, int(os.getenv("PAYMENT_OCR_PROCESSING_STALE_SECONDS", "900")))
 P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
@@ -53,6 +54,14 @@ _key_index = 0
 _db_path = None
 _bot = None
 _admin_id = None
+
+
+class TemporaryAIError(RuntimeError):
+    pass
+
+
+class BudgetBlockedError(RuntimeError):
+    pass
 
 
 class ReceiptAIResult(BaseModel):
@@ -339,17 +348,26 @@ def _vision(file_bytes, mime_type, attempt_number):
     if not PAYMENT_GEMINI_API_KEYS:
         raise RuntimeError("PAYMENT_GEMINI_API_KEYS sozlanmagan")
 
-    models = [PAYMENT_GEMINI_MODEL] + PAYMENT_GEMINI_FALLBACK_MODELS
+    models = []
+    for model in [PAYMENT_GEMINI_MODEL] + PAYMENT_GEMINI_FALLBACK_MODELS:
+        if model and model not in models:
+            models.append(model)
+
     last_error = None
     for model in models:
-        # Rotate keys for every model/attempt. With multiple keys this avoids repeatedly
-        # hitting the same provider key during a transient outage.
         key_idx, api_key = _next_key()
         if not api_key:
             continue
+
+        # Reserve one budget unit for each real provider call. This makes the
+        # budget protect against retries/fallbacks as well as normal traffic.
+        allowed, budget_reason = _budget_reserve()
+        if not allowed:
+            raise BudgetBlockedError(budget_reason)
+
         acquired = _semaphore.acquire(timeout=120)
         if not acquired:
-            last_error = RuntimeError("OCR concurrency limit")
+            last_error = TemporaryAIError("OCR concurrency limit")
             continue
         try:
             response = _vision_once(file_bytes, mime_type, model, api_key)
@@ -362,11 +380,19 @@ def _vision(file_bytes, mime_type, attempt_number):
                 "P2P Gemini Vision xatosi | model=%s | key=%s | receipt_attempt=%s | %s",
                 model, key_idx, attempt_number, exc
             )
-            if not _is_transient_error(exc):
-                raise
+            # A provider outage/rate limit or malformed structured output can
+            # safely move to the next model. Non-transient HTTP/auth failures
+            # are retained as the final error if every fallback also fails.
+            if not _is_transient_error(exc) and not isinstance(exc, (ValueError, json.JSONDecodeError)):
+                continue
         finally:
             _semaphore.release()
-    raise RuntimeError(str(last_error or "Gemini Vision ishlamadi"))
+
+    if last_error is None:
+        raise RuntimeError("Gemini Vision uchun ishlaydigan API key/model topilmadi")
+    if _is_transient_error(last_error):
+        raise TemporaryAIError(str(last_error))
+    raise last_error
 
 
 def _mark(receipt_id, **fields):
@@ -400,6 +426,51 @@ def _parse_amount(value):
 def _expected_amount(price):
     digits = "".join(ch for ch in (price or "") if ch.isdigit())
     return float(digits) if digits else 0.0
+
+
+def _get_user_lang(user_id):
+    try:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT language FROM users WHERE user_id=?", (user_id,)).fetchone()
+        finally:
+            conn.close()
+        lang = row[0] if row else "uz"
+        return lang if lang in ("uz", "ru", "en") else "uz"
+    except Exception:
+        return "uz"
+
+
+P2P_MESSAGES = {
+    "uz": {
+        "received": "⏳ Chekingiz qabul qilindi.\nAI tekshiruvi vaqtincha bandligi sabab biroz choʻzilmoqda. Tekshiruv avtomatik davom etadi. Premium toʻlovingiz tasdiqlangandan soʻng avtomatik faollashadi.",
+        "queue": "⏳ Chekingiz qabul qilindi. AI tekshiruvi navbatga qoʻyildi. Toʻlov avtomatik tekshiriladi.",
+        "budget": "⏳ Chekingiz saqlandi. AI tekshiruv limiti vaqtincha toʻldi; tizim avtomatik qayta tekshiradi. Sizdan qayta toʻlov talab qilinmaydi.",
+        "approved": "🎉 Toʻlov tasdiqlandi! PRO status avtomatik faollashtirildi. 👑",
+        "duplicate": "❌ Bu chek rasmi avval yuborilgan. Tarif avtomatik faollashtirilmadi.",
+        "duplicate_tx": "❌ Bu toʻlov cheki avval ishlatilgan. Tarif avtomatik faollashtirilmadi.",
+    },
+    "ru": {
+        "received": "⏳ Чек получен.\nИз-за временной нагрузки AI-проверка может занять немного больше времени. Проверка продолжится автоматически. После подтверждения платежа Premium будет активирован автоматически.",
+        "queue": "⏳ Чек получен. Проверка AI поставлена в очередь. Платёж будет проверен автоматически.",
+        "budget": "⏳ Чек сохранён. Лимит AI-проверок временно исчерпан; система автоматически повторит проверку. Повторно оплачивать не нужно.",
+        "approved": "🎉 Платёж подтверждён! Статус PRO активирован автоматически. 👑",
+        "duplicate": "❌ Этот чек уже был отправлен ранее. Тариф автоматически не активирован.",
+        "duplicate_tx": "❌ Этот платёжный чек уже использовался. Тариф автоматически не активирован.",
+    },
+    "en": {
+        "received": "⏳ Your receipt has been received.\nDue to temporary AI load, verification may take a little longer. The verification will continue automatically. Once your payment is confirmed, Premium will be activated automatically.",
+        "queue": "⏳ Your receipt has been received. AI verification has been queued. Your payment will be checked automatically.",
+        "budget": "⏳ Your receipt has been saved. The AI verification limit is temporarily reached; the system will retry automatically. You do not need to pay again.",
+        "approved": "🎉 Payment confirmed! Your PRO status has been activated automatically. 👑",
+        "duplicate": "❌ This receipt image was already submitted. The plan was not activated automatically.",
+        "duplicate_tx": "❌ This payment receipt has already been used. The plan was not activated automatically.",
+    },
+}
+
+
+def _p2p_message(user_id, key):
+    return P2P_MESSAGES[_get_user_lang(user_id)][key]
 
 
 def _notify_user(user_id, text):
@@ -572,16 +643,7 @@ def _process(item):
         _mark_by_tx(tx_id, status="cancelled", processed_at=_now(), reason="Payment is no longer pending")
         return
 
-    allowed, reason = _budget_reserve()
-    if not allowed:
-        # Do not lose a valid customer's receipt when the AI budget is exhausted.
-        # Keep it persistent and retry automatically; never ask the customer to pay again.
-        _mark_by_tx(tx_id, status="budget_blocked", reason=reason, next_retry_at=_now() + 3600)
-        if _get_attempts(tx_id) == 1:
-            _notify_user(user_id, "⏳ Chekingiz saqlandi. AI tekshiruv limiti vaqtincha to'ldi; tizim avtomatik qayta tekshiradi. Sizdan qayta to'lov talab qilinmaydi.")
-        logging.warning("P2P OCR budget blocked | tx=%s | user=%s | reason=%s", tx_id, user_id, reason)
-        return
-
+    # Budget is reserved inside _vision() for each real provider call.
     try:
         tg_file = _bot.get_file(file_id)
         data = _bot.download_file(tg_file.file_path)
@@ -602,7 +664,7 @@ def _process(item):
             conn.close()
         if duplicate_image:
             _mark_by_tx(tx_id, status="rejected", reason="Aynan shu chek rasmi avval yuborilgan", image_sha256=image_hash, processed_at=_now())
-            _notify_user(user_id, "❌ Bu chek rasmi avval yuborilgan. Tarif avtomatik faollashtirilmadi.")
+            _notify_user(user_id, _p2p_message(user_id, "duplicate"))
             return
         _mark_by_tx(tx_id, image_sha256=image_hash)
 
@@ -655,33 +717,36 @@ def _process(item):
             conn.close()
         if duplicate:
             _mark_by_tx(tx_id, status="rejected", reason="Transaction ID avval ishlatilgan")
-            _notify_user(user_id, "❌ Bu to'lov cheki avval ishlatilgan. Tarif avtomatik faollashtirilmadi.")
+            _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
             return
 
         ok, info = _approve(tx_id, user_id)
         if ok:
             _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
-            _notify_user(user_id, "🎉 To'lov tasdiqlandi! PRO status avtomatik faollashtirildi. 👑")
+            _notify_user(user_id, _p2p_message(user_id, "approved"))
             logging.info("P2P payment auto-approved | tx=%s | user=%s | model=%s | cost=$%.6f", tx_id, user_id, used_model, cost)
         else:
             _mark_by_tx(tx_id, status="review", reason=info)
+    except BudgetBlockedError as exc:
+        attempts = _get_attempts(tx_id)
+        _mark_by_tx(tx_id, status="budget_blocked", reason=str(exc), last_error=str(exc), next_retry_at=_now() + 3600)
+        if attempts <= 1:
+            _notify_user(user_id, _p2p_message(user_id, "budget"))
+        logging.warning("P2P OCR budget blocked | tx=%s | user=%s | reason=%s", tx_id, user_id, exc)
     except Exception as exc:
         attempts = _get_attempts(tx_id)
-        transient = _is_transient_error(exc)
-        if transient and attempts < PAYMENT_OCR_MAX_RETRIES:
-            delay = _retry_delay(attempts)
+        transient = _is_transient_error(exc) or isinstance(exc, TemporaryAIError)
+        if transient:
+            delay = _retry_delay(min(attempts, PAYMENT_OCR_MAX_RETRIES))
             _mark_by_tx(tx_id, status="retry_wait", reason="Vaqtinchalik AI xatosi; avtomatik qayta uriniladi", last_error=str(exc), next_retry_at=_now() + delay)
-            logging.warning("P2P OCR temporary failure | tx=%s | attempt=%s/%s | retry_in=%ss | %s", tx_id, attempts, PAYMENT_OCR_MAX_RETRIES, delay, exc)
+            logging.warning("P2P OCR temporary failure | tx=%s | attempt=%s | retry_in=%ss | %s", tx_id, attempts, delay, exc)
             if attempts == 1:
-                _notify_user(user_id, "⏳ Chekingiz saqlandi. AI xizmati vaqtincha band, tekshiruv avtomatik qayta uriniladi. Sizdan qayta to'lov talab qilinmaydi.")
+                _notify_user(user_id, _p2p_message(user_id, "received"))
+            # Do not spam the admin for every transient 503. The receipt remains durable.
         else:
-            # Keep the receipt recoverable rather than losing a real customer's payment.
-            # After the normal retry budget is exhausted, back off for 5 minutes and
-            # continue automatically; no repeated admin spam for a temporary outage.
             delay = PAYMENT_OCR_RETRY_MAX_SECONDS
-            _mark_by_tx(tx_id, status="retry_wait" if transient else "error", reason=str(exc)[:1000], last_error=str(exc)[:2000], next_retry_at=_now() + delay)
-            if not transient or attempts == PAYMENT_OCR_MAX_RETRIES:
-                _notify_admin(f"⚠️ P2P AI xatosi\nTX: {tx_id}\nUser: {user_id}\nAttempt: {attempts}\n{str(exc)[:800]}")
+            _mark_by_tx(tx_id, status="error", reason=str(exc)[:1000], last_error=str(exc)[:2000], next_retry_at=_now() + delay)
+            _notify_admin(f"⚠️ P2P AI xatosi\nTX: {tx_id}\nUser: {user_id}\nAttempt: {attempts}\n{str(exc)[:800]}")
 
 
 def _get_attempts(tx_id):
