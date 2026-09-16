@@ -2391,6 +2391,42 @@ button:focus-visible{outline:2px solid rgba(97,231,255,.65)!important;outline-of
 @media(min-width:700px){body{padding-bottom:118px!important;}.bottom-nav{max-width:730px!important;left:50%!important;transform:translateX(-50%)!important;}}
 </style>
 
+
+<style id="phone-switch-bar-fix">
+/* ===== ONLY: Phone-style switches + mobile floating bar alignment ===== */
+#settings-screen #vibration-toggle,
+#settings-screen #sound-toggle{
+    flex:0 0 46px!important;
+    min-width:46px!important;
+    width:46px!important;
+    height:24px!important;
+    padding:0!important;
+    border-radius:13px!important;
+    box-sizing:border-box!important;
+}
+#settings-screen #vibration-toggle::before,
+#settings-screen #sound-toggle::before{
+    left:2px!important;
+    top:2px!important;
+    width:18px!important;
+    height:18px!important;
+}
+#settings-screen #vibration-toggle.active::before,
+#settings-screen #sound-toggle.active::before{
+    transform:translateX(22px)!important;
+}
+@media(max-width:520px){
+    .bottom-nav{
+        left:6px!important;
+        right:auto!important;
+        transform:none!important;
+        width:calc(100% - 12px)!important;
+        max-width:none!important;
+        box-sizing:border-box!important;
+    }
+}
+</style>
+
 </head>
 <body>
 
