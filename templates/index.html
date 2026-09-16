@@ -539,6 +539,12 @@
         }
         .p-pro-header h3 { font-size: 20px; color: #ffffff; margin: 0 0 8px 0; font-weight: 700; text-shadow: 0 0 10px rgba(255,255,255,0.5); }
         .p-pro-header p { font-size: 13px; color: var(--text-hint); margin: 0; line-height: 1.4; }
+        .premium-note-highlight {
+            color: #ffd700;
+            font-weight: 700;
+            text-shadow: 0 0 7px rgba(255, 215, 0, 0.35);
+        }
+
         
         .tariff-card { 
             background: var(--aero-glass); border-radius: 12px; padding: 18px; 
@@ -1516,7 +1522,14 @@
         function applyLocalization() {
             document.querySelectorAll('[data-lang]').forEach(el => {
                 const key = el.getAttribute('data-lang');
-                if (langPack[currentLang][key]) el.innerText = langPack[currentLang][key];
+                if (langPack[currentLang][key]) {
+                    const value = langPack[currentLang][key];
+                    if (key === 'premium_pro_desc' && currentLang === 'uz') {
+                        el.innerHTML = value.replace('Eslatma:', '<span class="premium-note-highlight">Eslatma:</span>');
+                    } else {
+                        el.innerText = value;
+                    }
+                }
             });
             updateVibrationToggle();
             updateSoundToggle();
