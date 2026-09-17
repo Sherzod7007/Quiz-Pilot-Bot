@@ -2281,236 +2281,79 @@ body::before{
     *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;}
 }
 
-</style>
-<style id="quiz-wow-2026">
-/* ================================================================
-   QUIZ AI — WOW 2026 / NEBULA GLASS OS
-   Visual layer only: existing HTML, IDs, classes and JavaScript stay intact.
-   ================================================================ */
-:root{
-  --wow-bg:#050914;--wow-panel:rgba(13,20,35,.74);--wow-panel2:rgba(18,28,48,.62);
-  --wow-line:rgba(166,207,255,.18);--wow-line2:rgba(255,255,255,.10);
-  --wow-cyan:#61e7ff;--wow-blue:#4d8dff;--wow-purple:#a477ff;
-  --wow-text:#f4f8ff;--wow-muted:#8e9eb8;--wow-green:#5cf2a6;
-}
-html{background:#050914;}
-body{
-  background:
-    radial-gradient(900px 600px at 8% -10%,rgba(77,141,255,.20),transparent 58%),
-    radial-gradient(700px 500px at 100% 10%,rgba(164,119,255,.16),transparent 58%),
-    radial-gradient(600px 500px at 55% 110%,rgba(97,231,255,.09),transparent 62%),
-    linear-gradient(160deg,#040711 0%,#07101d 48%,#040711 100%) !important;
-  color:var(--wow-text)!important;
-  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif!important;
-  letter-spacing:.01em;
-}
-body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;opacity:.32;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,black,transparent 90%);}
-#app{max-width:760px!important;margin:auto;}
-.screen{animation:nebulaIn .28s cubic-bezier(.2,.8,.2,1)!important;}
-@keyframes nebulaIn{from{opacity:0;transform:translateY(7px) scale(.992)}to{opacity:1;transform:none}}
-.header{margin-bottom:18px!important;padding:7px 2px 4px!important;}
-.header h1{font-size:27px!important;font-weight:850!important;letter-spacing:-.7px!important;background:linear-gradient(110deg,#fff 15%,#aeefff 52%,#a98cff 100%);-webkit-background-clip:text;background-clip:text;color:transparent!important;text-shadow:0 0 28px rgba(97,231,255,.12);}
-/* Universal glass surface */
-.settings-box,.quiz-card,.flash-card,.teacher-section,.teacher-hero,.teacher-feature,.teacher-session-card,.teacher-variants-panel,.group-join-panel,.student-session-card,.upload-box,.create-promo-carousel,.premium-card,.tariff-card,.feature-card,.tab-panel,.modal-content,.app-dialog-content{
-  background:linear-gradient(145deg,rgba(25,37,62,.78),rgba(7,13,25,.76))!important;
-  border:1px solid var(--wow-line)!important;
-  border-top-color:rgba(255,255,255,.22)!important;
-  box-shadow:0 18px 45px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(77,141,255,.025)!important;
-  backdrop-filter:blur(20px) saturate(125%);-webkit-backdrop-filter:blur(20px) saturate(125%);
-}
-.settings-box,.quiz-card,.flash-card,.teacher-section,.teacher-hero,.teacher-feature,.teacher-session-card,.teacher-variants-panel,.group-join-panel{border-radius:20px!important;}
-/* Create — cinematic AI cockpit */
-#create-screen .create-promo-carousel{border-radius:24px!important;overflow:hidden!important;box-shadow:0 22px 55px rgba(0,0,0,.32),0 0 38px rgba(77,141,255,.08),inset 0 1px 0 rgba(255,255,255,.12)!important;}
-#create-screen .create-promo-carousel:after{content:"";position:absolute;inset:auto -10% -65% 35%;height:150px;background:radial-gradient(circle,rgba(97,231,255,.18),transparent 68%);pointer-events:none;}
-#create-screen .input-title,#create-screen .input-text,#create-screen input,#create-screen textarea,.teacher-screen-wrap input,.teacher-screen-wrap textarea,.teacher-screen-wrap select,.settings-box input{
-  background:rgba(3,9,19,.60)!important;border:1px solid rgba(151,195,240,.17)!important;border-radius:15px!important;color:#f7fbff!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 8px 25px rgba(0,0,0,.12)!important;transition:.2s ease!important;
-}
-#create-screen .input-title:focus,#create-screen .input-text:focus,.teacher-screen-wrap input:focus,.teacher-screen-wrap textarea:focus,.teacher-screen-wrap select:focus{border-color:rgba(97,231,255,.70)!important;box-shadow:0 0 0 3px rgba(97,231,255,.08),0 0 28px rgba(77,141,255,.10)!important;outline:none!important;}
-#create-screen .upload-box{border-radius:19px!important;border-style:dashed!important;border-color:rgba(97,231,255,.30)!important;position:relative;overflow:hidden;}
-#create-screen .upload-box:before{content:"";position:absolute;inset:0;background:linear-gradient(110deg,transparent,rgba(97,231,255,.06),transparent);transform:translateX(-100%);animation:scan 4.5s ease-in-out infinite;pointer-events:none;}
-@keyframes scan{45%,100%{transform:translateX(100%)}}
-#create-screen .submit-btn,.submit-btn{border:1px solid rgba(97,231,255,.62)!important;border-radius:16px!important;background:linear-gradient(135deg,#168bff,#5b5cf6)!important;box-shadow:0 12px 32px rgba(53,112,255,.26),inset 0 1px 0 rgba(255,255,255,.22)!important;font-weight:800!important;letter-spacing:.1px!important;transition:.18s ease!important;}
-#create-screen .submit-btn:hover,.submit-btn:hover{transform:translateY(-2px)!important;box-shadow:0 16px 38px rgba(53,112,255,.34),0 0 26px rgba(97,231,255,.12)!important;}
-/* Library — media dashboard */
-#library-screen .tabs{padding:5px!important;background:rgba(4,9,18,.58)!important;border:1px solid rgba(166,207,255,.12)!important;border-radius:17px!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.05)!important;}
-#library-screen .tab{border-radius:13px!important;border:1px solid transparent!important;color:#8fa0b9!important;transition:.18s ease!important;}
-#library-screen .tab.active{color:#fff!important;background:linear-gradient(135deg,rgba(77,141,255,.34),rgba(97,231,255,.10))!important;border-color:rgba(97,231,255,.34)!important;box-shadow:0 0 20px rgba(77,141,255,.11),inset 0 1px 0 rgba(255,255,255,.10)!important;}
-#library-screen .quiz-card,#library-screen .flash-card{position:relative;overflow:hidden!important;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease!important;}
-#library-screen .quiz-card:before,#library-screen .flash-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:linear-gradient(#61e7ff,#7a6cff,transparent);opacity:.65;}
-#library-screen .quiz-card:hover,#library-screen .flash-card:hover{transform:translateY(-3px)!important;border-color:rgba(97,231,255,.34)!important;box-shadow:0 22px 50px rgba(0,0,0,.34),0 0 24px rgba(77,141,255,.08)!important;}
-#library-screen .card-title{font-weight:800!important;letter-spacing:-.2px;}
-/* Teacher — command center */
-#teacher-screen .teacher-hero{background:radial-gradient(circle at 85% 15%,rgba(164,119,255,.20),transparent 34%),linear-gradient(145deg,rgba(24,40,72,.85),rgba(7,13,25,.78))!important;border-color:rgba(164,119,255,.24)!important;}
-#teacher-screen .teacher-feature{border-radius:18px!important;background:linear-gradient(145deg,rgba(255,255,255,.065),rgba(2,7,15,.34))!important;}
-#teacher-screen .teacher-feature.active{background:linear-gradient(135deg,rgba(77,141,255,.30),rgba(164,119,255,.15))!important;border-color:rgba(97,231,255,.78)!important;box-shadow:0 0 28px rgba(77,141,255,.15),inset 0 1px 0 rgba(255,255,255,.12)!important;}
-#teacher-screen .variant-btn,.teacher-mini-btn{border-radius:13px!important;background:rgba(5,12,23,.60)!important;border-color:rgba(166,207,255,.16)!important;}
-#teacher-screen .variant-btn.active{background:linear-gradient(135deg,#197eff,#6c5cff)!important;border-color:rgba(97,231,255,.70)!important;box-shadow:0 8px 25px rgba(77,141,255,.22)!important;}
-/* Settings — premium device panel */
-#settings-screen .settings-box{padding:17px!important;}
-#settings-screen .lang-btn{border-radius:14px!important;background:rgba(4,10,20,.48)!important;border-color:rgba(166,207,255,.14)!important;}
-#settings-screen .lang-btn.active{background:linear-gradient(135deg,rgba(77,141,255,.32),rgba(97,231,255,.11))!important;border-color:rgba(97,231,255,.72)!important;box-shadow:0 0 24px rgba(97,231,255,.11)!important;}
-#settings-screen #vibration-toggle,#settings-screen #sound-toggle{flex:0 0 46px!important;width:46px!important;min-width:46px!important;height:24px!important;border-radius:13px!important;padding:0!important;}
-/* Premium — store / subscription experience */
-#premium-screen .tariff-card,#premium-screen .premium-card{border-radius:22px!important;overflow:hidden!important;transition:.2s ease!important;}
-#premium-screen .tariff-card:hover{transform:translateY(-3px)!important;border-color:rgba(97,231,255,.36)!important;box-shadow:0 24px 55px rgba(0,0,0,.35),0 0 28px rgba(77,141,255,.10)!important;}
-#premium-screen .tariff-card.popular{border-color:rgba(255,210,82,.46)!important;box-shadow:0 16px 45px rgba(0,0,0,.30),0 0 26px rgba(255,210,82,.07)!important;}
-/* Bottom navigation — floating spacecraft console */
-.bottom-nav{
-  background:linear-gradient(145deg,rgba(20,30,50,.88),rgba(5,10,19,.91))!important;
-  border:1px solid rgba(177,216,255,.20)!important;border-top-color:rgba(255,255,255,.18)!important;
-  border-radius:23px!important;padding:6px!important;gap:5px!important;
-  box-shadow:0 20px 55px rgba(0,0,0,.48),0 0 32px rgba(77,141,255,.09),inset 0 1px 0 rgba(255,255,255,.11)!important;
-  backdrop-filter:blur(25px) saturate(150%)!important;-webkit-backdrop-filter:blur(25px) saturate(150%)!important;
-}
-.nav-item{border-radius:17px!important;color:#71839f!important;transition:.18s ease!important;}
-.nav-item:hover{color:#dcecff!important;background:rgba(255,255,255,.045)!important;}
-.nav-item.active{color:#fff!important;background:linear-gradient(145deg,rgba(77,141,255,.31),rgba(97,231,255,.08))!important;border:1px solid rgba(97,231,255,.28)!important;box-shadow:0 0 22px rgba(77,141,255,.13),inset 0 1px 0 rgba(255,255,255,.11)!important;}
-.nav-item.active .nav-icon{filter:drop-shadow(0 0 7px rgba(97,231,255,.48));}
-.nav-icon{font-size:21px!important;}
-/* Game screen — immersive quiz mode */
-#game-screen{background:radial-gradient(800px 500px at 50% 0%,rgba(77,141,255,.15),transparent 60%),#050914!important;}
-.game-header{padding-top:8px!important;}
-#question-text{font-size:22px!important;line-height:1.45!important;font-weight:800!important;letter-spacing:-.3px!important;}
-#options-container button{border-radius:17px!important;background:linear-gradient(145deg,rgba(22,34,55,.80),rgba(6,12,23,.78))!important;border:1px solid rgba(166,207,255,.17)!important;box-shadow:0 10px 28px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.07)!important;transition:.16s ease!important;}
-#options-container button:hover{transform:translateY(-2px)!important;border-color:rgba(97,231,255,.48)!important;box-shadow:0 15px 30px rgba(0,0,0,.28),0 0 24px rgba(77,141,255,.10)!important;}
-#game-progress{background:linear-gradient(90deg,#61e7ff,#6e72ff,#a477ff)!important;box-shadow:0 0 14px rgba(97,231,255,.28)!important;}
-#next-question-btn{border-radius:16px!important;}
-/* Dialogs / toast */
-#newsModal,#payment-modal,#app-dialog{backdrop-filter:blur(18px)!important;background:rgba(1,5,12,.62)!important;}
-.app-dialog-content,.modal-content{border-radius:24px!important;}
-button{font-family:inherit!important;}
-button:focus-visible{outline:2px solid rgba(97,231,255,.65)!important;outline-offset:2px;}
-/* Mobile polish */
-@media(max-width:520px){
-  body{padding-left:10px!important;padding-right:10px!important;}
-  #app{width:100%!important;}
-  .header h1{font-size:24px!important;}
-  .bottom-nav{width:calc(100% - 12px)!important;left:6px!important;}
-  .nav-item{height:58px!important;}
-}
-@media(min-width:700px){body{padding-bottom:118px!important;}.bottom-nav{max-width:730px!important;left:50%!important;transform:translateX(-50%)!important;}}
-</style>
 
-
-<style id="phone-switch-bar-fix">
-/* ===== ONLY: Phone-style switches + mobile floating bar alignment ===== */
+/* ===== FINAL PHONE-STYLE SWITCH OVERRIDE =====
+   Only Vibratsiya/Ovoz switches are changed. Everything else remains untouched. */
 #settings-screen #vibration-toggle,
 #settings-screen #sound-toggle{
-    flex:0 0 46px!important;
-    min-width:46px!important;
-    width:46px!important;
-    height:24px!important;
-    padding:0!important;
-    border-radius:13px!important;
-    box-sizing:border-box!important;
+    appearance:none !important;
+    -webkit-appearance:none !important;
+    position:relative !important;
+    display:block !important;
+    flex:0 0 44px !important;
+    width:44px !important;
+    min-width:44px !important;
+    max-width:44px !important;
+    height:24px !important;
+    min-height:24px !important;
+    max-height:24px !important;
+    padding:0 !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+    border-radius:999px !important;
+    overflow:visible !important;
+    color:transparent !important;
+    font-size:0 !important;
+    line-height:0 !important;
+    text-align:left !important;
+    justify-content:flex-start !important;
+    align-items:center !important;
+    background:#20283a !important;
+    border:1px solid rgba(255,255,255,.12) !important;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.28) !important;
+    transition:background .18s ease,border-color .18s ease,box-shadow .18s ease !important;
+    -webkit-tap-highlight-color:transparent !important;
 }
 #settings-screen #vibration-toggle::before,
 #settings-screen #sound-toggle::before{
-    left:2px!important;
-    top:2px!important;
-    width:18px!important;
-    height:18px!important;
+    content:"" !important;
+    position:absolute !important;
+    display:block !important;
+    left:2px !important;
+    top:2px !important;
+    width:18px !important;
+    height:18px !important;
+    min-width:18px !important;
+    min-height:18px !important;
+    max-width:18px !important;
+    max-height:18px !important;
+    padding:0 !important;
+    margin:0 !important;
+    box-sizing:border-box !important;
+    border-radius:50% !important;
+    background:#f7f9ff !important;
+    border:0 !important;
+    box-shadow:0 2px 5px rgba(0,0,0,.38) !important;
+    transform:translateX(0) !important;
+    transition:transform .18s cubic-bezier(.2,.8,.2,1) !important;
+    z-index:2 !important;
+}
+#settings-screen #vibration-toggle.active,
+#settings-screen #sound-toggle.active{
+    background:linear-gradient(90deg,#25c9ee,#6977ff) !important;
+    border-color:rgba(53,217,255,.62) !important;
+    box-shadow:0 0 8px rgba(53,217,255,.35),inset 0 1px 1px rgba(255,255,255,.25) !important;
 }
 #settings-screen #vibration-toggle.active::before,
 #settings-screen #sound-toggle.active::before{
-    transform:translateX(22px)!important;
+    transform:translateX(20px) !important;
 }
-@media(max-width:520px){
-    .bottom-nav{
-        left:6px!important;
-        right:auto!important;
-        transform:none!important;
-        width:calc(100% - 12px)!important;
-        max-width:none!important;
-        box-sizing:border-box!important;
-    }
+#settings-screen #vibration-toggle:active,
+#settings-screen #sound-toggle:active{
+    transform:scale(.96) !important;
 }
+
 </style>
-
-
-<style id="ACTUAL_PHONE_SWITCH_FINAL">
-/* ===== ONLY Ovoz + Vibratsiya switches ===== */
-button#settings-screen #vibration-toggle,
-button#settings-screen #sound-toggle { all: revert; }
-
-/* High-specificity rules for the two real buttons */
-#settings-screen button#vibration-toggle,
-#settings-screen button#sound-toggle {
-    position: relative !important;
-    display: inline-flex !important;
-    flex: 0 0 42px !important;
-    width: 42px !important;
-    min-width: 42px !important;
-    max-width: 42px !important;
-    height: 24px !important;
-    min-height: 24px !important;
-    max-height: 24px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border-radius: 999px !important;
-    border: 1px solid rgba(150,180,210,.28) !important;
-    box-sizing: border-box !important;
-    overflow: hidden !important;
-    background: #20283a !important;
-    color: transparent !important;
-    font-size: 0 !important;
-    line-height: 0 !important;
-    text-align: initial !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,.38), 0 2px 6px rgba(0,0,0,.25) !important;
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    -webkit-tap-highlight-color: transparent !important;
-    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .12s ease !important;
-}
-
-#settings-screen button#vibration-toggle::before,
-#settings-screen button#sound-toggle::before {
-    content: "" !important;
-    position: absolute !important;
-    display: block !important;
-    left: 2px !important;
-    top: 2px !important;
-    width: 18px !important;
-    height: 18px !important;
-    min-width: 18px !important;
-    min-height: 18px !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: 0 !important;
-    border-radius: 50% !important;
-    background: #f7f9ff !important;
-    box-shadow: 0 2px 5px rgba(0,0,0,.38), inset 0 1px 1px rgba(255,255,255,.95) !important;
-    transform: translateX(0) !important;
-    z-index: 5 !important;
-    transition: transform .18s cubic-bezier(.2,.8,.2,1) !important;
-}
-
-#settings-screen button#vibration-toggle.active,
-#settings-screen button#sound-toggle.active {
-    background: linear-gradient(90deg,#25c9ee,#6977ff) !important;
-    border-color: rgba(53,217,255,.62) !important;
-    box-shadow: 0 0 8px rgba(53,217,255,.34), inset 0 1px 1px rgba(255,255,255,.22) !important;
-}
-
-#settings-screen button#vibration-toggle.active::before,
-#settings-screen button#sound-toggle.active::before {
-    transform: translateX(18px) !important;
-}
-
-#settings-screen button#vibration-toggle:not(.active),
-#settings-screen button#sound-toggle:not(.active) {
-    background: #20283a !important;
-    border-color: rgba(150,180,210,.28) !important;
-}
-
-#settings-screen button#vibration-toggle:active,
-#settings-screen button#sound-toggle:active {
-    transform: scale(.96) !important;
-}
-</style>
-
 </head>
 <body>
 
@@ -2631,14 +2474,14 @@ button#settings-screen #sound-toggle { all: revert; }
             <div class="settings-box">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                 <span style="font-weight:bold; font-size:16px;" data-lang="vibration_title">📳 Vibratsiya</span>
-                <button id="vibration-toggle" class="lang-btn" type="button" onclick="toggleVibration()" style="min-width:42px;">ON</button>
+                <button id="vibration-toggle" class="lang-btn" type="button" onclick="toggleVibration()" style="min-width:110px;">ON</button>
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="vibration_desc">Tugmalarni bosganda yengil vibratsiya.</div>
         </div>
         <div class="settings-box">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                 <span style="font-weight:bold; font-size:16px;" data-lang="sound_title">🔊 Ovoz</span>
-                <button id="sound-toggle" class="lang-btn" type="button" onclick="toggleSound()" style="min-width:42px;">ON</button>
+                <button id="sound-toggle" class="lang-btn" type="button" onclick="toggleSound()" style="min-width:110px;">ON</button>
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="sound_desc">Test jarayonida tovushlar ijro etiladi.</div>
         </div>
