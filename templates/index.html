@@ -7216,10 +7216,15 @@ button{cursor:pointer!important}
   .submit-btn:active,.support-contact-btn:active,.next-btn:active{transform:scale(.985)!important}
 }
 
-/* ---------- quiz text visibility: light green ---------- */
-#game-screen .q-text,
-#game-screen .opt-btn{
-  color:#43c97a!important;
+/* ---------- light green background: Colorful Fusion ---------- */
+html[data-quiz-theme="colorful-fusion"] body,
+html[data-quiz-theme="colorful-fusion"] #game-screen{
+  background:
+    radial-gradient(circle at 12% 8%,rgba(134,239,172,.30),transparent 27%),
+    radial-gradient(circle at 88% 15%,rgba(187,247,208,.34),transparent 30%),
+    radial-gradient(circle at 78% 84%,rgba(74,222,128,.18),transparent 32%),
+    linear-gradient(135deg,#effcf4 0%,#e9f9ef 38%,#f2fbf5 68%,#e5f7ec 100%) !important;
+  color:var(--text-color);
 }
 </template>
 <template id="quizpilot-theme-css-nebula" data-theme-template="nebula">
@@ -12287,10 +12292,15 @@ html[data-quiz-theme="crystal-aurora"] .news-body{
     color:#64748b!important;
 }
 
-/* ---------- quiz text visibility: light green ---------- */
-#game-screen .q-text,
-#game-screen .opt-btn{
-  color:#43c97a!important;
+/* ---------- light green background: Crystal Aurora ---------- */
+html[data-quiz-theme="crystal-aurora"] body,
+html[data-quiz-theme="crystal-aurora"] #game-screen{
+  background:
+    radial-gradient(circle at 12% 8%,rgba(134,239,172,.30),transparent 27%),
+    radial-gradient(circle at 88% 15%,rgba(187,247,208,.34),transparent 30%),
+    radial-gradient(circle at 78% 84%,rgba(74,222,128,.18),transparent 32%),
+    linear-gradient(135deg,#effcf4 0%,#e9f9ef 38%,#f2fbf5 68%,#e5f7ec 100%) !important;
+  color:#17243a !important;
 }
 </template>
 
