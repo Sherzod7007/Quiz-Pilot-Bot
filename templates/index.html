@@ -1592,6 +1592,78 @@
         /* ===== END CREATE SCREEN PREMIUM VISUAL PASS ===== */
 
 </style>
+
+<style id="small-iphone-switches-only">
+/* Faqat Ovoz va Vibratsiya switchlari — ixcham telefon uslubi */
+#vibration-toggle,
+#sound-toggle {
+    width: 50px !important;
+    min-width: 50px !important;
+    max-width: 50px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    max-height: 28px !important;
+    flex: 0 0 50px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 999px !important;
+    box-sizing: border-box !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    position: relative !important;
+    color: transparent !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    text-shadow: none !important;
+    cursor: pointer !important;
+    -webkit-tap-highlight-color: transparent !important;
+    transition: background .2s ease, border-color .2s ease, box-shadow .2s ease !important;
+}
+
+#vibration-toggle::before,
+#sound-toggle::before {
+    content: "" !important;
+    position: absolute !important;
+    left: 3px !important;
+    top: 3px !important;
+    width: 20px !important;
+    height: 20px !important;
+    border-radius: 50% !important;
+    box-sizing: border-box !important;
+    background: linear-gradient(145deg, #fff 0%, #edf2f7 60%, #d2dbe5 100%) !important;
+    border: 1px solid rgba(255,255,255,.75) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,.4), inset 0 1px 1px rgba(255,255,255,.95) !important;
+    transform: translateX(0) !important;
+    transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease !important;
+    z-index: 2 !important;
+}
+
+#vibration-toggle.active,
+#sound-toggle.active {
+    background: linear-gradient(180deg, #20c8f4 0%, #0b9ed8 100%) !important;
+    border-color: rgba(0,210,255,.8) !important;
+    box-shadow: 0 0 7px rgba(0,210,255,.65), inset 0 1px 1px rgba(255,255,255,.3) !important;
+}
+
+#vibration-toggle.active::before,
+#sound-toggle.active::before {
+    transform: translateX(24px) !important;
+}
+
+#vibration-toggle:not(.active),
+#sound-toggle:not(.active) {
+    background: linear-gradient(180deg, #465467 0%, #182231 100%) !important;
+    border-color: rgba(160,190,220,.28) !important;
+    box-shadow: inset 0 1px 2px rgba(255,255,255,.12), 0 2px 6px rgba(0,0,0,.3) !important;
+}
+
+#vibration-toggle:active,
+#sound-toggle:active {
+    transform: scale(.96) !important;
+}
+</style>
+
 </head>
 <body>
 
