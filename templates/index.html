@@ -2363,7 +2363,10 @@ button{cursor:pointer!important}
             userId = tg.initDataUnsafe.user.id;
         }
 
-        let currentLang = 'uz';
+        // Tanlangan tilni qayta kirganda saqlab qolish
+        const LANGUAGE_STORAGE_KEY = `quizpilot_language_${userId}`;
+        const savedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+        let currentLang = ['uz', 'ru', 'en'].includes(savedLanguage) ? savedLanguage : 'uz';
         let currentTab = 'personal'; 
         let currentQuizQuestions = [];
         let currentQuestionIdx = 0;
@@ -2969,7 +2972,9 @@ button{cursor:pointer!important}
         }
 
         async function changeLanguage(lang) {
+            if (!['uz', 'ru', 'en'].includes(lang)) return;
             currentLang = lang;
+            localStorage.setItem(LANGUAGE_STORAGE_KEY, currentLang);
             applyLocalization();
             try {
                 await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
@@ -3144,8 +3149,10 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 if (data && data.total_users !== undefined) liveUsers = data.total_users;
                 document.getElementById('user-count-badge').innerText = `🟢 ${liveUsers}`;
 
-                if (data && data.user_lang) {
-                    currentLang = data.user_lang;
+                // Qurilmada saqlangan til bo‘lsa, serverning eski tili uni bosib ketmaydi.
+                if (data && data.user_lang && !localStorage.getItem(LANGUAGE_STORAGE_KEY)) {
+                    currentLang = ['uz', 'ru', 'en'].includes(data.user_lang) ? data.user_lang : 'uz';
+                    localStorage.setItem(LANGUAGE_STORAGE_KEY, currentLang);
                     applyLocalization();
                 }
 
