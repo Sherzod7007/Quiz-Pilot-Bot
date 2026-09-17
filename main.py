@@ -69,29 +69,51 @@ GOOGLE_API_KEYS = (
 current_key_index = 0
 key_lock = threading.Lock()
 
-# --- PROFESSIONAL AI QUEUE + RETRY + TIMEOUT + CONCURRENCY PROTECTION ---
-# Free API Key Rotation saqlanadi. Katta (100-500 savolli) so'rovlarni
-# sun'iy 90 soniya / 5 daqiqalik limit bilan kesib tashlamaymiz.
-AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", str(min(7, max(1, len(GOOGLE_API_KEYS)))))))
+# --- PROFESSIONAL AI MANAGER: KEY ROTATION != CONCURRENCY CONTROL ---
+# API key rotation must never determine the number of simultaneous Gemini requests.
+# This keeps the architecture stable when moving from multiple free keys to one
+# paid key, or later to multiple independent projects/keys.
+#
+# Recommended Railway variables for production can be tuned without code changes:
+#   GEMINI_MODEL=gemini-2.5-flash
+#   AI_MAX_CONCURRENT=10
+#   AI_MAX_QUEUE=150
+#   AI_RETRY_PER_KEY=2
+#   AI_REQUEST_TIMEOUT=600
+#   AI_TOTAL_TIMEOUT=1800
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", "10")))
 AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "150")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
+# Explanation generation is configurable. When disabled, the schema still stays
+# compatible, but Gemini returns an empty explanation string instead of spending
+# output tokens on explanations. Default remains ON for the educational value.
+GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+
+# Input protection: pasted text gets a visible hard limit; extracted files are
+# protected separately below. This prevents unexpectedly large requests entering
+# the AI queue. Large books should be split/batched rather than silently truncated.
+MAX_TEXT_INPUT_CHARS = max(10000, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
+
 # Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
-# AI so'rovlar sonini cheklaydi. 150 ta foydalanuvchi birdan so'rov yuborsa
-# ortiqcha so'rovlar xavfsiz kutadi, API birdaniga bosib yuborilmaydi.
+# AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
 logging.info(
-    "AI protection initialized | concurrent=%s | queue=%s | request_timeout=%ss | total_timeout=%ss",
-    AI_MAX_CONCURRENT, AI_MAX_QUEUE, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
+    "AI Manager initialized | model=%s | concurrent=%s | queue=%s | explanations=%s | request_timeout=%ss | total_timeout=%ss",
+    GEMINI_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE, GEMINI_INCLUDE_EXPLANATIONS,
+    AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
 )
 
 # --- PROFESSIONAL FILE PROTECTION LAYER ---
 # Katta kitob yoki juda og'ir fayllar server, parser va AI Queue ga
 # ortiqcha yuk bermasligi uchun yuklashdan oldin tekshiriladi.
-MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "20")))
+MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "10")))
 MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
 MAX_EXTRACTED_TEXT_CHARS = max(10000, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "300000")))
@@ -103,6 +125,7 @@ FILE_PROTECTION_MESSAGES = {
         "too_large": f"Fayl hajmi {MAX_UPLOAD_FILE_MB} MB limitdan oshdi. Iltimos, faylni kichikroq qismlarga bo'lib yuboring.",
         "too_many_pages": f"PDF sahifalari soni {MAX_PDF_PAGES} ta limitdan oshdi. Iltimos, PDF faylni qismlarga bo'ling.",
         "too_much_text": "Fayldagi matn hajmi juda katta. Iltimos, faylni kichikroq qismlarga bo'lib yuboring.",
+        "text_too_long": f"Kiritilgan matn {MAX_TEXT_INPUT_CHARS:,} ta belgidan oshmasligi kerak. Iltimos, matnni qismlarga bo'ling.",
         "unreadable": "Faylni o'qib bo'lmadi. Matnli PDF yoki to'g'ri DOCX fayl yuboring.",
     },
     "ru": {
@@ -1705,7 +1728,7 @@ def get_premium_status(user_id: int):
         "is_teacher": is_teacher,
     }
 
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB (baytlarda)
+MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES  # MAX_UPLOAD_FILE_MB (baytlarda)
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1715,20 +1738,6 @@ async def create_quiz_web(
 ):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
-
-# 10 MB Fayl hajmini tekshirish
-    if file:
-        file_bytes = bytearray()
-        chunk_size = 1024 * 1024  # 1 MB bo'laklar
-        while chunk := await file.read(chunk_size):
-            file_bytes.extend(chunk)
-            if len(file_bytes) > MAX_FILE_SIZE:
-                raise HTTPException(
-                    status_code=413, 
-                    detail="Fayl hajmi 10 MB limitidan oshib ketdi!"
-                )
-        await file.seek(0)
-
 
     conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn_check.row_factory = sqlite3.Row
@@ -1888,6 +1897,20 @@ async def create_quiz_web(
             return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
     if not raw_text.strip() and text:
+        if len(text) > MAX_TEXT_INPUT_CHARS:
+            if free_slot_reserved:
+                try:
+                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    cur_restore = conn_restore.cursor()
+                    cur_restore.execute(
+                        "UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?",
+                        (user_id,),
+                    )
+                    conn_restore.commit()
+                    conn_restore.close()
+                except Exception:
+                    pass
+            return {"status": "error", "message": file_protection_message(user_lang, "text_too_long")}
         raw_text = text
         auto_text_clean = text.replace("\n", " ").strip()
         auto_title = (
@@ -2025,7 +2048,7 @@ def randomize_quiz_answer_positions(items):
 def generate_quiz_from_gemini(extracted_text):
     """
     Professional AI Queue + Retry + Timeout + Concurrency Protection.
-    API Key Rotation va Gemini 2.5 Flash saqlanadi.
+    API Key Rotation saqlanadi; Gemini modeli GEMINI_MODEL orqali boshqariladi.
 
     Muhim: katta testlarni avvalgi 203 savolli ishlagan versiyadek yaratish
     uchun request 90 soniyada majburan to'xtatilmaydi. Timeout nazorati
@@ -2037,10 +2060,17 @@ def generate_quiz_from_gemini(extracted_text):
         logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
         return None
 
-    system_instruction = """You are an advanced AI quiz generator.
+    explanation_rule = (
+        "3. EXPLANATION RULE: Generate a short explanation for every question."
+        if GEMINI_INCLUDE_EXPLANATIONS
+        else
+        "3. EXPLANATION RULE: Do NOT spend output tokens on explanations. Return an empty string in the explanation field for every question."
+    )
+    system_instruction = f"""You are an advanced AI quiz generator.
 CRITICAL RULES:
 1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum."""
+2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
+{explanation_rule}"""
 
     # Queue: 150 tagacha bir vaqtning o'zida kelgan foydalanuvchi so'rovini
     # xavfsiz boshqaradi. Katta test uchun kutish vaqti umumiy timeoutga mos.
@@ -2084,8 +2114,8 @@ CRITICAL RULES:
                 try:
                     client = genai.Client(api_key=api_key)
                     response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=extracted_text[:80000],
+                        model=GEMINI_MODEL,
+                        contents=extracted_text[:MAX_TEXT_INPUT_CHARS],
                         config=genai_types.GenerateContentConfig(
                             system_instruction=system_instruction,
                             response_mime_type="application/json",
