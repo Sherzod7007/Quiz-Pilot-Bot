@@ -12069,6 +12069,219 @@ body::before{
 }
 
 </template>
+
+<style id="quizpilot-crystal-aurora-css">
+/* =========================================================
+   CRYSTAL AURORA — eye-friendly premium light theme
+   Visual layer only. No application logic is changed.
+   ========================================================= */
+html[data-quiz-theme="crystal-aurora"]{
+    --aero-bg:linear-gradient(135deg,#eef4fb 0%,#e8eff9 38%,#f0ebfb 70%,#e8f7f4 100%);
+    --aero-glass:rgba(255,255,255,.62);
+    --aero-glass-hover:rgba(255,255,255,.78);
+    --aero-border:rgba(126,151,184,.24);
+    --aero-border-glow:rgba(87,151,255,.32);
+    --text-color:#17243a;
+    --text-hint:#718099;
+    --accent-blue:#4d7cff;
+    --glass-shadow:0 10px 30px rgba(83,103,137,.13);
+}
+html[data-quiz-theme="crystal-aurora"] body{
+    background:
+      radial-gradient(circle at 12% 8%,rgba(117,204,255,.20),transparent 25%),
+      radial-gradient(circle at 88% 12%,rgba(186,151,255,.18),transparent 27%),
+      radial-gradient(circle at 80% 82%,rgba(104,231,195,.14),transparent 28%),
+      var(--aero-bg)!important;
+    color:#17243a!important;
+}
+html[data-quiz-theme="crystal-aurora"] .glass-panel,
+html[data-quiz-theme="crystal-aurora"] .settings-box,
+html[data-quiz-theme="crystal-aurora"] .fc-card,
+html[data-quiz-theme="crystal-aurora"] .teacher-section{
+    background:rgba(255,255,255,.64)!important;
+    border-color:rgba(126,151,184,.22)!important;
+    box-shadow:0 12px 34px rgba(83,103,137,.12),inset 0 1px 0 rgba(255,255,255,.90)!important;
+    color:#17243a!important;
+}
+html[data-quiz-theme="crystal-aurora"] .header h1,
+html[data-quiz-theme="crystal-aurora"] h1,
+html[data-quiz-theme="crystal-aurora"] h2,
+html[data-quiz-theme="crystal-aurora"] h3,
+html[data-quiz-theme="crystal-aurora"] h4{
+    color:#182640!important;
+    text-shadow:0 2px 10px rgba(86,111,160,.12)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .input-title,
+html[data-quiz-theme="crystal-aurora"] .input-card,
+html[data-quiz-theme="crystal-aurora"] .input-text{
+    background:rgba(255,255,255,.76)!important;
+    color:#1b2940!important;
+    border-color:rgba(126,151,184,.24)!important;
+    box-shadow:inset 0 1px 3px rgba(77,101,137,.06),0 5px 16px rgba(83,103,137,.06)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .input-title::placeholder,
+html[data-quiz-theme="crystal-aurora"] .input-text::placeholder{
+    color:#91a0b4!important;
+}
+html[data-quiz-theme="crystal-aurora"] .upload-box{
+    background:rgba(255,255,255,.54)!important;
+    border-color:rgba(92,142,220,.32)!important;
+    color:#718099!important;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.92),0 7px 20px rgba(83,103,137,.07)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .submit-btn{
+    background:linear-gradient(135deg,#4e7dff 0%,#7861f4 52%,#54bfe7 100%)!important;
+    border-color:rgba(255,255,255,.58)!important;
+    color:#fff!important;
+    box-shadow:0 10px 24px rgba(91,103,230,.22),inset 0 1px 0 rgba(255,255,255,.48)!important;
+    text-shadow:0 1px 3px rgba(31,47,95,.22)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .bottom-nav{
+    background:rgba(250,252,255,.78)!important;
+    border-color:rgba(126,151,184,.22)!important;
+    box-shadow:0 12px 32px rgba(72,92,124,.16),inset 0 1px 0 rgba(255,255,255,.94)!important;
+    color:#52627a!important;
+}
+html[data-quiz-theme="crystal-aurora"] .bottom-nav *{
+    text-shadow:none!important;
+}
+html[data-quiz-theme="crystal-aurora"] .bottom-nav .active,
+html[data-quiz-theme="crystal-aurora"] .bottom-nav .nav-item.active{
+    background:linear-gradient(135deg,#5b7cff,#8061ee)!important;
+    color:#fff!important;
+    box-shadow:0 7px 18px rgba(91,103,230,.22)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .tabs,
+html[data-quiz-theme="crystal-aurora"] .tab-bar{
+    background:rgba(255,255,255,.58)!important;
+    border-color:rgba(126,151,184,.20)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .tabs button,
+html[data-quiz-theme="crystal-aurora"] .tab-btn{
+    color:#6b7890!important;
+}
+html[data-quiz-theme="crystal-aurora"] .tabs button.active,
+html[data-quiz-theme="crystal-aurora"] .tab-btn.active{
+    background:linear-gradient(135deg,#5b7cff,#8061ee)!important;
+    color:#fff!important;
+    box-shadow:0 6px 16px rgba(91,103,230,.18)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .teacher-hero{
+    background:
+      radial-gradient(circle at 88% 10%,rgba(255,255,255,.50),transparent 25%),
+      linear-gradient(135deg,#5b7cff 0%,#8061ee 52%,#55bddb 100%)!important;
+    border-color:rgba(255,255,255,.72)!important;
+    color:#fff!important;
+    box-shadow:0 18px 42px rgba(92,101,214,.18)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .teacher-feature{
+    background:rgba(255,255,255,.66)!important;
+    border-color:rgba(126,151,184,.22)!important;
+    color:#24324a!important;
+    box-shadow:0 8px 22px rgba(83,103,137,.07)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .teacher-feature b{
+    color:#24324a!important;
+}
+html[data-quiz-theme="crystal-aurora"] .teacher-feature span:last-child,
+html[data-quiz-theme="crystal-aurora"] .teacher-note{
+    color:#78879d!important;
+}
+html[data-quiz-theme="crystal-aurora"] .teacher-feature.active{
+    background:linear-gradient(135deg,rgba(91,124,255,.13),rgba(126,97,238,.10))!important;
+    border-color:rgba(91,124,255,.34)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .teacher-mini-btn,
+html[data-quiz-theme="crystal-aurora"] .variant-btn,
+html[data-quiz-theme="crystal-aurora"] .activate-btn{
+    background:rgba(248,250,255,.82)!important;
+    color:#31415d!important;
+    border-color:rgba(92,119,170,.18)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .variant-btn.active{
+    background:linear-gradient(135deg,#5b7cff,#8061ee)!important;
+    color:#fff!important;
+    border-color:rgba(91,124,255,.45)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .p-status-box{
+    background:linear-gradient(135deg,rgba(255,226,122,.20),rgba(255,255,255,.58))!important;
+    border-color:rgba(225,181,55,.30)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .p-pro-header,
+html[data-quiz-theme="crystal-aurora"] .tariff-card{
+    background:rgba(255,255,255,.66)!important;
+    border-color:rgba(126,151,184,.22)!important;
+    box-shadow:0 12px 32px rgba(83,103,137,.10)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .p-pro-header h3,
+html[data-quiz-theme="crystal-aurora"] .tariff-title,
+html[data-quiz-theme="crystal-aurora"] .tariff-price{
+    color:#1c2a42!important;
+    text-shadow:none!important;
+}
+html[data-quiz-theme="crystal-aurora"] .tariff-desc{
+    color:#77869d!important;
+}
+html[data-quiz-theme="crystal-aurora"] .lang-btn{
+    background:rgba(255,255,255,.54)!important;
+    border-color:rgba(126,151,184,.20)!important;
+    color:#293850!important;
+}
+html[data-quiz-theme="crystal-aurora"] .lang-btn.active{
+    background:linear-gradient(135deg,rgba(91,124,255,.13),rgba(126,97,238,.10))!important;
+    border-color:rgba(91,124,255,.38)!important;
+    color:#315ed7!important;
+    box-shadow:0 5px 16px rgba(91,124,255,.10)!important;
+}
+html[data-quiz-theme="crystal-aurora"] #settings-screen .theme-btn{
+    background:rgba(255,255,255,.54)!important;
+    color:#293850!important;
+    border-color:rgba(126,151,184,.20)!important;
+}
+html[data-quiz-theme="crystal-aurora"] #settings-screen .theme-btn.active{
+    background:linear-gradient(135deg,rgba(91,124,255,.13),rgba(126,97,238,.10))!important;
+    color:#315ed7!important;
+}
+html[data-quiz-theme="crystal-aurora"] .fc-display{
+    background:rgba(255,255,255,.56)!important;
+    color:#293850!important;
+    border-color:rgba(126,151,184,.22)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .modal-box,
+html[data-quiz-theme="crystal-aurora"] .app-dialog-box{
+    background:linear-gradient(145deg,rgba(250,252,255,.96),rgba(236,242,250,.96))!important;
+    color:#24324a!important;
+    border-color:rgba(126,151,184,.24)!important;
+    box-shadow:0 20px 48px rgba(55,72,103,.22)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .modal-box p,
+html[data-quiz-theme="crystal-aurora"] .app-dialog-msg{
+    color:#66758d!important;
+}
+html[data-quiz-theme="crystal-aurora"] .btn-close-modal,
+html[data-quiz-theme="crystal-aurora"] .app-dialog-btn.secondary{
+    background:rgba(224,232,242,.62)!important;
+    color:#5d6d84!important;
+    border-color:rgba(126,151,184,.20)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .group-join-open-btn{
+    background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(233,240,249,.72))!important;
+    color:#52627a!important;
+    border-color:rgba(126,151,184,.20)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .news-item{
+    background:rgba(255,255,255,.54)!important;
+    border-color:rgba(126,151,184,.20)!important;
+}
+html[data-quiz-theme="crystal-aurora"] .news-title{
+    color:#263650!important;
+    text-shadow:none!important;
+}
+html[data-quiz-theme="crystal-aurora"] .news-body{
+    color:#64748b!important;
+}
+</style>
+
 <style id="quizpilot-active-theme"></style>
 
 <script>
@@ -12077,7 +12290,7 @@ body::before{
         (window.Telegram && Telegram.WebApp && Telegram.WebApp.initDataUnsafe &&
          Telegram.WebApp.initDataUnsafe.user && Telegram.WebApp.initDataUnsafe.user.id) || '99999'
     );
-    const THEME_IDS = ['teacher-aero','ios-black','colorful-fusion','nebula','quantum-aurora'];
+    const THEME_IDS = ['teacher-aero','ios-black','colorful-fusion','nebula','quantum-aurora','crystal-aurora'];
     const DEFAULT_THEME = 'teacher-aero';
 
     function getSavedTheme(){
@@ -12260,6 +12473,10 @@ body::before{
                 <button class="theme-btn" type="button" data-theme="quantum-aurora" onclick="changeTheme('quantum-aurora')" aria-pressed="false">
                     <span class="theme-preview" style="background:linear-gradient(135deg,#060912,#61e7ff,#a477ff,#ff5fd2)"></span>
                     <span class="theme-btn-label" data-lang="theme_quantum">Quantum Aurora</span><span class="theme-check">✓</span>
+                </button>
+                <button class="theme-btn" type="button" data-theme="crystal-aurora" onclick="changeTheme('crystal-aurora')" aria-pressed="false">
+                    <span class="theme-preview" style="background:linear-gradient(135deg,#eaf2ff,#bdefff,#d8c9ff,#bff7e7)"></span>
+                    <span class="theme-btn-label" data-lang="theme_crystal">Crystal Aurora</span><span class="theme-check">✓</span>
                 </button>
             </div>
         </div>
@@ -12518,7 +12735,7 @@ body::before{
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🎁 Bepul limitlar", promo_6_desc: "Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
-                theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_quantum: "Quantum Aurora", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
+                theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
@@ -12548,7 +12765,7 @@ body::before{
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", selected_file: "Выбрано: ", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🎁 Бесплатные лимиты", promo_6_desc: "Каждые 30 дней: 3 бесплатных теста, 3 публичных теста и 3 флеш-карточки.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
-                theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_quantum: "Quantum Aurora", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
@@ -12578,7 +12795,7 @@ body::before{
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", selected_file: "Selected: ", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🎁 Free limits", promo_6_desc: "Every 30 days: 3 free quizzes, 3 public quizzes, and 3 flashcards.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
-                theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_quantum: "Quantum Aurora", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
+                theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
