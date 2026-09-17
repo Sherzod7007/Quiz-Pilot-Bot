@@ -12302,6 +12302,195 @@ html[data-quiz-theme="crystal-aurora"] #game-screen{
     linear-gradient(135deg,#effcf4 0%,#e9f9ef 38%,#f2fbf5 68%,#e5f7ec 100%) !important;
   color:#17243a !important;
 }
+
+/* =========================================================
+   CRYSTAL AURORA — WINDOWS 7 CRYSTAL AERO VISUAL PASS
+   Crystal Aurora only. Other themes are untouched.
+   ========================================================= */
+
+/* Windows Crystal Aero background */
+html[data-quiz-theme="crystal-aurora"] body,
+html[data-quiz-theme="crystal-aurora"] #game-screen{
+    background:
+      radial-gradient(circle at 15% 5%,rgba(255,255,255,.72),transparent 26%),
+      radial-gradient(circle at 88% 18%,rgba(120,205,255,.28),transparent 30%),
+      radial-gradient(circle at 76% 88%,rgba(160,225,205,.24),transparent 32%),
+      linear-gradient(135deg,#dceefa 0%,#eaf5fc 42%,#edf0fb 72%,#e2f5ef 100%) !important;
+    color:#20344d !important;
+}
+
+/* Classic Aero glass surfaces */
+html[data-quiz-theme="crystal-aurora"] .glass-panel,
+html[data-quiz-theme="crystal-aurora"] .settings-box,
+html[data-quiz-theme="crystal-aurora"] .quiz-card,
+html[data-quiz-theme="crystal-aurora"] .fc-card,
+html[data-quiz-theme="crystal-aurora"] .teacher-section,
+html[data-quiz-theme="crystal-aurora"] .tariff-card{
+    background:
+      linear-gradient(135deg,rgba(255,255,255,.82),rgba(235,245,253,.58)) !important;
+    border:1px solid rgba(255,255,255,.92) !important;
+    border-top-color:rgba(255,255,255,.98) !important;
+    box-shadow:
+      0 10px 28px rgba(68,105,145,.15),
+      inset 0 1px 0 rgba(255,255,255,.95),
+      inset 0 -1px 0 rgba(133,174,210,.12) !important;
+    color:#20344d !important;
+}
+
+/* Dark blue Windows-style typography on light glass */
+html[data-quiz-theme="crystal-aurora"] .card-title,
+html[data-quiz-theme="crystal-aurora"] .q-text,
+html[data-quiz-theme="crystal-aurora"] .game-header,
+html[data-quiz-theme="crystal-aurora"] #question-text,
+html[data-quiz-theme="crystal-aurora"] .section-header,
+html[data-quiz-theme="crystal-aurora"] .teacher-section-title{
+    color:#1c3048 !important;
+    text-shadow:0 1px 2px rgba(255,255,255,.72) !important;
+}
+
+/* Quiz answers — readable dark text instead of white */
+html[data-quiz-theme="crystal-aurora"] .opt-btn,
+html[data-quiz-theme="crystal-aurora"] #options-container button{
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.84),rgba(239,247,253,.66)) !important;
+    color:#20354e !important;
+    border:1px solid rgba(132,171,205,.34) !important;
+    text-shadow:0 1px 1px rgba(255,255,255,.75) !important;
+    box-shadow:
+      0 5px 16px rgba(75,108,142,.11),
+      inset 0 1px 0 rgba(255,255,255,.96) !important;
+}
+
+/* Aero blue hover/press highlight */
+html[data-quiz-theme="crystal-aurora"] .opt-btn:hover,
+html[data-quiz-theme="crystal-aurora"] #options-container button:hover{
+    background:
+      linear-gradient(180deg,rgba(232,248,255,.96),rgba(204,232,250,.82)) !important;
+    color:#173b63 !important;
+    border-color:rgba(74,157,218,.52) !important;
+    box-shadow:
+      0 7px 18px rgba(55,125,180,.15),
+      0 0 8px rgba(72,166,225,.12),
+      inset 0 1px 0 rgba(255,255,255,.98) !important;
+}
+
+/* Keep answer-state colors strong and readable */
+html[data-quiz-theme="crystal-aurora"] .opt-btn.correct,
+html[data-quiz-theme="crystal-aurora"] #options-container button.correct{
+    background:linear-gradient(180deg,#43c66b,#25a957) !important;
+    color:#fff !important;
+    border-color:#7de39b !important;
+    text-shadow:0 1px 2px rgba(0,70,30,.28) !important;
+}
+
+html[data-quiz-theme="crystal-aurora"] .opt-btn.wrong,
+html[data-quiz-theme="crystal-aurora"] #options-container button.wrong{
+    background:linear-gradient(180deg,#ee5b68,#d83d4d) !important;
+    color:#fff !important;
+    border-color:#ff9ba4 !important;
+    text-shadow:0 1px 2px rgba(90,0,10,.28) !important;
+}
+
+/* Windows Aero-style quiz action button */
+html[data-quiz-theme="crystal-aurora"] .next-btn{
+    background:
+      linear-gradient(180deg,#4aa9e8 0%,#1979bd 48%,#0d68ad 100%) !important;
+    color:#fff !important;
+    border:1px solid rgba(255,255,255,.72) !important;
+    box-shadow:
+      0 6px 18px rgba(30,111,174,.24),
+      inset 0 1px 0 rgba(255,255,255,.55) !important;
+    text-shadow:0 1px 2px rgba(0,45,80,.35) !important;
+}
+
+/* Game explanation: clean Aero glass panel */
+html[data-quiz-theme="crystal-aurora"] .explanation-box{
+    background:
+      linear-gradient(135deg,rgba(255,255,255,.76),rgba(228,239,247,.68)) !important;
+    color:#30455e !important;
+    border:1px solid rgba(126,164,195,.30) !important;
+    border-left:4px solid #4d9bd2 !important;
+    box-shadow:
+      0 6px 18px rgba(72,103,135,.10),
+      inset 0 1px 0 rgba(255,255,255,.90) !important;
+    text-shadow:0 1px 1px rgba(255,255,255,.65) !important;
+}
+
+/* Glass input fields */
+html[data-quiz-theme="crystal-aurora"] .input-title,
+html[data-quiz-theme="crystal-aurora"] .input-card,
+html[data-quiz-theme="crystal-aurora"] .input-text{
+    background:rgba(255,255,255,.78) !important;
+    color:#20354e !important;
+    border-color:rgba(112,158,196,.30) !important;
+    box-shadow:
+      inset 0 1px 3px rgba(54,91,124,.07),
+      0 4px 14px rgba(75,108,142,.07) !important;
+}
+
+/* Classic Aero tabs */
+html[data-quiz-theme="crystal-aurora"] .tabs,
+html[data-quiz-theme="crystal-aurora"] .tab-bar{
+    background:rgba(255,255,255,.70) !important;
+    border-color:rgba(125,165,199,.28) !important;
+    box-shadow:
+      0 7px 18px rgba(71,105,139,.10),
+      inset 0 1px 0 rgba(255,255,255,.94) !important;
+}
+
+html[data-quiz-theme="crystal-aurora"] .tabs button.active,
+html[data-quiz-theme="crystal-aurora"] .tab-btn.active,
+html[data-quiz-theme="crystal-aurora"] .tabs .tab.active{
+    background:linear-gradient(180deg,#69b8ec,#3188c8) !important;
+    color:#fff !important;
+    border-color:rgba(255,255,255,.75) !important;
+    text-shadow:0 1px 2px rgba(0,54,96,.28) !important;
+    box-shadow:
+      0 5px 14px rgba(42,119,178,.20),
+      inset 0 1px 0 rgba(255,255,255,.55) !important;
+}
+
+/* Crystal Aero bottom navigation */
+html[data-quiz-theme="crystal-aurora"] .bottom-nav{
+    background:
+      linear-gradient(180deg,rgba(255,255,255,.88),rgba(220,235,247,.78)) !important;
+    border-color:rgba(255,255,255,.94) !important;
+    box-shadow:
+      0 12px 30px rgba(63,91,120,.18),
+      inset 0 1px 0 rgba(255,255,255,.98) !important;
+}
+
+html[data-quiz-theme="crystal-aurora"] .nav-item{
+    color:#60758b !important;
+    text-shadow:0 1px 1px rgba(255,255,255,.72) !important;
+}
+
+html[data-quiz-theme="crystal-aurora"] .nav-item.active{
+    color:#fff !important;
+    background:linear-gradient(180deg,#6dbcf0,#3d8ed0) !important;
+    border-color:rgba(255,255,255,.72) !important;
+    text-shadow:0 1px 2px rgba(0,58,100,.28) !important;
+    box-shadow:
+      0 6px 16px rgba(44,119,179,.22),
+      inset 0 1px 0 rgba(255,255,255,.55) !important;
+}
+
+/* Theme selector itself */
+html[data-quiz-theme="crystal-aurora"] #settings-screen .theme-btn{
+    background:linear-gradient(135deg,rgba(255,255,255,.82),rgba(231,242,250,.68)) !important;
+    color:#29405a !important;
+    border-color:rgba(116,158,193,.28) !important;
+}
+
+html[data-quiz-theme="crystal-aurora"] #settings-screen .theme-btn.active{
+    background:linear-gradient(180deg,rgba(116,193,239,.28),rgba(73,145,207,.16)) !important;
+    color:#1f5e96 !important;
+    border-color:rgba(61,160,222,.62) !important;
+    box-shadow:
+      0 0 0 1px rgba(82,170,224,.16),
+      0 5px 16px rgba(67,142,195,.15) !important;
+}
+
 </template>
 
 <style id="quizpilot-active-theme"></style>
