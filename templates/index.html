@@ -5137,6 +5137,8 @@ button{cursor:pointer!important}
     #000!important;
   padding:20px 16px!important;
 }
+/* Quiz mode: bottom navigation stays behind the game screen. */
+#game-screen{z-index:10000!important;}
 .game-header{
   min-height:45px!important;padding-bottom:15px!important;border-bottom:1px solid rgba(255,255,255,.07)!important;
 }
@@ -7133,6 +7135,8 @@ button{cursor:pointer!important}
     linear-gradient(180deg,#f8faff,#eef7ff)!important;
   padding:20px 16px!important;color:#18213a!important;
 }
+/* Quiz mode: bottom navigation stays behind the game screen. */
+#game-screen{z-index:10000!important;}
 .game-header{min-height:45px!important;padding-bottom:15px!important;border-bottom:1px solid rgba(67,90,155,.10)!important}
 .random-btn{
   width:42px!important;height:38px!important;border-radius:13px!important;
@@ -7235,6 +7239,13 @@ html[data-quiz-theme="colorful-fusion"] .card-title,
 html[data-quiz-theme="colorful-fusion"] .game-header,
 html[data-quiz-theme="colorful-fusion"] .q-text {
     text-shadow: none !important;
+}
+/* Colorful Fusion: theme names stay dark and readable on the light panel. */
+html[data-quiz-theme="colorful-fusion"] #settings-screen .theme-btn-label {
+    color:#26314b !important;
+}
+html[data-quiz-theme="colorful-fusion"] #settings-screen .theme-check {
+    color:#2f6f9f !important;
 }
 
 </template>
