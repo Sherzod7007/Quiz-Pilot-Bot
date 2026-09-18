@@ -12574,6 +12574,67 @@ html[data-quiz-theme="crystal-aurora"] .settings-footer-brand b{
 </template>
 
 <style id="quizpilot-active-theme"></style>
+<style id="quizpilot-wallpaper-css">
+/* ===== Quiz AI — User Wallpaper =====
+   Wallpaper changes only the app background; existing theme UI remains intact. */
+body,
+#game-screen{
+    background:var(--quizpilot-wallpaper, var(--aero-bg)) !important;
+    background-attachment:fixed !important;
+    background-size:cover !important;
+    background-position:center !important;
+    background-repeat:no-repeat !important;
+}
+#settings-screen .wallpaper-settings-box{margin-top:15px}
+#settings-screen .wallpaper-settings-title{
+    display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px;margin-bottom:4px;
+}
+#settings-screen .wallpaper-settings-desc{
+    margin-top:6px;font-size:12px;color:var(--text-hint,#8e8e93);line-height:1.45;
+}
+#settings-screen .wallpaper-grid{
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px;
+}
+#settings-screen .wallpaper-btn{
+    position:relative;width:100%;min-height:76px;padding:8px;border-radius:15px;
+    border:1px solid var(--aero-border,rgba(255,255,255,.2));
+    background:rgba(255,255,255,.07);color:var(--text-color,#fff);
+    display:flex;align-items:flex-end;text-align:left;cursor:pointer;overflow:hidden;
+    box-sizing:border-box;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;
+    -webkit-tap-highlight-color:transparent;
+}
+#settings-screen .wallpaper-btn:active{transform:scale(.985)}
+#settings-screen .wallpaper-btn.active{
+    border-color:#00d2ff;
+    box-shadow:0 0 0 1px rgba(0,210,255,.22),0 0 15px rgba(0,180,255,.20);
+}
+#settings-screen .wallpaper-preview{
+    position:absolute;inset:0;background-position:center;background-size:cover;background-repeat:no-repeat;
+}
+#settings-screen .wallpaper-preview::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(0,0,0,0) 25%,rgba(0,0,0,.68) 100%);
+}
+#settings-screen .wallpaper-label{
+    position:relative;z-index:1;padding:5px 5px 3px;
+    font-size:11px;line-height:1.2;font-weight:700;color:#fff;
+    text-shadow:0 1px 3px rgba(0,0,0,.85);
+}
+#settings-screen .wallpaper-check{
+    position:absolute;z-index:2;right:7px;top:6px;opacity:0;
+    width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,210,255,.88);color:#fff;font-size:13px;font-weight:800;
+    box-shadow:0 0 8px rgba(0,210,255,.55);
+    transition:opacity .16s ease,transform .16s ease;transform:scale(.8);
+}
+#settings-screen .wallpaper-btn.active .wallpaper-check{opacity:1;transform:scale(1)}
+@media(max-width:420px){
+    #settings-screen .wallpaper-grid{gap:8px}
+    #settings-screen .wallpaper-btn{min-height:70px;padding:7px}
+    #settings-screen .wallpaper-label{font-size:10.5px}
+}
+</style>
+
 
 <script>
 (function(){
@@ -12620,6 +12681,60 @@ html[data-quiz-theme="crystal-aurora"] .settings-footer-brand b{
 
     // First launch: Teacher Aero. Later launches: restore the user's own choice.
     applyTheme(getSavedTheme(), false);
+})();
+</script>
+
+<script>
+(function(){
+    const WALLPAPER_STORAGE_KEY = 'quizpilot_wallpaper_' + (
+        (window.Telegram && Telegram.WebApp && Telegram.WebApp.initDataUnsafe &&
+         Telegram.WebApp.initDataUnsafe.user && Telegram.WebApp.initDataUnsafe.user.id) || '99999'
+    );
+
+    const WALLPAPERS = {
+        default: 'linear-gradient(135deg,#1c2b3a 0%,#0d1520 48%,#080c14 100%)',
+        aurora: 'radial-gradient(circle at 20% 20%,rgba(0,220,255,.72),transparent 34%),radial-gradient(circle at 82% 72%,rgba(139,92,246,.72),transparent 36%),linear-gradient(135deg,#071b35,#14204d 48%,#260d3b)',
+        ocean: 'radial-gradient(circle at 18% 18%,rgba(34,211,238,.55),transparent 28%),radial-gradient(circle at 84% 78%,rgba(37,99,235,.68),transparent 38%),linear-gradient(135deg,#031b2d,#063d59 50%,#071b3a)',
+        sunset: 'radial-gradient(circle at 72% 25%,rgba(251,191,36,.58),transparent 25%),radial-gradient(circle at 28% 78%,rgba(244,63,94,.55),transparent 34%),linear-gradient(135deg,#27132d,#55203d 52%,#15152f)',
+        emerald: 'radial-gradient(circle at 22% 24%,rgba(52,211,153,.58),transparent 30%),radial-gradient(circle at 78% 74%,rgba(20,184,166,.58),transparent 34%),linear-gradient(135deg,#062b2a,#073f42 50%,#071d31)',
+        sakura: 'radial-gradient(circle at 20% 25%,rgba(244,114,182,.58),transparent 28%),radial-gradient(circle at 82% 72%,rgba(192,132,252,.58),transparent 36%),linear-gradient(135deg,#24132d,#452044 50%,#17162f)',
+        cyber: 'radial-gradient(circle at 78% 20%,rgba(0,210,255,.62),transparent 26%),radial-gradient(circle at 20% 78%,rgba(139,92,246,.66),transparent 30%),linear-gradient(135deg,#050817,#10183c 50%,#19062c)',
+        cosmic: 'radial-gradient(circle at 25% 25%,rgba(99,102,241,.62),transparent 26%),radial-gradient(circle at 78% 68%,rgba(217,70,239,.60),transparent 32%),linear-gradient(135deg,#08091d,#17123a 48%,#2a0b36)'
+    };
+    const WALLPAPER_IDS = Object.keys(WALLPAPERS);
+
+    function getSavedWallpaper(){
+        try {
+            const value = localStorage.getItem(WALLPAPER_STORAGE_KEY);
+            return WALLPAPER_IDS.includes(value) ? value : 'default';
+        } catch(e) {
+            return 'default';
+        }
+    }
+
+    function applyWallpaper(wallpaperId, persist){
+        if (!WALLPAPER_IDS.includes(wallpaperId)) wallpaperId = 'default';
+        const value = WALLPAPERS[wallpaperId];
+
+        document.documentElement.style.setProperty('--quizpilot-wallpaper', value);
+
+        document.querySelectorAll('#settings-screen .wallpaper-btn').forEach(function(btn){
+            const active = btn.getAttribute('data-wallpaper') === wallpaperId;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+
+        if (persist !== false) {
+            try { localStorage.setItem(WALLPAPER_STORAGE_KEY, wallpaperId); } catch(e) {}
+        }
+    }
+
+    window.changeWallpaper = function(wallpaperId){
+        applyWallpaper(wallpaperId, true);
+    };
+
+    // Restore the user's wallpaper on every launch.
+    applyWallpaper(getSavedWallpaper(), false);
 })();
 </script>
 
@@ -12768,6 +12883,45 @@ html[data-quiz-theme="crystal-aurora"] .settings-footer-brand b{
                 <button class="theme-btn" type="button" data-theme="crystal-aurora" onclick="changeTheme('crystal-aurora')" aria-pressed="false">
                     <span class="theme-preview" style="background:linear-gradient(135deg,#eaf2ff,#bdefff,#d8c9ff,#bff7e7)"></span>
                     <span class="theme-btn-label" data-lang="theme_crystal">Crystal Aurora</span><span class="theme-check">✓</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="settings-box wallpaper-settings-box">
+            <div class="wallpaper-settings-title">🖼️ <span data-lang="wallpaper_title">Oboy</span></div>
+            <div class="wallpaper-settings-desc" data-lang="wallpaper_desc">Ilova fonini o‘zingizga moslang.</div>
+            <div class="wallpaper-grid">
+                <button class="wallpaper-btn" type="button" data-wallpaper="default" onclick="changeWallpaper('default')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:linear-gradient(135deg,#1c2b3a 0%,#0d1520 48%,#080c14 100%)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_default">Standart</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="aurora" onclick="changeWallpaper('aurora')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 20% 20%,rgba(0,220,255,.72),transparent 34%),radial-gradient(circle at 82% 72%,rgba(139,92,246,.72),transparent 36%),linear-gradient(135deg,#071b35,#14204d 48%,#260d3b)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_aurora">Aurora Glow</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="ocean" onclick="changeWallpaper('ocean')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 18% 18%,rgba(34,211,238,.55),transparent 28%),radial-gradient(circle at 84% 78%,rgba(37,99,235,.68),transparent 38%),linear-gradient(135deg,#031b2d,#063d59 50%,#071b3a)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_ocean">Ocean Dream</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="sunset" onclick="changeWallpaper('sunset')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 72% 25%,rgba(251,191,36,.58),transparent 25%),radial-gradient(circle at 28% 78%,rgba(244,63,94,.55),transparent 34%),linear-gradient(135deg,#27132d,#55203d 52%,#15152f)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_sunset">Sunset Horizon</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="emerald" onclick="changeWallpaper('emerald')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 22% 24%,rgba(52,211,153,.58),transparent 30%),radial-gradient(circle at 78% 74%,rgba(20,184,166,.58),transparent 34%),linear-gradient(135deg,#062b2a,#073f42 50%,#071d31)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_emerald">Emerald Mist</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="sakura" onclick="changeWallpaper('sakura')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 20% 25%,rgba(244,114,182,.58),transparent 28%),radial-gradient(circle at 82% 72%,rgba(192,132,252,.58),transparent 36%),linear-gradient(135deg,#24132d,#452044 50%,#17162f)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_sakura">Sakura Dream</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="cyber" onclick="changeWallpaper('cyber')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 78% 20%,rgba(0,210,255,.62),transparent 26%),radial-gradient(circle at 20% 78%,rgba(139,92,246,.66),transparent 30%),linear-gradient(135deg,#050817,#10183c 50%,#19062c)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_cyber">Cyber Pulse</span><span class="wallpaper-check">✓</span>
+                </button>
+                <button class="wallpaper-btn" type="button" data-wallpaper="cosmic" onclick="changeWallpaper('cosmic')" aria-pressed="false">
+                    <span class="wallpaper-preview" style="background:radial-gradient(circle at 25% 25%,rgba(99,102,241,.62),transparent 26%),radial-gradient(circle at 78% 68%,rgba(217,70,239,.60),transparent 32%),linear-gradient(135deg,#08091d,#17123a 48%,#2a0b36)"></span>
+                    <span class="wallpaper-label" data-lang="wallpaper_cosmic">Cosmic Violet</span><span class="wallpaper-check">✓</span>
                 </button>
             </div>
         </div>
@@ -13026,7 +13180,7 @@ html[data-quiz-theme="crystal-aurora"] .settings-footer-brand b{
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🎁 Bepul limitlar", promo_6_desc: "Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
-                theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
+                theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Oboy", wallpaper_desc: "Ilova fonini o‘zingizga moslang.", wallpaper_default: "Standart", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
@@ -13056,7 +13210,7 @@ html[data-quiz-theme="crystal-aurora"] .settings-footer-brand b{
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", selected_file: "Выбрано: ", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🎁 Бесплатные лимиты", promo_6_desc: "Каждые 30 дней: 3 бесплатных теста, 3 публичных теста и 3 флеш-карточки.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
-                theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Обои", wallpaper_desc: "Настройте фон приложения под себя.", wallpaper_default: "Стандартные", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
@@ -13086,7 +13240,7 @@ html[data-quiz-theme="crystal-aurora"] .settings-footer-brand b{
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", selected_file: "Selected: ", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🎁 Free limits", promo_6_desc: "Every 30 days: 3 free quizzes, 3 public quizzes, and 3 flashcards.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
-                theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
+                theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Wallpaper", wallpaper_desc: "Customize the app background to your liking.", wallpaper_default: "Default", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
