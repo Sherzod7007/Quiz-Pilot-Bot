@@ -26,7 +26,7 @@ PAYMENT_GEMINI_API_KEYS = [
     k.strip() for k in os.getenv("PAYMENT_GEMINI_API_KEYS", "").split(",") if k.strip()
 ]
 PAYMENT_GEMINI_MODEL = os.getenv("PAYMENT_GEMINI_MODEL", "gemini-3.6-flash").strip()
-_fallback_env = os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "gemini-2.5-flash")
+_fallback_env = os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "")
 PAYMENT_GEMINI_FALLBACK_MODELS = [
     m.strip() for m in _fallback_env.split(",") if m.strip()
 ]
@@ -661,6 +661,46 @@ def _retry_scheduler():
         time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
+def _user_identity(user_id):
+    """Return Telegram display name and username for admin diagnostics.
+    Telegram lookup is best-effort; payment processing must never fail because
+    profile information could not be fetched.
+    """
+    name = "Mavjud emas"
+    username = "Mavjud emas"
+    try:
+        if _bot:
+            chat = _bot.get_chat(user_id)
+            first = (getattr(chat, "first_name", "") or "").strip()
+            last = (getattr(chat, "last_name", "") or "").strip()
+            name = " ".join(x for x in (first, last) if x) or name
+            raw_username = (getattr(chat, "username", "") or "").strip()
+            if raw_username:
+                username = f"@{raw_username}"
+    except Exception as exc:
+        logging.debug("P2P Telegram profile lookup failed | user=%s | %s", user_id, exc)
+    return name, username
+
+
+def _friendly_ai_error(exc):
+    """Translate common provider errors into a concise Uzbek admin explanation."""
+    text = str(exc or "")
+    upper = text.upper()
+    if "404" in upper or "NOT_FOUND" in upper:
+        return "Sozlangan AI modeli ushbu API hisobida mavjud emas."
+    if "429" in upper or "RESOURCE_EXHAUSTED" in upper:
+        return "AI so‘rovlar limiti vaqtincha oshib ketdi."
+    if "503" in upper or "UNAVAILABLE" in upper:
+        return "AI modeli vaqtincha band yoki xizmatda uzilish yuz berdi."
+    if "401" in upper or "403" in upper or "API KEY" in upper or "PERMISSION" in upper:
+        return "P2P AI API kaliti yoki unga berilgan ruxsat bilan muammo bor."
+    if "TIMEOUT" in upper or "DEADLINE_EXCEEDED" in upper:
+        return "AI tekshiruvi vaqt chegarasidan oshdi."
+    if isinstance(exc, (ValueError, json.JSONDecodeError)):
+        return "AI javobi kutilgan formatda qaytmadi."
+    return "AI tekshiruvida kutilmagan texnik xatolik yuz berdi."
+
+
 def _process(item):
     tx_id, user_id, file_id = item
     if not _claim(tx_id):
@@ -724,13 +764,21 @@ def _process(item):
             if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
             reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
             _mark_by_tx(tx_id, status="review", reason=reason_text)
+            display_name, username = _user_identity(user_id)
             _notify_admin(
-                f"⚠️ P2P TO'LOV — QO'SHIMCHA TEKSHIRUV KERAK\n\n"
-                f"TX: {tx_id}\nUser: {user_id}\n"
-                f"Kutilgan summa: {pay['tariff_price']}\nAI summa: {result.amount}\n"
-                f"Karta: {actual_card or 'yo-q'} / kutilgan oxiri: {expected_card or 'sozlanmagan'}\n"
-                f"Confidence: {result.confidence:.2f}\nTransaction ID: {result.transaction_id or 'yo-q'}\n"
-                f"Model: {used_model}\nSabab: {reason_text}"
+                f"⚠️ P2P TO‘LOV — QO‘SHIMCHA TEKSHIRUV KERAK\n\n"
+                f"🧾 TX: {tx_id}\n"
+                f"👤 Foydalanuvchi: {display_name}\n"
+                f"🔗 Username: {username}\n"
+                f"🆔 Telegram ID: {user_id}\n\n"
+                f"💰 Kutilgan summa: {pay['tariff_price']}\n"
+                f"🤖 AI aniqlagan summa: {result.amount}\n"
+                f"💳 Karta oxiri: {actual_card or 'aniqlanmadi'} / kutilgan: {expected_card or 'sozlanmagan'}\n"
+                f"📊 Confidence: {result.confidence:.2f}\n"
+                f"🔢 Transaction ID: {result.transaction_id or 'aniqlanmadi'}\n"
+                f"🤖 Model: {used_model}\n\n"
+                f"🔎 Tekshiruv sababi: {reason_text}\n\n"
+                f"ℹ️ Premium avtomatik faollashtirilmadi. Qo‘shimcha tekshiruv talab qilinadi."
             )
             return
 
@@ -773,7 +821,20 @@ def _process(item):
         else:
             delay = PAYMENT_OCR_RETRY_MAX_SECONDS
             _mark_by_tx(tx_id, status="error", reason=str(exc)[:1000], last_error=str(exc)[:2000], next_retry_at=_now() + delay)
-            _notify_admin(f"⚠️ P2P AI xatosi\nTX: {tx_id}\nUser: {user_id}\nAttempt: {attempts}\n{str(exc)[:800]}")
+            display_name, username = _user_identity(user_id)
+            friendly = _friendly_ai_error(exc)
+            _notify_admin(
+                f"⚠️ P2P TO‘LOV — AI TEKSHIRUVIDA XATOLIK\n\n"
+                f"🧾 TX: {tx_id}\n"
+                f"👤 Foydalanuvchi: {display_name}\n"
+                f"🔗 Username: {username}\n"
+                f"🆔 Telegram ID: {user_id}\n"
+                f"🔢 Urinish: {attempts}\n\n"
+                f"🔴 Muammo: {friendly}\n\n"
+                f"💳 Premium avtomatik faollashtirilmadi.\n"
+                f"🔄 Tizim holati: to‘lov saqlandi va belgilangan tartibda qayta tekshiriladi.\n\n"
+                f"🛠 Texnik xato: {str(exc)[:800]}"
+            )
 
 
 def _get_attempts(tx_id):
