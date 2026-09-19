@@ -12822,6 +12822,24 @@ html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !im
 </style>
 
 
+<style id="quizpilot-performance-lite-navigation-fix">
+/* ===== Yengil rejim: swipe va bo'lim ochilish effektlarini o'chirish ===== */
+html[data-performance-mode="lite"] * {
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+}
+html[data-performance-mode="lite"] .screen,
+html[data-performance-mode="lite"] .screen.active,
+html[data-performance-mode="lite"] .screen.swipe-enter-left,
+html[data-performance-mode="lite"] .screen.swipe-enter-right {
+    animation:none !important;
+    transition:none !important;
+    transform:none !important;
+    opacity:1 !important;
+    will-change:auto !important;
+}
+</style>
+
 <style id="quizpilot-performance-switch-final-fix">
 /* Final exact switch match: Yengil rejim = Vibratsiya/Ovoz */
 #settings-screen #performance-toggle{
@@ -14050,6 +14068,7 @@ html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !im
             area.addEventListener('touchend', e=>{
                 if(!aeroTouchActive || !e.changedTouches.length) return;
                 aeroTouchActive=false;
+                if (performanceLite) return;
                 const t=e.changedTouches[0], dx=t.clientX-aeroTouchStartX, dy=t.clientY-aeroTouchStartY;
                 if(Math.abs(dx)<12 || Math.abs(dx)<Math.abs(dy)*1.02) return;
                 const target=e.target;
