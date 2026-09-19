@@ -13915,7 +13915,7 @@ html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !im
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active','swipe-enter-left','swipe-enter-right'));
             document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
             nextScreen.classList.add('active');
-            if (swipeDirection === 'left' || swipeDirection === 'right') {
+            if (!performanceLite && (swipeDirection === 'left' || swipeDirection === 'right')) {
                 nextScreen.classList.add(swipeDirection === 'left' ? 'swipe-enter-left' : 'swipe-enter-right');
                 setTimeout(()=>nextScreen.classList.remove('swipe-enter-left','swipe-enter-right'),260);
             }
@@ -14023,6 +14023,7 @@ html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !im
         }
         // UX convention: swipe RIGHT = previous section, swipe LEFT = next section.
         function aeroSwipeTarget(deltaX){
+            if(performanceLite) return;
             const main=aeroCurrentMainScreen();
             if(!main) return;
             const screens=aeroVisibleMainScreens();
@@ -14043,11 +14044,13 @@ html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !im
             if(!area || area.dataset.aeroSwipe==='1') return;
             area.dataset.aeroSwipe='1';
             area.addEventListener('touchstart', e=>{
+                if(performanceLite) return;
                 if(e.touches.length!==1) return;
                 const t=e.touches[0];
                 aeroTouchStartX=t.clientX; aeroTouchStartY=t.clientY; aeroTouchActive=true;
             }, {passive:true});
             area.addEventListener('touchend', e=>{
+                if(performanceLite) { aeroTouchActive=false; return; }
                 if(!aeroTouchActive || !e.changedTouches.length) return;
                 aeroTouchActive=false;
                 const t=e.changedTouches[0], dx=t.clientX-aeroTouchStartX, dy=t.clientY-aeroTouchStartY;
