@@ -12735,6 +12735,12 @@ body,
 
     // Restore the user's wallpaper on every launch.
     applyWallpaper(getSavedWallpaper(), false);
+
+    // The wallpaper script runs before the settings buttons exist in the DOM.
+    // Re-apply after the page is built so the saved checkmark is restored too.
+    document.addEventListener('DOMContentLoaded', function(){
+        applyWallpaper(getSavedWallpaper(), false);
+    });
 })();
 </script>
 
