@@ -12821,6 +12821,77 @@ html[data-performance-mode="lite"] body,
 html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !important;}
 </style>
 
+
+<style id="quizpilot-performance-switch-final-fix">
+/* Final exact switch match: Yengil rejim = Vibratsiya/Ovoz */
+#settings-screen #performance-toggle{
+    position:relative !important;
+    flex:0 0 46px !important;
+    min-width:46px !important;
+    max-width:46px !important;
+    width:46px !important;
+    min-height:24px !important;
+    max-height:24px !important;
+    height:24px !important;
+    padding:0 !important;
+    margin:0 !important;
+    align-self:center !important;
+    border-radius:13px !important;
+    box-sizing:border-box !important;
+    border:1px solid rgba(170,205,235,0.28) !important;
+    background:linear-gradient(180deg,rgba(72,87,105,0.60),rgba(12,19,29,0.82)) !important;
+    color:transparent !important;
+    font-size:0 !important;
+    line-height:0 !important;
+    text-shadow:none !important;
+    display:inline-flex !important;
+    align-items:center !important;
+    justify-content:flex-start !important;
+    overflow:hidden !important;
+    box-shadow:inset 0 1px 1px rgba(255,255,255,0.18),inset 0 -1px 2px rgba(0,0,0,0.42),0 2px 7px rgba(0,0,0,0.32) !important;
+    -webkit-appearance:none !important;
+    appearance:none !important;
+    -webkit-tap-highlight-color:transparent !important;
+}
+#settings-screen #performance-toggle::before{
+    content:"" !important;
+    position:absolute !important;
+    left:2px !important;
+    top:2px !important;
+    width:18px !important;
+    height:18px !important;
+    min-width:18px !important;
+    min-height:18px !important;
+    max-width:18px !important;
+    max-height:18px !important;
+    padding:0 !important;
+    margin:0 !important;
+    border-radius:50% !important;
+    background:linear-gradient(145deg,#ffffff 0%,#e5edf5 58%,#c4d0dc 100%) !important;
+    border:1px solid rgba(255,255,255,0.72) !important;
+    box-shadow:0 1px 3px rgba(0,0,0,0.38),inset 0 1px 1px rgba(255,255,255,0.92) !important;
+    transform:translateX(0) !important;
+    transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s ease !important;
+    z-index:1 !important;
+    box-sizing:border-box !important;
+}
+#settings-screen #performance-toggle.active{
+    border-color:rgba(0,210,255,0.78) !important;
+    background:linear-gradient(180deg,rgba(0,170,245,0.88),rgba(0,91,160,0.88)) !important;
+    box-shadow:0 0 7px rgba(0,210,255,0.72),0 0 13px rgba(0,160,255,0.28),inset 0 1px 1px rgba(255,255,255,0.34) !important;
+}
+#settings-screen #performance-toggle.active::before{
+    transform:translateX(22px) !important;
+    box-shadow:0 1px 4px rgba(0,0,0,0.42),0 0 4px rgba(255,255,255,0.38),inset 0 1px 1px rgba(255,255,255,0.96) !important;
+}
+#settings-screen #performance-toggle:not(.active){
+    background:linear-gradient(180deg,rgba(67,80,97,0.56),rgba(11,17,26,0.84)) !important;
+    border-color:rgba(145,180,210,0.24) !important;
+    box-shadow:inset 0 1px 1px rgba(255,255,255,0.13),inset 0 -1px 2px rgba(0,0,0,0.42),0 2px 7px rgba(0,0,0,0.30) !important;
+}
+#settings-screen #performance-toggle:active{ transform:scale(.96) !important; }
+</style>
+
 </head>
 <body>
 
@@ -13012,7 +13083,7 @@ html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !im
         <div class="settings-box performance-settings-box">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
                 <span style="font-weight:bold; font-size:16px;" data-lang="performance_mode_title">⚡ Yengil rejim</span>
-                <button id="performance-toggle" class="lang-btn" type="button" onclick="togglePerformanceMode()" aria-pressed="false" style="min-width:44px !important; width:44px !important; height:24px !important; padding:0 !important; margin:0 !important; border-radius:12px !important;"></button>
+                <button id="performance-toggle" class="lang-btn" type="button" onclick="togglePerformanceMode()" aria-pressed="false"></button>
             </div>
             <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="performance_mode_desc">Kuchsizroq telefonlarda ilovani silliqroq ishlatish uchun grafik effektlarni yengillashtiradi.</div>
         </div>
