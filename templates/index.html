@@ -13907,7 +13907,7 @@ html[data-performance-mode="lite"] #loading-status .ai-loader-dots i:nth-child(3
                     if (key === 'premium_pro_desc') {
                         // Eslatma /«Tranzaksiya ID raqami boʻlmagan cheklar qabul qilinmaydi»./ Примечание /«Чеки без номера транзакции не принимаются»./ Note/«Checks without a transaction ID number will not be accepted»./ — barcha tillarda bir xil sariq uslubda
                         el.innerHTML = value.replace(
-                            /(Eslatma:|Примечание:|Note:«Checks without a transaction ID number will not be accepted».)/,
+                            /(Eslatma:|Примечание:|Note:)/,
                             '<span class="premium-note-highlight">$1</span>'
                         );
                     } else {
