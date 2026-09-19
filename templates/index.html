@@ -12744,6 +12744,83 @@ body,
 })();
 </script>
 
+
+<style id="quizpilot-performance-mode-css">
+/* ===== Quiz AI — Yengil rejim (kuchsizroq qurilmalar uchun) ===== */
+#performance-toggle{
+    position:relative !important; flex:0 0 44px !important; min-width:44px !important; width:44px !important; height:24px !important;
+    padding:0 !important; margin:0 !important; border-radius:12px !important;
+    border:1px solid rgba(170,205,235,.28) !important;
+    background:linear-gradient(180deg,rgba(72,87,105,.60),rgba(12,19,29,.82)) !important;
+    color:transparent !important; font-size:0 !important; line-height:0 !important; text-shadow:none !important;
+    display:inline-flex !important; align-items:center !important; justify-content:flex-start !important; box-sizing:border-box !important;
+}
+#performance-toggle::before{
+    content:""; position:absolute; left:1px; top:1px; width:18px; height:18px; border-radius:50%;
+    background:linear-gradient(145deg,#fff 0%,#e5edf5 58%,#c4d0dc 100%);
+    border:1px solid rgba(255,255,255,.72);
+    box-shadow:0 1px 3px rgba(0,0,0,.38),inset 0 1px 1px rgba(255,255,255,.92);
+    transform:translateX(0); transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s ease; z-index:1;
+}
+#performance-toggle.active{
+    border-color:rgba(0,210,255,.78) !important;
+    background:linear-gradient(180deg,rgba(0,170,245,.88),rgba(0,91,160,.88)) !important;
+    box-shadow:0 0 7px rgba(0,210,255,.72),0 0 13px rgba(0,160,255,.28),inset 0 1px 1px rgba(255,255,255,.34) !important;
+}
+#performance-toggle.active::before{
+    transform:translateX(20px) !important;
+    box-shadow:0 1px 4px rgba(0,0,0,.42),0 0 4px rgba(255,255,255,.38),inset 0 1px 1px rgba(255,255,255,.96);
+}
+#performance-toggle:not(.active){
+    background:linear-gradient(180deg,rgba(67,80,97,.56),rgba(11,17,26,.84)) !important;
+    border-color:rgba(145,180,210,.24) !important;
+    box-shadow:inset 0 1px 1px rgba(255,255,255,.13),inset 0 -1px 2px rgba(0,0,0,.42),0 2px 7px rgba(0,0,0,.30) !important;
+}
+#performance-toggle:active{transform:scale(.96)}
+
+/* Lite mode: reduce GPU-heavy blur, glow, shadows and transition work without changing app functions. */
+html[data-performance-mode="lite"] .glass-panel,
+html[data-performance-mode="lite"] .quiz-card,
+html[data-performance-mode="lite"] .flash-card,
+html[data-performance-mode="lite"] .upload-box,
+html[data-performance-mode="lite"] .input-title,
+html[data-performance-mode="lite"] .input-card,
+html[data-performance-mode="lite"] .input-text,
+html[data-performance-mode="lite"] .opt-btn,
+html[data-performance-mode="lite"] .explanation-box,
+html[data-performance-mode="lite"] .settings-box,
+html[data-performance-mode="lite"] .p-pro-header,
+html[data-performance-mode="lite"] .tariff-card,
+html[data-performance-mode="lite"] .bottom-nav,
+html[data-performance-mode="lite"] .wallpaper-settings-box{
+    backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+}
+html[data-performance-mode="lite"] .glass-panel,
+html[data-performance-mode="lite"] .quiz-card,
+html[data-performance-mode="lite"] .flash-card,
+html[data-performance-mode="lite"] .settings-box,
+html[data-performance-mode="lite"] .tariff-card{
+    box-shadow:0 3px 10px rgba(0,0,0,.18) !important;
+}
+html[data-performance-mode="lite"] .screen.swipe-enter-left,
+html[data-performance-mode="lite"] .screen.swipe-enter-right{animation:none !important;}
+html[data-performance-mode="lite"] .create-promo-slide{transition:opacity .12s ease,transform .12s ease !important;}
+html[data-performance-mode="lite"] .ai-loader-orbit,
+html[data-performance-mode="lite"] .ai-loader-orbit::before,
+html[data-performance-mode="lite"] .ai-loader-orbit::after,
+html[data-performance-mode="lite"] .ai-loader-core,
+html[data-performance-mode="lite"] .ai-loader-progress span,
+html[data-performance-mode="lite"] .ai-loader-dots i,
+html[data-performance-mode="lite"] .news-badge.has-new{animation:none !important;}
+html[data-performance-mode="lite"] .nav-item,
+html[data-performance-mode="lite"] .tab,
+html[data-performance-mode="lite"] .btn-circle,
+html[data-performance-mode="lite"] .btn-delete,
+html[data-performance-mode="lite"] .btn-public{transition-duration:.08s !important;}
+html[data-performance-mode="lite"] body,
+html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !important;}
+</style>
+
 </head>
 <body>
 
@@ -12930,6 +13007,14 @@ body,
                     <span class="wallpaper-label" data-lang="wallpaper_cosmic">Cosmic Violet</span><span class="wallpaper-check">✓</span>
                 </button>
             </div>
+        </div>
+
+        <div class="settings-box performance-settings-box">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                <span style="font-weight:bold; font-size:16px;" data-lang="performance_mode_title">⚡ Yengil rejim</span>
+                <button id="performance-toggle" class="lang-btn" type="button" onclick="togglePerformanceMode()" aria-pressed="false"></button>
+            </div>
+            <div style="margin-top:6px; font-size:12px; color:#8e8e93;" data-lang="performance_mode_desc">Kuchsizroq telefonlarda ilovani silliqroq ishlatish uchun grafik effektlarni yengillashtiradi.</div>
         </div>
 
             <div class="settings-box">
@@ -13186,7 +13271,7 @@ body,
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🎁 Bepul limitlar", promo_6_desc: "Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
-                theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Oboy", wallpaper_desc: "Ilova fonini o‘zingizga moslang.", wallpaper_default: "Standart", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
+                theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Oboy", wallpaper_desc: "Ilova fonini o‘zingizga moslang.", wallpaper_default: "Standart", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Yengil rejim", performance_mode_desc: "Kuchsizroq telefonlarda ilovani silliqroq ishlatish uchun grafik effektlarni yengillashtiradi.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
@@ -13216,7 +13301,7 @@ body,
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", selected_file: "Выбрано: ", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🎁 Бесплатные лимиты", promo_6_desc: "Каждые 30 дней: 3 бесплатных теста, 3 публичных теста и 3 флеш-карточки.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
-                theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Обои", wallpaper_desc: "Настройте фон приложения под себя.", wallpaper_default: "Стандартные", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
+                theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Обои", wallpaper_desc: "Настройте фон приложения под себя.", wallpaper_default: "Стандартные", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Лёгкий режим", performance_mode_desc: "Уменьшает графические эффекты для более плавной работы на слабых телефонах.", performance_mode_on: "ВКЛ", performance_mode_off: "ВЫКЛ", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
@@ -13246,7 +13331,7 @@ body,
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", selected_file: "Selected: ", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🎁 Free limits", promo_6_desc: "Every 30 days: 3 free quizzes, 3 public quizzes, and 3 flashcards.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
-                theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Wallpaper", wallpaper_desc: "Customize the app background to your liking.", wallpaper_default: "Default", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
+                theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Wallpaper", wallpaper_desc: "Customize the app background to your liking.", wallpaper_default: "Default", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Lite Mode", performance_mode_desc: "Reduces graphic effects for smoother performance on less powerful phones.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
@@ -13357,6 +13442,38 @@ body,
                 setTimeout(() => { tg.close(); }, 200);
             });
         }
+
+        // ===== Yengil rejim — kuchsizroq qurilmalar uchun =====
+        const PERFORMANCE_STORAGE_KEY = `quizpilot_performance_${userId}`;
+        let performanceLite = (() => {
+            try { return localStorage.getItem(PERFORMANCE_STORAGE_KEY) === 'lite'; }
+            catch(e) { return false; }
+        })();
+
+        function updatePerformanceToggle() {
+            const btn = document.getElementById('performance-toggle');
+            if (!btn) return;
+            btn.innerText = performanceLite
+                ? (langPack[currentLang].performance_mode_on || 'ON')
+                : (langPack[currentLang].performance_mode_off || 'OFF');
+            btn.classList.toggle('active', performanceLite);
+            btn.setAttribute('aria-pressed', performanceLite ? 'true' : 'false');
+        }
+
+        function applyPerformanceMode(persist) {
+            document.documentElement.setAttribute('data-performance-mode', performanceLite ? 'lite' : 'standard');
+            if (persist !== false) {
+                try { localStorage.setItem(PERFORMANCE_STORAGE_KEY, performanceLite ? 'lite' : 'standard'); } catch(e) {}
+            }
+            updatePerformanceToggle();
+        }
+
+        function togglePerformanceMode() {
+            performanceLite = !performanceLite;
+            applyPerformanceMode(true);
+        }
+
+        applyPerformanceMode(false);
 
         // ===== Ovoz sozlamasi =====
         const SOUND_STORAGE_KEY = `quizpilot_sound_${userId}`;
@@ -13657,6 +13774,7 @@ body,
             });
             updateVibrationToggle();
             updateSoundToggle();
+            updatePerformanceToggle();
             document.querySelectorAll('[data-placeholder]').forEach(el => {
                 const key = el.getAttribute('data-placeholder');
                 if (langPack[currentLang][key]) el.placeholder = langPack[currentLang][key];
