@@ -12910,6 +12910,60 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 #settings-screen #performance-toggle:active{ transform:scale(.96) !important; }
 </style>
 
+
+
+<style id="quizpilot-performance-lite-ai-loader-final">
+/* Yengil rejim: faqat AI loader yengillashtiriladi. Qolgan qismlar o'zgarmaydi. */
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit {
+    width:34px !important;
+    height:34px !important;
+    margin:4px auto 10px !important;
+    border:2px solid rgba(0,210,255,.22) !important;
+    box-shadow:none !important;
+    animation:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit::before,
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit::after {
+    inset:7px !important;
+    border:2px solid transparent !important;
+    border-top-color:#00d2ff !important;
+    border-right-color:rgba(0,210,255,.38) !important;
+    filter:none !important;
+    animation:quizLiteLoaderSpin .9s linear infinite !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit::after {
+    display:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-core {
+    inset:8px !important;
+    background:none !important;
+    text-shadow:none !important;
+    font-size:13px !important;
+    animation:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-progress {
+    height:3px !important;
+    margin:10px auto 7px !important;
+    box-shadow:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-progress span {
+    background:#00d2ff !important;
+    box-shadow:none !important;
+    animation:quizLiteLoaderProgress 1.35s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-dots i {
+    width:4px !important;
+    height:4px !important;
+    background:#00d2ff !important;
+    box-shadow:none !important;
+    animation:quizLiteLoaderDot 1s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-dots i:nth-child(2){animation-delay:.14s !important;}
+html[data-performance-mode="lite"] #loading-status .ai-loader-dots i:nth-child(3){animation-delay:.28s !important;}
+@keyframes quizLiteLoaderSpin { to { transform:rotate(360deg); } }
+@keyframes quizLiteLoaderProgress { 0% { transform:translateX(-120%); } 100% { transform:translateX(320%); } }
+@keyframes quizLiteLoaderDot { 0%,60%,100% { transform:translateY(0); opacity:.35; } 30% { transform:translateY(-3px); opacity:1; } }
+</style>
 </head>
 <body>
 
