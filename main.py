@@ -826,11 +826,10 @@ def create_news_api(news_data: NewsCreateSchema):
 
 @app.get("/api/news")
 def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
-    # Foydalanuvchining saqlangan ilova tili News uchun ustuvor.
-    if user_id is not None:
-        lang = get_user_lang(user_id)
-    else:
-        lang = lang if lang in ("uz", "ru", "en") else "uz"
+    # News uchun frontend yuborgan til ustuvor.
+    # Noto'g'ri yoki bo'sh til kelsa, foydalanuvchining saqlangan tili olinadi.
+    if lang not in ("uz", "ru", "en"):
+        lang = get_user_lang(user_id) if user_id is not None else "uz"
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
