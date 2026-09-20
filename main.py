@@ -219,7 +219,7 @@ MESSAGES = {
             "🌍 O'zbek, Русский va English tillari.\n"
             "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
-            "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring. «Tranzaksiya ID raqami boʻlmagan cheklar qabul qilinmaydi».\n\n"
+            "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz AI imkoniyatlaridan foydalaning!"
         ),
@@ -269,7 +269,7 @@ MESSAGES = {
             "🌍 Узбекский, русский и английский языки.\n"
             "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
-            "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота. «Чеки без номера транзакции не принимаются».\n\n"
+            "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz AI!"
         ),
@@ -318,7 +318,7 @@ MESSAGES = {
             "🌍 Uzbek, Russian and English languages.\n"
             "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
-            "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot. «Checks without a transaction ID number will not be accepted».\n\n"
+            "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Tap the button below and start using Quiz AI!"
         ),
@@ -826,10 +826,11 @@ def create_news_api(news_data: NewsCreateSchema):
 
 @app.get("/api/news")
 def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
-    # News uchun frontend yuborgan til ustuvor.
-    # Noto'g'ri yoki bo'sh til kelsa, foydalanuvchining saqlangan tili olinadi.
-    if lang not in ("uz", "ru", "en"):
-        lang = get_user_lang(user_id) if user_id is not None else "uz"
+    # Foydalanuvchining saqlangan ilova tili News uchun ustuvor.
+    if user_id is not None:
+        lang = get_user_lang(user_id)
+    else:
+        lang = lang if lang in ("uz", "ru", "en") else "uz"
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
