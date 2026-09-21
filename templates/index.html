@@ -13287,6 +13287,31 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
         </div>
     </div>
 
+    <div id="quiz-file-create-modal" class="quiz-file-create-overlay" aria-hidden="true">
+        <div class="quiz-file-create-card">
+            <div class="quiz-file-create-head">
+                <div><div id="quiz-file-create-icon" class="quiz-file-create-icon">📄</div><div id="quiz-file-create-title" class="quiz-file-create-title">Fayl tahlili</div></div>
+                <button type="button" class="quiz-file-create-close" onclick="closeQuizFileCreateModal()">✕</button>
+            </div>
+            <div class="quiz-file-create-file" id="quiz-file-create-file">Tarix.pdf</div>
+            <div class="quiz-file-create-count" id="quiz-file-create-count">✅ 200 ta savol aniqlandi</div>
+            <div class="quiz-file-create-label" id="quiz-file-create-choice-label">Test yaratish usuli</div>
+            <div class="quiz-file-create-modes">
+                <button type="button" id="quiz-file-mode-single" class="quiz-file-mode active" onclick="setQuizFileCreationMode('single')">📘 <span id="quiz-file-mode-single-text">Yagona test</span></button>
+                <button type="button" id="quiz-file-mode-groups" class="quiz-file-mode" onclick="setQuizFileCreationMode('groups')">📚 <span id="quiz-file-mode-groups-text">Bir necha guruh</span></button>
+            </div>
+            <div id="quiz-file-group-options" class="quiz-file-group-options" style="display:none;">
+                <button type="button" class="quiz-file-size-btn" data-size="20" onclick="setQuizGroupSize(20)">20</button>
+                <button type="button" class="quiz-file-size-btn active" data-size="30" onclick="setQuizGroupSize(30)">30</button>
+                <button type="button" class="quiz-file-size-btn" data-size="40" onclick="setQuizGroupSize(40)">40</button>
+                <span id="quiz-file-size-caption">ta savoldan</span>
+            </div>
+            <div id="quiz-file-create-summary" class="quiz-file-create-summary"></div>
+            <button type="button" id="quiz-file-ai-create-btn" class="quiz-file-ai-btn" onclick="createQuizFromFileChoice()">✨ AI yordamida test yaratish</button>
+            <div id="quiz-file-create-status" class="quiz-file-create-status" style="display:none;"></div>
+        </div>
+    </div>
+
     <div id="game-screen">
         <div class="game-header">
             <span id="game-title">Test</span>
@@ -13360,7 +13385,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
-                btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🎁 Bepul limitlar", promo_6_desc: "Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
+                btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🎁 Bepul limitlar", promo_6_desc: "Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...", quiz_file_title: "Fayl tahlili", quiz_file_choice: "Test yaratish usuli", quiz_file_single: "Yagona test", quiz_file_groups: "Bir necha guruh", quiz_file_questions_found: "{count} ta savol aniqlandi", quiz_file_questions_approx: "Taxminan {count} ta savol aniqlandi", quiz_file_group_size_caption: "ta savoldan", quiz_file_summary_single: "{count} ta savol → 1 ta test", quiz_file_summary_groups: "{count} ta savol → {groups} ta test", quiz_file_ai_create: "✨ AI yordamida test yaratish", quiz_file_creating: "🤖 Testlar tayyorlanmoqda...", quiz_file_created: "🎉 Testlar muvaffaqiyatli yaratildi!", quiz_file_close: "Yopish", quiz_file_questions_not_detected: "Fayldagi savollarni avtomatik aniqlab bo‘lmadi.", quiz_file_failed: "Test yaratishda xatolik yuz berdi. Qayta urinib ko‘ring.",
                 theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Oboy", wallpaper_desc: "Ilova fonini o‘zingizga moslang.", wallpaper_default: "Standart", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Yengil rejim", performance_mode_desc: "Kuchsizroq telefonlarda ilovani silliqroq ishlatish uchun grafik effektlarni yengillashtiradi.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
@@ -13390,7 +13415,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.", student_active_tests: "🚀 Активные тесты", student_no_active_tests: "Активных тестов пока нет. Когда учитель запустит тест, он появится здесь.", student_test_start: "🚀 Начать тест", student_test_info: "📝 {total} вопросов · ⏱️ {duration} мин.", student_test_remaining: "Осталось: {time}", student_new_test: "🔔 Новый тест начался", student_session_expired: "⏰ Эта сессия теста завершена.", student_session_access: "Чтобы войти в групповой тест, сначала присоединитесь к группе.", student_active_students: "Активные ученики", student_completed_students: "Завершили", student_time_up: "⏰ Время вышло.", student_test_completed: "✅ Тест завершён", student_test_result: "Ваш результат: {score}/{total} ({percent}%)",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", selected_file: "Выбрано: ", or_text: "или введите текст:",
-                btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🎁 Бесплатные лимиты", promo_6_desc: "Каждые 30 дней: 3 бесплатных теста, 3 публичных теста и 3 флеш-карточки.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
+                btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🎁 Бесплатные лимиты", promo_6_desc: "Каждые 30 дней: 3 бесплатных теста, 3 публичных теста и 3 флеш-карточки.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...", quiz_file_title: "Анализ файла", quiz_file_choice: "Способ создания теста", quiz_file_single: "Один тест", quiz_file_groups: "Несколько групп", quiz_file_questions_found: "Обнаружено вопросов: {count}", quiz_file_questions_approx: "Обнаружено примерно {count} вопросов", quiz_file_group_size_caption: "вопросов в тесте", quiz_file_summary_single: "{count} вопросов → 1 тест", quiz_file_summary_groups: "{count} вопросов → {groups} тестов", quiz_file_ai_create: "✨ Создать тест с помощью ИИ", quiz_file_creating: "🤖 Тесты создаются...", quiz_file_created: "🎉 Тесты успешно созданы!", quiz_file_close: "Закрыть", quiz_file_questions_not_detected: "Не удалось автоматически определить вопросы в файле.", quiz_file_failed: "Произошла ошибка при создании тестов. Попробуйте ещё раз.",
                 theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Обои", wallpaper_desc: "Настройте фон приложения под себя.", wallpaper_default: "Стандартные", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Лёгкий режим", performance_mode_desc: "Уменьшает графические эффекты для более плавной работы на слабых телефонах.", performance_mode_on: "ВКЛ", performance_mode_off: "ВЫКЛ", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
@@ -13420,7 +13445,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.", student_active_tests: "🚀 Active tests", student_no_active_tests: "No active tests yet. It will appear here when the teacher starts a test.", student_test_start: "🚀 Start test", student_test_info: "📝 {total} questions · ⏱️ {duration} min", student_test_remaining: "Time left: {time}", student_new_test: "🔔 New test started", student_session_expired: "⏰ This test session has ended.", student_session_access: "Join the group first to enter this group test.", student_active_students: "Active students", student_completed_students: "Completed", student_time_up: "⏰ Time is up.", student_test_completed: "✅ Test completed", student_test_result: "Your result: {score}/{total} ({percent}%)",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", selected_file: "Selected: ", or_text: "or enter text:",
-                btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🎁 Free limits", promo_6_desc: "Every 30 days: 3 free quizzes, 3 public quizzes, and 3 flashcards.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
+                btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🎁 Free limits", promo_6_desc: "Every 30 days: 3 free quizzes, 3 public quizzes, and 3 flashcards.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...", quiz_file_title: "File analysis", quiz_file_choice: "Test creation method", quiz_file_single: "Single test", quiz_file_groups: "Multiple groups", quiz_file_questions_found: "{count} questions detected", quiz_file_questions_approx: "Approximately {count} questions detected", quiz_file_group_size_caption: "questions per test", quiz_file_summary_single: "{count} questions → 1 test", quiz_file_summary_groups: "{count} questions → {groups} tests", quiz_file_ai_create: "✨ Create tests with AI", quiz_file_creating: "🤖 Tests are being created...", quiz_file_created: "🎉 Tests created successfully!", quiz_file_close: "Close", quiz_file_questions_not_detected: "Questions could not be detected automatically in the file.", quiz_file_failed: "An error occurred while creating the tests. Please try again.",
                 theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Wallpaper", wallpaper_desc: "Customize the app background to your liking.", wallpaper_default: "Default", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Lite Mode", performance_mode_desc: "Reduces graphic effects for smoother performance on less powerful phones.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
@@ -13983,6 +14008,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 localStorage.setItem(LANGUAGE_STORAGE_KEY, currentLang);
             } catch (_) {}
             applyLocalization();
+            refreshQuizFileCreateModalLanguage();
             try {
                 await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
             } catch(e){}
@@ -14021,9 +14047,181 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
             }
         }
 
+        let quizFileCreationState = { token: null, filename: '', title: '', questionCount: 0, mode: 'single', groupSize: 30, busy: false };
+
+        function refreshQuizFileCreateModalLanguage() {
+            const p = langPack[currentLang];
+            const title = document.getElementById('quiz-file-create-title');
+            const choice = document.getElementById('quiz-file-create-choice-label');
+            const single = document.getElementById('quiz-file-mode-single-text');
+            const groups = document.getElementById('quiz-file-mode-groups-text');
+            const caption = document.getElementById('quiz-file-size-caption');
+            const ai = document.getElementById('quiz-file-ai-create-btn');
+            const close = document.querySelector('#quiz-file-create-modal .quiz-file-create-close');
+            if(title) title.innerText = p.quiz_file_title || 'File analysis';
+            if(choice) choice.innerText = p.quiz_file_choice || 'Test creation method';
+            if(single) single.innerText = p.quiz_file_single || 'Single test';
+            if(groups) groups.innerText = p.quiz_file_groups || 'Multiple groups';
+            if(caption) caption.innerText = p.quiz_file_group_size_caption || 'questions per test';
+            if(ai && !quizFileCreationState.busy) ai.innerText = p.quiz_file_ai_create || '✨ Create tests with AI';
+            if(close) close.setAttribute('aria-label', p.quiz_file_close || 'Close');
+            updateQuizFileCreateSummary();
+        }
+
+        function updateQuizFileCreateSummary() {
+            const p = langPack[currentLang];
+            const el = document.getElementById('quiz-file-create-summary');
+            const countEl = document.getElementById('quiz-file-create-count');
+            if(!el) return;
+            const count = Number(quizFileCreationState.questionCount || 0);
+            if(countEl) countEl.innerText = `✅ ${(p.quiz_file_questions_found || '{count} questions detected').replace('{count}', count)}`;
+            if(quizFileCreationState.mode === 'groups') {
+                const groups = Math.ceil(count / quizFileCreationState.groupSize);
+                el.innerText = (p.quiz_file_summary_groups || '{count} questions → {groups} tests').replace('{count}', count).replace('{groups}', groups);
+            } else {
+                el.innerText = (p.quiz_file_summary_single || '{count} questions → 1 test').replace('{count}', count);
+            }
+        }
+
+        function setQuizFileCreationMode(mode) {
+            if(quizFileCreationState.busy) return;
+            quizFileCreationState.mode = mode === 'groups' ? 'groups' : 'single';
+            const single = document.getElementById('quiz-file-mode-single');
+            const groups = document.getElementById('quiz-file-mode-groups');
+            const opts = document.getElementById('quiz-file-group-options');
+            if(single) single.classList.toggle('active', quizFileCreationState.mode === 'single');
+            if(groups) groups.classList.toggle('active', quizFileCreationState.mode === 'groups');
+            if(opts) opts.style.display = quizFileCreationState.mode === 'groups' ? 'grid' : 'none';
+            updateQuizFileCreateSummary();
+        }
+
+        function setQuizGroupSize(size) {
+            if(quizFileCreationState.busy || ![20,30,40].includes(Number(size))) return;
+            quizFileCreationState.groupSize = Number(size);
+            document.querySelectorAll('#quiz-file-group-options .quiz-file-size-btn').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.size) === quizFileCreationState.groupSize));
+            updateQuizFileCreateSummary();
+        }
+
+        function openQuizFileCreateModal() {
+            const modal = document.getElementById('quiz-file-create-modal');
+            if(!modal) return;
+            modal.style.display = 'flex';
+            modal.setAttribute('aria-hidden','false');
+            refreshQuizFileCreateModalLanguage();
+        }
+
+        function closeQuizFileCreateModal(force = false) {
+            if(quizFileCreationState.busy && !force) return;
+            const modal = document.getElementById('quiz-file-create-modal');
+            if(modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden','true'); }
+            if(!quizFileCreationState.busy) {
+                const input = document.getElementById('file-input');
+                if(input) input.value = '';
+                const genBtn = document.getElementById('generate-btn');
+                if(genBtn) genBtn.style.display = 'block';
+            }
+        }
+
+        async function analyzeUploadedFile(file) {
+            if(!file) return;
+            const genBtn = document.getElementById('generate-btn');
+            const status = document.getElementById('quiz-file-create-status');
+            const aiBtn = document.getElementById('quiz-file-ai-create-btn');
+            if(file.size > 10 * 1024 * 1024) {
+                const alerts = { uz:'Fayl hajmi 10 MB dan oshmasligi kerak!', ru:'Размер файла не должен превышать 10 МБ!', en:'File size must not exceed 10 MB!' };
+                showAppAlert('⚠️', alerts[currentLang] || alerts.uz);
+                document.getElementById('file-input').value = '';
+                return;
+            }
+            quizFileCreationState = { token:null, filename:file.name, title:file.name.replace(/\.[^.]+$/,''), questionCount:0, mode:'single', groupSize:30, busy:false };
+            document.getElementById('quiz-file-create-file').innerText = file.name;
+            if(status) { status.style.display='block'; status.innerText = langPack[currentLang].loading_status || 'Analyzing...'; }
+            if(aiBtn) aiBtn.disabled = true;
+            if(genBtn) genBtn.style.display = 'none';
+            openQuizFileCreateModal();
+            try {
+                const fd = new FormData();
+                fd.append('user_id', userId);
+                fd.append('file', file);
+                const response = await fetch(BASE_URL + '/api/analyze-quiz-file', { method:'POST', body:fd });
+                const data = await response.json();
+                if(!data || data.status !== 'ok') {
+                    closeQuizFileCreateModal();
+                    showAppAlert('❌', data?.message || langPack[currentLang].quiz_file_questions_not_detected);
+                    document.getElementById('file-input').value = '';
+                    if(genBtn) genBtn.style.display = 'block';
+                    return;
+                }
+                quizFileCreationState.token = data.file_token;
+                quizFileCreationState.filename = data.filename || file.name;
+                quizFileCreationState.title = data.title || quizFileCreationState.title;
+                quizFileCreationState.questionCount = Number(data.question_count || 0);
+                document.getElementById('quiz-file-create-file').innerText = quizFileCreationState.filename;
+                if(status) status.style.display='none';
+                if(aiBtn) aiBtn.disabled = false;
+                setQuizFileCreationMode('single');
+            } catch(e) {
+                closeQuizFileCreateModal();
+                showAppAlert('❌', langPack[currentLang].alert_system_err);
+                document.getElementById('file-input').value = '';
+                if(genBtn) genBtn.style.display = 'block';
+            }
+        }
+
+        async function createQuizFromFileChoice() {
+            if(quizFileCreationState.busy || !quizFileCreationState.token) return;
+            quizFileCreationState.busy = true;
+            const btn = document.getElementById('quiz-file-ai-create-btn');
+            const status = document.getElementById('quiz-file-create-status');
+            const closeBtn = document.querySelector('#quiz-file-create-modal .quiz-file-create-close');
+            if(btn) { btn.disabled = true; btn.innerText = langPack[currentLang].quiz_file_creating || '🤖 Tests are being created...'; }
+            if(closeBtn) closeBtn.disabled = true;
+            if(status) { status.style.display='block'; status.innerText = langPack[currentLang].quiz_file_creating || '🤖 Tests are being created...'; }
+            try {
+                const fd = new FormData();
+                fd.append('user_id', userId);
+                fd.append('file_token', quizFileCreationState.token);
+                fd.append('mode', quizFileCreationState.mode);
+                fd.append('group_size', String(quizFileCreationState.groupSize));
+                const customTitle = document.getElementById('quiz-title-input').value.trim();
+                if(customTitle) fd.append('quiz_title', customTitle);
+                const response = await fetch(BASE_URL + '/api/create-quiz-from-file-groups', { method:'POST', body:fd });
+                const data = await response.json();
+                if(data && data.status === 'ok') {
+                    if(status) status.innerText = langPack[currentLang].quiz_file_created || '🎉 Tests created successfully!';
+                    quizFileCreationState.busy = false;
+                    setTimeout(() => {
+                        closeQuizFileCreateModal();
+                        document.getElementById('text-input').value='';
+                        document.getElementById('quiz-title-input').value='';
+                        document.getElementById('file-input').value='';
+                        document.getElementById('upload-text').innerText=langPack[currentLang].upload_box;
+                        document.getElementById('generate-btn').style.display='block';
+                        loadQuizzes();
+                        switchScreen('library');
+                    }, 450);
+                } else if(data && data.error_code === 'free_limit') {
+                    quizFileCreationState.busy = false;
+                    closeQuizFileCreateModal();
+                    showAppAlert('⚠️', langPack[currentLang].alert_limit_over, () => switchScreen('premium'));
+                } else {
+                    if(status) status.innerText = data?.message || langPack[currentLang].quiz_file_failed;
+                    quizFileCreationState.busy = false;
+                    if(btn) { btn.disabled=false; btn.innerText=langPack[currentLang].quiz_file_ai_create; }
+                    if(closeBtn) closeBtn.disabled=false;
+                }
+            } catch(e) {
+                if(status) status.innerText = langPack[currentLang].quiz_file_failed || langPack[currentLang].alert_system_err;
+                quizFileCreationState.busy = false;
+                if(btn) { btn.disabled=false; btn.innerText=langPack[currentLang].quiz_file_ai_create; }
+                if(closeBtn) closeBtn.disabled=false;
+            }
+        }
+
         function fileSelected(input) {
             if(input.files && input.files.length > 0) {
                 document.getElementById('upload-text').innerText = langPack[currentLang].selected_file + input.files[0].name;
+                analyzeUploadedFile(input.files[0]);
             }
         }
 
@@ -15125,3 +15323,9 @@ window.onload = function() {
     </script>
 </body>
 </html>
+
+<style id="quizpilot-professional-file-create-ui">
+.quiz-file-create-overlay{display:none;position:fixed;inset:0;z-index:30000;align-items:center;justify-content:center;padding:18px;box-sizing:border-box;background:rgba(0,0,0,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+.quiz-file-create-card{width:min(440px,100%);box-sizing:border-box;padding:18px;border-radius:22px;background:linear-gradient(145deg,rgba(20,34,49,.98),rgba(5,12,21,.99));border:1px solid rgba(140,190,225,.30);border-top-color:rgba(255,255,255,.30);box-shadow:0 25px 70px rgba(0,0,0,.65),inset 0 1px 0 rgba(255,255,255,.10);color:#fff}
+.quiz-file-create-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.quiz-file-create-icon{font-size:28px;line-height:1;margin-bottom:5px}.quiz-file-create-title{font-size:18px;font-weight:800}.quiz-file-create-close{width:34px;height:34px;border-radius:10px;border:1px solid rgba(180,210,235,.25);background:rgba(255,255,255,.08);color:#dbeeff;font-size:16px;cursor:pointer}.quiz-file-create-file{margin-top:12px;padding:9px 11px;border-radius:10px;background:rgba(0,0,0,.20);border:1px solid rgba(180,210,235,.16);font-size:12px;color:#b9cce0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quiz-file-create-count{margin-top:12px;font-size:16px;font-weight:800;color:#63e6a5;text-align:center}.quiz-file-create-label{margin-top:17px;margin-bottom:8px;font-size:12px;color:#9fb3c7;font-weight:700}.quiz-file-create-modes{display:grid;grid-template-columns:1fr 1fr;gap:9px}.quiz-file-mode{min-height:52px;padding:9px;border-radius:13px;border:1px solid rgba(170,205,230,.25);background:rgba(255,255,255,.06);color:#eaf6ff;font-size:13px;font-weight:800;cursor:pointer;transition:.16s ease}.quiz-file-mode.active{border-color:#00d2ff;background:linear-gradient(145deg,rgba(0,153,255,.25),rgba(0,65,110,.38));box-shadow:0 0 12px rgba(0,210,255,.18),inset 0 1px 0 rgba(255,255,255,.14)}.quiz-file-group-options{grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;align-items:center}.quiz-file-size-btn{min-height:40px;border-radius:10px;border:1px solid rgba(170,205,230,.22);background:rgba(255,255,255,.05);color:#dff4ff;font-weight:800;cursor:pointer}.quiz-file-size-btn.active{border-color:#00d2ff;background:rgba(0,153,255,.20);color:#fff;box-shadow:0 0 9px rgba(0,210,255,.14)}#quiz-file-size-caption{grid-column:1/-1;text-align:center;color:#91a8bd;font-size:11px}.quiz-file-create-summary{margin-top:12px;text-align:center;color:#c5d8e9;font-size:12px;min-height:17px}.quiz-file-ai-btn{width:100%;min-height:48px;margin-top:13px;border-radius:13px;border:1px solid #00d2ff;background:linear-gradient(180deg,#079fe8,#075b96);color:#fff;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 0 13px rgba(0,210,255,.16),inset 0 1px 0 rgba(255,255,255,.20)}.quiz-file-ai-btn:disabled{opacity:.55;cursor:default}.quiz-file-create-status{margin-top:10px;text-align:center;color:#9edfff;font-size:12px;line-height:1.4}html[data-performance-mode="lite"] .quiz-file-create-overlay{backdrop-filter:none;-webkit-backdrop-filter:none}html[data-performance-mode="lite"] .quiz-file-create-card{box-shadow:0 15px 35px rgba(0,0,0,.55)}@media(max-width:420px){.quiz-file-create-overlay{padding:12px}.quiz-file-create-card{padding:15px;border-radius:18px}.quiz-file-create-modes{gap:7px}.quiz-file-mode{font-size:12px}}
+</style>
