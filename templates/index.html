@@ -12805,52 +12805,13 @@ html[data-performance-mode="lite"] .tariff-card{
 html[data-performance-mode="lite"] .screen.swipe-enter-left,
 html[data-performance-mode="lite"] .screen.swipe-enter-right{animation:none !important;}
 html[data-performance-mode="lite"] .create-promo-slide{transition:opacity .12s ease,transform .12s ease !important;}
-/* Yengil rejim uchun alohida, GPU-yengil AI loader.
-   Oddiy rejim loaderiga tegilmaydi. */
-html[data-performance-mode="lite"] .ai-loader-orbit{
-    animation:lite-ai-loader-breathe 1.6s ease-in-out infinite !important;
-}
-html[data-performance-mode="lite"] .ai-loader-orbit::before{
-    animation:lite-ai-loader-spin .95s linear infinite !important;
-}
-html[data-performance-mode="lite"] .ai-loader-orbit::after{
-    animation:lite-ai-loader-spin-reverse 1.35s linear infinite !important;
-}
-html[data-performance-mode="lite"] .ai-loader-core{
-    animation:lite-ai-loader-core .95s ease-in-out infinite !important;
-}
-html[data-performance-mode="lite"] .ai-loader-progress span{
-    animation:lite-ai-loader-progress 1.5s ease-in-out infinite !important;
-}
-html[data-performance-mode="lite"] .ai-loader-dots i{
-    animation:lite-ai-loader-dot 1.05s ease-in-out infinite !important;
-}
-html[data-performance-mode="lite"] .news-badge.has-new{
-    animation:none !important;
-}
-
-@keyframes lite-ai-loader-spin{
-    to{transform:rotate(360deg);}
-}
-@keyframes lite-ai-loader-spin-reverse{
-    to{transform:rotate(-360deg);}
-}
-@keyframes lite-ai-loader-breathe{
-    0%,100%{transform:scale(.97);opacity:.82;}
-    50%{transform:scale(1.03);opacity:1;}
-}
-@keyframes lite-ai-loader-core{
-    0%,100%{transform:scale(.94);opacity:.78;}
-    50%{transform:scale(1.06);opacity:1;}
-}
-@keyframes lite-ai-loader-progress{
-    0%{transform:translateX(-135%);}
-    100%{transform:translateX(335%);}
-}
-@keyframes lite-ai-loader-dot{
-    0%,60%,100%{transform:translateY(0);opacity:.35;}
-    30%{transform:translateY(-3px);opacity:1;}
-}
+html[data-performance-mode="lite"] .ai-loader-orbit,
+html[data-performance-mode="lite"] .ai-loader-orbit::before,
+html[data-performance-mode="lite"] .ai-loader-orbit::after,
+html[data-performance-mode="lite"] .ai-loader-core,
+html[data-performance-mode="lite"] .ai-loader-progress span,
+html[data-performance-mode="lite"] .ai-loader-dots i,
+html[data-performance-mode="lite"] .news-badge.has-new{animation:none !important;}
 html[data-performance-mode="lite"] .nav-item,
 html[data-performance-mode="lite"] .tab,
 html[data-performance-mode="lite"] .btn-circle,
@@ -12949,6 +12910,60 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 #settings-screen #performance-toggle:active{ transform:scale(.96) !important; }
 </style>
 
+
+
+<style id="quizpilot-performance-lite-ai-loader-final">
+/* Yengil rejim: faqat AI loader yengillashtiriladi. Qolgan qismlar o'zgarmaydi. */
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit {
+    width:34px !important;
+    height:34px !important;
+    margin:4px auto 10px !important;
+    border:2px solid rgba(0,210,255,.22) !important;
+    box-shadow:none !important;
+    animation:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit::before,
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit::after {
+    inset:7px !important;
+    border:2px solid transparent !important;
+    border-top-color:#00d2ff !important;
+    border-right-color:rgba(0,210,255,.38) !important;
+    filter:none !important;
+    animation:quizLiteLoaderSpin .9s linear infinite !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-orbit::after {
+    display:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-core {
+    inset:8px !important;
+    background:none !important;
+    text-shadow:none !important;
+    font-size:13px !important;
+    animation:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-progress {
+    height:3px !important;
+    margin:10px auto 7px !important;
+    box-shadow:none !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-progress span {
+    background:#00d2ff !important;
+    box-shadow:none !important;
+    animation:quizLiteLoaderProgress 1.35s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-dots i {
+    width:4px !important;
+    height:4px !important;
+    background:#00d2ff !important;
+    box-shadow:none !important;
+    animation:quizLiteLoaderDot 1s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] #loading-status .ai-loader-dots i:nth-child(2){animation-delay:.14s !important;}
+html[data-performance-mode="lite"] #loading-status .ai-loader-dots i:nth-child(3){animation-delay:.28s !important;}
+@keyframes quizLiteLoaderSpin { to { transform:rotate(360deg); } }
+@keyframes quizLiteLoaderProgress { 0% { transform:translateX(-120%); } 100% { transform:translateX(320%); } }
+@keyframes quizLiteLoaderDot { 0%,60%,100% { transform:translateY(0); opacity:.35; } 30% { transform:translateY(-3px); opacity:1; } }
+</style>
 </head>
 <body>
 
@@ -13253,7 +13268,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 
             <div class="p-pro-header">
                 <h3 data-lang="premium_pro_title">Quiz AI PRO 👑</h3>
-                <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring! Eslatma: «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring. </p>
+                <p data-lang="premium_pro_desc">O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring! Eslatma: «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.«Tranzaksiya ID raqami boʻlmagan cheklar qabul qilinmaydi». </p>
             </div>
 
             <div class="tariff-card" id="card-daily">
@@ -13377,7 +13392,6 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
         })();
         let currentTab = 'personal'; 
         let currentQuizQuestions = [];
-        let originalQuizQuestions = [];
         let currentQuestionIdx = 0;
         let currentQuizId = "";
         let isAnswered = false;
@@ -13411,7 +13425,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
                 btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
                 premium_pro_title: "Quiz AI PRO 👑",
-                premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring! Eslatma: «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring. ",
+                premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring! Eslatma: «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.«Tranzaksiya ID raqami boʻlmagan cheklar qabul qilinmaydi». ",
                 tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat mutlaqo cheksiz test yaratish",
                 tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
                 tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida eng qulay cheksiz rejim",
@@ -13421,7 +13435,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 public_limit_over: "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
                 flashcard_limit_over: "🔒 Bepul limit tugadi. Flash Kartochka yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
                 confirm_payment: "📑 Chek yuborilsinmi? Botga qaytib, chek rasmini / skrinshotini yuborishni unutmang.",
-                btn_ok: "OK", btn_cancel: "Yopish", quiz_result_label: "Natija", quiz_retry: "🔄 Qayta urinish", quiz_review_errors: "❌ Xatolarni takrorlash", quiz_wrong_count: "❌ {count} ta xato", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
+                btn_ok: "OK", btn_cancel: "Yopish", alert_system_err: "❌ Tizim xatoligi yuz berdi.", alert_del_card: "🗑️ Ushbu kartochkani o'chirasizmi?",
                 teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang va guruh sessiyasini oching. O‘quvchilar “Guruhga qo‘shilish” bo‘limidan havolasiz kirishadi.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", teacher_refresh: "Yangilash", teacher_loading: "Yuklanmoqda...", teacher_group_name: "Guruh nomi", teacher_group_desc: "Izoh (ixtiyoriy)", teacher_create_group: "➕ Guruh yaratish", teacher_delete: "🗑️ O‘chirish", teacher_group_empty: "Hozircha guruhlar yo‘q.", teacher_group_code: "Guruh kodi", teacher_members: "a’zo", teacher_active_word: "Faol", teacher_closed_word: "Yopiq", teacher_delete_session: "🗑️ Sessiyani o‘chirish", teacher_assign_variant: "Oddiy test", teacher_assign_title: "Topshiriq nomi (ixtiyoriy)", teacher_assign_btn: "📋 Topshiriq biriktirish", teacher_assignment_empty: "Hozircha topshiriqlar yo‘q.", teacher_start_assignment: "🚀 Testni boshlash", teacher_assignment_started: "Guruh test sessiyasi yaratildi.", teacher_group_test_type: "Guruh testi", teacher_assignment_type: "Topshiriq", teacher_assignment_duration: "Test vaqti", teacher_assignment_duration_hint: "Topshiriq uchun test davomiyligini tanlang.", teacher_show_results: "📊 Natijalarni ko‘rsatish", teacher_no_sessions: "Hali sessiya yo‘q.", teacher_no_student_results: "Hali o‘quvchilar natijasi yo‘q.", teacher_generate_variants: "⚙️ A, B, C, D variantlarni yaratish", teacher_variants_ready: "Variantlar tayyorlandi. Har bir variant uchun test kaliti saqlandi.", teacher_export_excel_key: "Excel + Kalit", teacher_export_pdf_key: "PDF + Kalit", teacher_export_word_key: "Word + Kalit", teacher_variant_a: "Variant A", teacher_variant_b: "Variant B", teacher_variant_c: "Variant C", teacher_variant_d: "Variant D", teacher_server_error: "❌ Serverda ichki xatolik yuz berdi. Iltimos, qayta urinib ko‘ring.", teacher_db_busy: "⚠️ Server ma’lumotlar bazasi band. Bir necha soniyadan so‘ng qayta urinib ko‘ring.", teacher_select_group_quiz: "Guruh va testni tanlang.", teacher_select_quiz_variant: "Test va kamida bitta variantni tanlang.", teacher_select_group: "Guruhni tanlang.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️"
             },
             ru: {
@@ -13441,7 +13455,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
                 btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
                 premium_pro_title: "Quiz AI PRO 👑",
-                premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту! Примечание: При нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота. ",
+                premium_pro_desc: "Выберите подходящий тариф, скопируйте номер карты, оплатите и отправьте чек боту! Примечание: При нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.«Чеки без номера транзакции не принимаются». ",
                 tariff_daily_title: "⚡ Суточный Безлимит", tariff_daily_desc: "24 часа абсолютно безлимитного создания тестов",
                 tariff_weekly_title: "📅 Недельный Безлимит", tariff_weekly_desc: "7 дней безлимитного использования системы",
                 tariff_monthly_title: "🌙 Месячный Безлимит", tariff_monthly_desc: "30 дней самого удобного безлимитного режима",
@@ -13451,7 +13465,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 public_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить проходить публичные тесты, перейдите на Premium тариф. 👑",
                 flashcard_limit_over: "🔒 Бесплатный лимит исчерпан. Чтобы продолжить создавать флеш-карточки, перейдите на Premium тариф. 👑",
                 confirm_payment: "📑 Отправить чек? Не забудьте вернуться в бота и отправить скриншот чека.",
-                btn_ok: "ОК", btn_cancel: "Отмена", quiz_result_label: "Результат", quiz_retry: "🔄 Повторить", quiz_review_errors: "❌ Повторить ошибки", quiz_wrong_count: "❌ Ошибок: {count}", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
+                btn_ok: "ОК", btn_cancel: "Отмена", alert_system_err: "❌ Произошла ошибка системы.", alert_del_card: "🗑️ Удалить эту карточку?",
                 teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест и создайте групповую сессию. Ученики входят в тест через раздел «Присоединиться к группе», без ссылки.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", teacher_refresh: "Обновить", teacher_loading: "Загрузка...", teacher_group_name: "Название группы", teacher_group_desc: "Комментарий (необязательно)", teacher_create_group: "➕ Создать группу", teacher_delete: "🗑️ Удалить", teacher_group_empty: "Групп пока нет.", teacher_group_code: "Код группы", teacher_members: "уч.", teacher_active_word: "Активна", teacher_closed_word: "Закрыта", teacher_delete_session: "🗑️ Удалить сессию", teacher_assign_variant: "Обычный тест", teacher_assign_title: "Название задания (необязательно)", teacher_assign_btn: "📋 Назначить задание", teacher_assignment_empty: "Заданий пока нет.", teacher_start_assignment: "🚀 Начать тест", teacher_assignment_started: "Групповая тестовая сессия создана.", teacher_group_test_type: "Групповой тест", teacher_assignment_type: "Задание", teacher_assignment_duration: "Время теста", teacher_assignment_duration_hint: "Выберите длительность теста для задания.", teacher_show_results: "📊 Показать результаты", teacher_no_sessions: "Сессий пока нет.", teacher_no_student_results: "Результатов учеников пока нет.", teacher_generate_variants: "⚙️ Создать варианты A, B, C, D", teacher_variants_ready: "Варианты готовы. Ключ для каждого варианта сохранён.", teacher_export_excel_key: "Excel + ключ", teacher_export_pdf_key: "PDF + ключ", teacher_export_word_key: "Word + ключ", teacher_variant_a: "Вариант A", teacher_variant_b: "Вариант B", teacher_variant_c: "Вариант C", teacher_variant_d: "Вариант D", teacher_server_error: "❌ Произошла внутренняя ошибка сервера. Попробуйте ещё раз.", teacher_db_busy: "⚠️ База данных сервера занята. Повторите через несколько секунд.", teacher_select_group_quiz: "Выберите группу и тест.", teacher_select_quiz_variant: "Выберите тест и хотя бы один вариант.", teacher_select_group: "Выберите группу.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️"
             },
             en: {
@@ -13471,7 +13485,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
                 btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
                 premium_pro_title: "Quiz AI PRO 👑",
-                premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot! Note: Clicking the «Activate tariffs» button will open a new window. Press the «Send receipt» button in that window — this will return you to the bot. Then, send the payment receipt as a photo or screenshot. ",
+                premium_pro_desc: "Choose a suitable plan, copy the card number, make a payment and send the receipt to the bot! Note: Clicking the «Activate tariffs» button will open a new window. Press the «Send receipt» button in that window — this will return you to the bot. Then, send the payment receipt as a photo or screenshot.«Checks without a transaction ID number will not be accepted». ",
                 tariff_daily_title: "⚡ Daily Unlimited", tariff_daily_desc: "24 hours of completely unlimited quiz creation",
                 tariff_weekly_title: "📅 Weekly Unlimited", tariff_weekly_desc: "7 days of completely unlimited access",
                 tariff_monthly_title: "🌙 Monthly Unlimited", tariff_monthly_desc: "30 days of the most convenient premium mode",
@@ -13481,7 +13495,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 public_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue taking public quizzes. 👑",
                 flashcard_limit_over: "🔒 Your free limit has been reached. Upgrade to Premium to continue creating flashcards. 👑",
                 confirm_payment: "📑 Send receipt request? Don't forget to return to the bot and send the screenshot.",
-                btn_ok: "OK", btn_cancel: "Close", quiz_result_label: "Result", quiz_retry: "🔄 Retry", quiz_review_errors: "❌ Review mistakes", quiz_wrong_count: "❌ Mistakes: {count}", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
+                btn_ok: "OK", btn_cancel: "Close", alert_system_err: "❌ System error occurred.", alert_del_card: "🗑️ Delete this flashcard?",
                 teacher_panel_title: "Teacher mode", teacher_panel_desc: "Choose a quiz and start a group session. Students enter the test through “Join group” without a link.", teacher_create_btn: "🚀 Start group quiz", teacher_no_quizzes: "Create a quiz first.", teacher_created: "Session created.", teacher_results: "📊 Results", teacher_copy: "🔗 Copy link", teacher_excel: "Excel", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "No results yet.", teacher_refresh: "Refresh", teacher_loading: "Loading...", teacher_group_name: "Group name", teacher_group_desc: "Note (optional)", teacher_create_group: "➕ Create group", teacher_delete: "🗑️ Delete", teacher_group_empty: "No groups yet.", teacher_group_code: "Group code", teacher_members: "members", teacher_active_word: "Active", teacher_closed_word: "Closed", teacher_delete_session: "🗑️ Delete session", teacher_assign_variant: "Regular quiz", teacher_assign_title: "Assignment title (optional)", teacher_assign_btn: "📋 Assign task", teacher_assignment_empty: "No assignments yet.", teacher_start_assignment: "🚀 Start test", teacher_assignment_started: "Group test session created.", teacher_group_test_type: "Group test", teacher_assignment_type: "Assignment", teacher_assignment_duration: "Test time", teacher_assignment_duration_hint: "Choose the test duration for this assignment.", teacher_show_results: "📊 Show results", teacher_no_sessions: "No sessions yet.", teacher_no_student_results: "No student results yet.", teacher_generate_variants: "⚙️ Create A, B, C, D variants", teacher_variants_ready: "Variants are ready. An answer key was saved for each variant.", teacher_export_excel_key: "Excel + Key", teacher_export_pdf_key: "PDF + Key", teacher_export_word_key: "Word + Key", teacher_variant_a: "Variant A", teacher_variant_b: "Variant B", teacher_variant_c: "Variant C", teacher_variant_d: "Variant D", teacher_server_error: "❌ An internal server error occurred. Please try again.", teacher_db_busy: "⚠️ The server database is busy. Please try again in a few seconds.", teacher_select_group_quiz: "Select a group and a quiz.", teacher_select_quiz_variant: "Select a quiz and at least one variant.", teacher_select_group: "Select a group.", public_locked: "🔒 Activate a Premium or Teacher plan to use public quizzes.", public_open: "▶️"
             }
         };
@@ -13497,7 +13511,6 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
             document.getElementById('app-dialog-icon').innerText = icon;
             document.getElementById('app-dialog-msg').innerText = text;
             const footer = document.getElementById('app-dialog-footer');
-            footer.style.flexDirection = '';
             footer.innerHTML = `<button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>`;
             document.getElementById('app-dialog').style.display = 'flex';
             document.getElementById('app-dialog-ok-btn').onclick = function() {
@@ -13510,7 +13523,6 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
             document.getElementById('app-dialog-icon').innerText = icon;
             document.getElementById('app-dialog-msg').innerText = text;
             const footer = document.getElementById('app-dialog-footer');
-            footer.style.flexDirection = '';
             footer.innerHTML = `
                 <button class="app-dialog-btn secondary" id="app-dialog-cancel-btn">${langPack[currentLang].btn_cancel || 'Yopish'}</button>
                 <button class="app-dialog-btn primary" id="app-dialog-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>
@@ -14210,10 +14222,6 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                         const hasScore = quiz.last_score !== undefined && quiz.last_score !== -1;
                         const displayPercent = hasScore ? quiz.last_percent : 0;
                         const scoreText = hasScore ? `${quiz.last_score}/${quiz.total} (${quiz.last_percent}%)` : `0/0 (0%)`;
-                        const createdDate = quiz.created_at ? new Date(Number(quiz.created_at) * 1000) : null;
-                        const createdText = createdDate && !isNaN(createdDate.getTime())
-                            ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(createdDate).replace(/\//g, '-').replace(',', '')
-                            : '';
                         const pubClass = quiz.is_public ? 'is-active' : '';
 
                         const card = document.createElement('div');
@@ -14238,7 +14246,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                                 <div class="progress-line-container"><div class="progress-line-bar" style="width: ${displayPercent}%;"></div></div>
                                 <span style="font-size: 14px; font-weight: bold;">${displayPercent}%</span>
                             </div>
-                            <div class="card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; position: relative;"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>${langPack[currentLang].score_text}: ${scoreText}</span>${createdText ? `<span style="position: absolute; right: 0; bottom: 0; color: inherit; font-size: inherit;">${createdText}</span>` : ''}</div>
+                            <div class="card-footer" style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>${langPack[currentLang].q_count}: ${quiz.total}</span><span>${langPack[currentLang].score_text}: ${scoreText}</span></div>
                         `;
                         listDiv.appendChild(card);
                     });
@@ -14438,14 +14446,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                         ...q,
                         options: Array.isArray(q.options) ? [...q.options] : [],
                         _answered: false,
-                        _wrong: false,
                         _randomId: idx
-                    }));
-                    originalQuizQuestions = currentQuizQuestions.map(q => ({
-                        ...q,
-                        options: Array.isArray(q.options) ? [...q.options] : [],
-                        _answered: false,
-                        _wrong: false
                     }));
                     currentQuestionIdx = 0; correctAnswersCount = 0; wrongAnswersCount = 0;
                     currentTeacherSessionId=sessionId||null;
@@ -14552,7 +14553,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             if (idx === correctIdx) {
                 btn.classList.add('correct'); correctAnswersCount++; q._answered = true; playQuizSound('correct');
             } else {
-                btn.classList.add('wrong'); wrongAnswersCount++; q._answered = true; q._wrong = true; playQuizSound('wrong');
+                btn.classList.add('wrong'); wrongAnswersCount++; q._answered = true; playQuizSound('wrong');
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
                 const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
                 expBox.innerText = `${expLabel} ` + (explanation || "...");
@@ -14563,76 +14564,6 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         function nextQuestion() {
             currentQuestionIdx++; showQuestion();
-        }
-
-        function showQuizResultDialog(autoByTimer, total, scorePercent) {
-            const dialog = document.getElementById('app-dialog');
-            const icon = document.getElementById('app-dialog-icon');
-            const msg = document.getElementById('app-dialog-msg');
-            const footer = document.getElementById('app-dialog-footer');
-            if (!dialog || !icon || !msg || !footer) return;
-
-            const correct = correctAnswersCount;
-            const wrong = wrongAnswersCount;
-            const timePrefix = autoByTimer ? `${langPack[currentLang].student_time_up}<br><br>` : '';
-            const wrongText = (langPack[currentLang].quiz_wrong_count || '❌ {count} ta xato').replace('{count}', wrong);
-
-            icon.innerText = '🏁';
-            msg.innerHTML = `${timePrefix}<div>${langPack[currentLang].quiz_result_label || 'Natija'}: <span style="color:#72f297;font-weight:800;">${correct}</span>/${total} (${scorePercent}%)</div><div style="margin-top:8px;color:#ff6b6b;font-weight:700;">${wrongText}</div>`;
-            footer.style.flexDirection = 'column';
-            footer.innerHTML = `
-                <button class="app-dialog-btn primary" id="quiz-retry-btn" style="width:100%;">${langPack[currentLang].quiz_retry}</button>
-                ${wrong > 0 ? `<button class="app-dialog-btn secondary" id="quiz-review-btn" style="width:100%;color:#ff8b94;border-color:rgba(232,17,35,.45);">${langPack[currentLang].quiz_review_errors}</button>` : ''}
-                <button class="app-dialog-btn secondary" id="quiz-result-ok-btn" style="width:100%;">${langPack[currentLang].btn_ok || 'OK'}</button>
-            `;
-            dialog.style.display = 'flex';
-
-            document.getElementById('quiz-retry-btn').onclick = function() {
-                dialog.style.display = 'none';
-                footer.style.flexDirection = '';
-                currentQuizQuestions = originalQuizQuestions.map(q => ({
-                    ...q,
-                    options: Array.isArray(q.options) ? [...q.options] : [],
-                    _answered: false,
-                    _wrong: false
-                }));
-                currentQuestionIdx = 0;
-                correctAnswersCount = 0;
-                wrongAnswersCount = 0;
-                isAnswered = false;
-                quizFinished = false;
-                document.getElementById('game-screen').style.display = 'block';
-                showQuestion();
-            };
-
-            const reviewBtn = document.getElementById('quiz-review-btn');
-            if (reviewBtn) {
-                reviewBtn.onclick = function() {
-                    const wrongQuestions = currentQuizQuestions.filter(q => q._wrong);
-                    dialog.style.display = 'none';
-                    footer.style.flexDirection = '';
-                    if (!wrongQuestions.length) return;
-                    currentQuizQuestions = wrongQuestions.map(q => ({
-                        ...q,
-                        options: Array.isArray(q.options) ? [...q.options] : [],
-                        _answered: false,
-                        _wrong: false
-                    }));
-                    currentQuestionIdx = 0;
-                    correctAnswersCount = 0;
-                    wrongAnswersCount = 0;
-                    isAnswered = false;
-                    quizFinished = false;
-                    document.getElementById('game-screen').style.display = 'block';
-                    showQuestion();
-                };
-            }
-
-            document.getElementById('quiz-result-ok-btn').onclick = function() {
-                dialog.style.display = 'none';
-                footer.style.flexDirection = '';
-                closeGame();
-            };
         }
 
         async function finishQuiz(autoByTimer=false) {
@@ -14661,7 +14592,8 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             } catch (e) {}
             currentTeacherSessionId = null;
             currentTeacherSessionExpiresAt = 0;
-            showQuizResultDialog(autoByTimer, total, scorePercent);
+            const resultPrefix = autoByTimer ? `${langPack[currentLang].student_time_up}\n\n` : '';
+            showAppAlert("🏁", `${resultPrefix}Natija: ${correctAnswersCount}/${total} (${scorePercent}%)`, () => { closeGame(); });
         }
 
         function closeGame() {
