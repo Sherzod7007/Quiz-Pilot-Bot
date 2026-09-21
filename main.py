@@ -211,31 +211,186 @@ def _extract_source_text(file_path, extension):
     raise ValueError("unsupported")
 
 def _extract_numbered_question_blocks(raw_text):
-    """Find numbered question blocks such as 1. / 2) / 3 - and preserve their text."""
+    """Detect quiz question blocks from numbered or unnumbered PDF/DOCX text.
+
+    The detector intentionally uses deterministic parsing first so normal files do
+    not consume an AI request just to count questions. It supports common forms:
+    1. Question / 1) Question / 1 - Question, a standalone number line, and
+    unnumbered questions followed by A/B/C/D answer choices. A final fallback
+    handles simple question-mark-separated text without answer choices.
+    """
     text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[\u00a0\u2007\u202f]", " ", text)
     lines = text.split("\n")
-    pattern = re.compile(r"^\s*(\d{1,4})\s*(?:[.)]|[-–—])\s+(.+?)\s*$")
+
+    # 1) Explicitly numbered questions. This remains the highest-confidence path.
+    numbered_pattern = re.compile(
+        r"^\s*(?:(?:savol|question|вопрос)\s*)?(\d{1,4})\s*(?:[.)]|[-–—:])(?:\s+(.*?))?\s*$",
+        re.IGNORECASE,
+    )
     matches = []
     for idx, line in enumerate(lines):
-        m = pattern.match(line)
+        m = numbered_pattern.match(line)
         if not m:
             continue
         number = int(m.group(1))
-        # Avoid treating ordinary year/list fragments as questions. A numbered
-        # question sequence is accepted when it starts at 1, or when it follows
-        # another detected number consecutively.
         if number == 1 or (matches and number == matches[-1][0] + 1):
             matches.append((number, idx))
-    if not matches or matches[0][0] != 1:
-        return []
+    if matches and matches[0][0] == 1 and len(matches) >= 2:
+        blocks = []
+        for pos, (_, start_idx) in enumerate(matches):
+            end_idx = matches[pos + 1][1] if pos + 1 < len(matches) else len(lines)
+            block = "\n".join(lines[start_idx:end_idx]).strip()
+            if block:
+                blocks.append(block)
+        # A/B/C/D (or question-mark) evidence prevents an answer list such as
+        # 1) ... 2) ... 3) ... 4) ... from being mistaken for four questions.
+        evidence = 0
+        for block in blocks:
+            first_line = block.split("\n", 1)[0].strip()
+            if re.search(r"[?？]", block) or re.search(r"^\s*[A-Da-d]\s*[.)]", block, re.MULTILINE):
+                evidence += 1
+            elif len(re.sub(r"^\s*(?:savol|question|вопрос)?\s*\d{1,4}\s*(?:[.)]|[-–—:])\s*", "", first_line, flags=re.IGNORECASE)) >= 15:
+                evidence += 1
+        if len(blocks) >= 2 and evidence >= max(2, int(len(blocks) * 0.6)):
+            return blocks
 
-    blocks = []
-    for pos, (number, start_idx) in enumerate(matches):
-        end_idx = matches[pos + 1][1] if pos + 1 < len(matches) else len(lines)
-        block = "\n".join(lines[start_idx:end_idx]).strip()
-        if block:
-            blocks.append(block)
-    return blocks
+    # 2) Unnumbered multiple-choice questions. The safest signal is a complete
+    # A/B/C/D sequence. We keep all text before A as the question, including
+    # multi-line question text, and preserve the original answer choices.
+    # Some PDF extractors collapse all four choices onto one line; split those
+    # lines only when a complete A/B/C/D sequence is visibly present.
+    expanded_lines = []
+    inline_option_probe = re.compile(r"(?:^|\s)([A-Da-d])\s*[.)]|(?:^|\s)([1-4])\s*[.)]")
+    for line in lines:
+        labels = [m.group(1) or m.group(2) for m in inline_option_probe.finditer(line)]
+        if len(labels) >= 4 and (
+            labels[:4] == ["A", "B", "C", "D"] or
+            labels[:4] == ["a", "b", "c", "d"] or
+            labels[:4] == ["1", "2", "3", "4"]
+        ):
+            split_line = re.sub(r"\s+(?=([A-Da-d]|[1-4])\s*[.)])", "\n", line)
+            expanded_lines.extend(split_line.split("\n"))
+        else:
+            expanded_lines.append(line)
+    lines = expanded_lines
+
+    option_pattern = re.compile(r"^\s*([A-Da-d])\s*(?:[.)]|[-–—:])\s*(.*)\s*$")
+    option_matches = []
+    for idx, line in enumerate(lines):
+        m = option_pattern.match(line)
+        if m:
+            option_matches.append((idx, m.group(1).upper(), m.group(2).strip()))
+
+    # Some educational PDFs use 1)/2)/3)/4) for answer choices while the
+    # questions themselves are not numbered. Support that form separately so
+    # those answer labels are not mistaken for question numbers.
+    numeric_option_pattern = re.compile(r"^\s*([1-4])\s*(?:[.)]|[-–—:])\s*(.*)\s*$")
+    numeric_option_matches = []
+    for idx, line in enumerate(lines):
+        m = numeric_option_pattern.match(line)
+        if m:
+            numeric_option_matches.append((idx, m.group(1), m.group(2).strip()))
+
+    def _find_option_sequences(matches, labels):
+        found = []
+        i = 0
+        while i < len(matches):
+            idx_a, label_a, _ = matches[i]
+            if label_a != labels[0]:
+                i += 1
+                continue
+            seq = [matches[i]]
+            expected_pos = 1
+            j = i + 1
+            while j < len(matches) and j < i + 10:
+                idx_j, label_j, _ = matches[j]
+                if idx_j - seq[-1][0] > 25:
+                    break
+                if expected_pos < len(labels) and label_j == labels[expected_pos]:
+                    seq.append(matches[j])
+                    expected_pos += 1
+                    if expected_pos == len(labels):
+                        break
+                elif label_j == labels[0]:
+                    break
+                j += 1
+            if len(seq) == len(labels) and [x[1] for x in seq] == labels:
+                found.append(seq)
+                i = j + 1
+            else:
+                i += 1
+        return found
+
+    sequences = _find_option_sequences(option_matches, ["A", "B", "C", "D"])
+    if not sequences:
+        sequences = _find_option_sequences(numeric_option_matches, ["1", "2", "3", "4"])
+
+    if sequences:
+        blocks = []
+        previous_end = 0
+        for seq in sequences:
+            start_idx = previous_end
+            end_idx = seq[-1][0] + 1
+            # If the source has a heading or an unrelated fragment before the
+            # first question, discard it. Between questions, start after D.
+            block_lines = lines[start_idx:end_idx]
+            while block_lines and not block_lines[0].strip():
+                block_lines.pop(0)
+            while block_lines and not block_lines[-1].strip():
+                block_lines.pop()
+            if block_lines:
+                block = "\n".join(block_lines).strip()
+                # Require actual question content before option A. This prevents
+                # a bare answer-choice list from being counted as a question.
+                a_line_index = seq[0][0] - start_idx
+                pre_option = "\n".join(block_lines[:a_line_index]).strip()
+                if pre_option:
+                    blocks.append(block)
+            previous_end = end_idx
+        if len(blocks) >= 2:
+            return blocks
+
+    # 3) Questions without numbering or answer choices. Use paragraph/question
+    # boundaries only when the source gives us enough evidence to avoid turning
+    # ordinary prose into hundreds of fake questions.
+    paragraphs = []
+    current = []
+    for line in lines:
+        if line.strip():
+            current.append(line.strip())
+        elif current:
+            paragraphs.append("\n".join(current).strip())
+            current = []
+    if current:
+        paragraphs.append("\n".join(current).strip())
+
+    question_paragraphs = [p for p in paragraphs if re.search(r"[?？]$", p)]
+    if len(question_paragraphs) >= 2 and len(question_paragraphs) / max(1, len(paragraphs)) >= 0.5:
+        return question_paragraphs
+
+    # 4) Last lightweight fallback for line-based question lists without blank
+    # lines, e.g. "Dialektika nima?" followed immediately by the next question.
+    q_blocks = []
+    current = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        current.append(stripped)
+        if re.search(r"[?？]$", stripped):
+            q_blocks.append("\n".join(current).strip())
+            current = []
+    if current and q_blocks and len(current) <= 3:
+        # Keep a short trailing fragment with the previous question rather than
+        # inventing a new question.
+        q_blocks[-1] += "\n" + "\n".join(current)
+    return q_blocks if len(q_blocks) >= 2 else []
+
+
+def _extract_question_blocks(raw_text):
+    """Backward-compatible public helper for the professional file workflow."""
+    return _extract_numbered_question_blocks(raw_text)
 
 def _reserve_quiz_slot_for_grouped_creation(user_id):
     """Atomically reserve one free AI-creation slot for the whole grouped job."""
@@ -372,7 +527,7 @@ MESSAGES = {
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
         "quiz_file_required": "📄 Iltimos, PDF yoki DOCX fayl tanlang.",
-        "quiz_questions_not_detected": "⚠️ Fayldagi raqamlangan savollar avtomatik aniqlanmadi. Savollar 1., 2., 3. kabi tartibda bo‘lishi kerak.",
+        "quiz_questions_not_detected": "⚠️ Fayldagi savollarni avtomatik aniqlab bo‘lmadi. Savollar raqamlangan bo‘lishi shart emas, lekin savol va javob variantlari aniq ko‘rinishda bo‘lishi kerak.",
         "quiz_file_session_expired": "⏰ Fayl sessiyasi tugagan. Faylni qayta yuklang.",
         "quiz_mode_invalid": "⚠️ Test yaratish rejimi noto‘g‘ri.",
         "quiz_group_size_invalid": "⚠️ 20, 30 yoki 40 ta savolni tanlang.",
@@ -428,7 +583,7 @@ MESSAGES = {
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
         "quiz_file_required": "📄 Пожалуйста, выберите файл PDF или DOCX.",
-        "quiz_questions_not_detected": "⚠️ Нумерованные вопросы в файле не удалось автоматически определить. Используйте формат 1., 2., 3. и т.д.",
+        "quiz_questions_not_detected": "⚠️ Не удалось автоматически определить вопросы в файле. Нумерация не обязательна, но структура вопросов и вариантов ответа должна быть понятной.",
         "quiz_file_session_expired": "⏰ Сессия файла истекла. Загрузите файл заново.",
         "quiz_mode_invalid": "⚠️ Неверный режим создания теста.",
         "quiz_group_size_invalid": "⚠️ Выберите 20, 30 или 40 вопросов.",
@@ -484,7 +639,7 @@ MESSAGES = {
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
         "quiz_file_required": "📄 Please select a PDF or DOCX file.",
-        "quiz_questions_not_detected": "⚠️ Numbered questions could not be detected automatically. Use a format such as 1., 2., 3., etc.",
+        "quiz_questions_not_detected": "⚠️ Questions could not be detected automatically. Numbering is not required, but the question and answer-choice structure must be clear.",
         "quiz_file_session_expired": "⏰ The file session has expired. Please upload the file again.",
         "quiz_mode_invalid": "⚠️ Invalid test creation mode.",
         "quiz_group_size_invalid": "⚠️ Choose 20, 30, or 40 questions.",
@@ -1900,7 +2055,7 @@ async def analyze_quiz_file(user_id: int = Form(...), file: Optional[UploadFile]
             fh.write(contents)
         try:
             raw_text = await asyncio.to_thread(_extract_source_text, path, extension)
-            blocks = _extract_numbered_question_blocks(raw_text)
+            blocks = _extract_question_blocks(raw_text)
         except ValueError as exc:
             try: os.remove(path)
             except Exception: pass
@@ -1987,7 +2142,7 @@ async def create_quiz_from_file_groups(
     async def build_group(group, idx, total_groups):
         expected = len(group)
         payload = (
-            f"IMPORTANT: This is quiz batch {idx} of {total_groups}. Return EXACTLY {expected} quiz questions from the numbered source below. "
+            f"IMPORTANT: This is quiz batch {idx} of {total_groups}. Return EXACTLY {expected} quiz questions from the source blocks below. "
             "Do not merge, omit, invent, or duplicate source questions. Preserve the original question meaning and answer choices.\n\n"
             + "\n\n".join(group)
         )
