@@ -228,11 +228,92 @@ def _is_question_like_line(line):
     return False
 
 
+def _extract_numbered_sequence_blocks(lines):
+    """Detect a reliable 1..N question-number sequence before heuristic parsing.
+
+    PDF extractors often split formulas and question numbers across lines, or put
+    the next question number at the end of the previous line.  A strict numeric
+    sequence lets us preserve those questions without asking Gemini to count them.
+    If a reliable sequence is not found, the normal structural parser remains the
+    fallback for unnumbered/mixed documents.
+    """
+    candidates = {}
+    for line_idx, line in enumerate(lines):
+        for match in re.finditer(r"(?<!\d)(\d{1,4})(?!\d)", line):
+            number = int(match.group(1))
+            if 1 <= number <= 1000:
+                candidates.setdefault(number, []).append(
+                    (line_idx, match.start(), match.end())
+                )
+
+    best_sequence = None
+    max_question_number = max(candidates.keys(), default=0)
+    max_gap_lines = 25
+
+    for first in candidates.get(1, []):
+        # Reject standalone page numbers/header numbers as the first question.
+        # A real first question normally has meaningful text on the same line.
+        same_line_tail = lines[first[0]][first[2]:].strip()
+        if len(same_line_tail) < 8:
+            continue
+
+        sequence = [first]
+        previous = first
+        expected = 2
+
+        while expected <= max_question_number:
+            options = []
+            for candidate in candidates.get(expected, []):
+                if candidate[0] < previous[0]:
+                    continue
+                if candidate[0] == previous[0] and candidate[1] <= previous[1]:
+                    continue
+                if candidate[0] - previous[0] > max_gap_lines:
+                    continue
+                options.append(candidate)
+
+            if not options:
+                break
+
+            # Prefer the closest next number. Same-line numbers are important
+            # for PDFs where "...savol. 19" occurs on one extracted line.
+            options.sort(key=lambda item: (item[0] - previous[0], item[1]))
+            previous = options[0]
+            sequence.append(previous)
+            expected += 1
+
+        if best_sequence is None or len(sequence) > len(best_sequence):
+            best_sequence = sequence
+
+    # A short accidental numeric run is not strong enough to replace the
+    # structural parser. Real numbered question sets normally contain many items.
+    if not best_sequence or len(best_sequence) < 8:
+        return None
+
+    blocks = []
+    for position, start in enumerate(best_sequence):
+        if position + 1 < len(best_sequence):
+            end = best_sequence[position + 1]
+        else:
+            end = (len(lines), 0, 0)
+
+        parts = [lines[start[0]][start[1]:]]
+        for line_idx in range(start[0] + 1, end[0]):
+            parts.append(lines[line_idx])
+        block = "\n".join(parts).strip()
+        if block:
+            blocks.append(block)
+
+    if len(blocks) != len(best_sequence):
+        return None
+    return blocks
+
+
 def _extract_question_blocks(raw_text):
     """
     Detect question blocks from PDF/DOCX text without requiring numbering.
-    Supports numbered questions, repeated question stems, question-mark or
-    fill-in-the-blank questions, and mixed documents where formats change.
+    Supports reliable numbered sequences, repeated question stems, question-mark
+    or fill-in-the-blank questions, and mixed documents where formats change.
     """
     text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n").replace("\x00", "")
     lines = []
@@ -243,6 +324,13 @@ def _extract_question_blocks(raw_text):
         if re.fullmatch(r"[-_=]{3,}", line):
             continue
         lines.append(line)
+
+    # First use a deterministic question-number sequence when the document has
+    # one. This fixes PDF layouts where formulas split the question text and the
+    # old question-shape heuristic could not recognize the numbered question.
+    numbered_blocks = _extract_numbered_sequence_blocks(lines)
+    if numbered_blocks:
+        return numbered_blocks, "numbered_sequence"
 
     # Some PDF extractors collapse repeated question stems onto one line.
     expanded_lines = []
