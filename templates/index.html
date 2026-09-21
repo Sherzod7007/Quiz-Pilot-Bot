@@ -12805,13 +12805,52 @@ html[data-performance-mode="lite"] .tariff-card{
 html[data-performance-mode="lite"] .screen.swipe-enter-left,
 html[data-performance-mode="lite"] .screen.swipe-enter-right{animation:none !important;}
 html[data-performance-mode="lite"] .create-promo-slide{transition:opacity .12s ease,transform .12s ease !important;}
-html[data-performance-mode="lite"] .ai-loader-orbit,
-html[data-performance-mode="lite"] .ai-loader-orbit::before,
-html[data-performance-mode="lite"] .ai-loader-orbit::after,
-html[data-performance-mode="lite"] .ai-loader-core,
-html[data-performance-mode="lite"] .ai-loader-progress span,
-html[data-performance-mode="lite"] .ai-loader-dots i,
-html[data-performance-mode="lite"] .news-badge.has-new{animation:none !important;}
+/* Yengil rejim uchun alohida, GPU-yengil AI loader.
+   Oddiy rejim loaderiga tegilmaydi. */
+html[data-performance-mode="lite"] .ai-loader-orbit{
+    animation:lite-ai-loader-breathe 1.6s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] .ai-loader-orbit::before{
+    animation:lite-ai-loader-spin .95s linear infinite !important;
+}
+html[data-performance-mode="lite"] .ai-loader-orbit::after{
+    animation:lite-ai-loader-spin-reverse 1.35s linear infinite !important;
+}
+html[data-performance-mode="lite"] .ai-loader-core{
+    animation:lite-ai-loader-core .95s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] .ai-loader-progress span{
+    animation:lite-ai-loader-progress 1.5s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] .ai-loader-dots i{
+    animation:lite-ai-loader-dot 1.05s ease-in-out infinite !important;
+}
+html[data-performance-mode="lite"] .news-badge.has-new{
+    animation:none !important;
+}
+
+@keyframes lite-ai-loader-spin{
+    to{transform:rotate(360deg);}
+}
+@keyframes lite-ai-loader-spin-reverse{
+    to{transform:rotate(-360deg);}
+}
+@keyframes lite-ai-loader-breathe{
+    0%,100%{transform:scale(.97);opacity:.82;}
+    50%{transform:scale(1.03);opacity:1;}
+}
+@keyframes lite-ai-loader-core{
+    0%,100%{transform:scale(.94);opacity:.78;}
+    50%{transform:scale(1.06);opacity:1;}
+}
+@keyframes lite-ai-loader-progress{
+    0%{transform:translateX(-135%);}
+    100%{transform:translateX(335%);}
+}
+@keyframes lite-ai-loader-dot{
+    0%,60%,100%{transform:translateY(0);opacity:.35;}
+    30%{transform:translateY(-3px);opacity:1;}
+}
 html[data-performance-mode="lite"] .nav-item,
 html[data-performance-mode="lite"] .tab,
 html[data-performance-mode="lite"] .btn-circle,
