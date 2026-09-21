@@ -26,6 +26,8 @@ import sqlite3
 import telebot
 import threading
 import time
+import queue
+from concurrent.futures import Future
 from typing import List, Optional
 import uvicorn
 import uuid
@@ -78,7 +80,7 @@ key_lock = threading.Lock()
 #   GEMINI_MODEL=gemini-3.6-flash
 #   GEMINI_FALLBACK_MODEL=gemini-2.5-flash
 #   AI_MAX_CONCURRENT=10
-#   AI_MAX_QUEUE=200
+#   AI_MAX_QUEUE=500
 #   AI_RETRY_PER_KEY=2
 #   AI_REQUEST_TIMEOUT=600
 #   AI_TOTAL_TIMEOUT=1800
@@ -96,7 +98,7 @@ for _model_name in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
     if _model_name and _model_name not in GEMINI_MODELS:
         GEMINI_MODELS.append(_model_name)
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", "10")))
-AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "200")))
+AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "500")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
@@ -113,10 +115,14 @@ GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").s
 # the AI queue. Large books should be split/batched rather than silently truncated.
 MAX_TEXT_INPUT_CHARS = max(10000, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 
-# Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
-# AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
-ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
+# Real bounded AI queue. API requests are accepted into this queue instead of
+# occupying FastAPI's default thread pool while waiting for Gemini. This keeps
+# the AI layer stable under burst traffic and gives us a clean migration path
+# to a distributed queue (Redis/PostgreSQL) later without changing quiz logic.
+ai_job_queue = queue.Queue(maxsize=AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
+ai_worker_threads = []
+
 logging.info(
     "AI Manager initialized | model=%s | concurrent=%s | queue=%s | explanations=%s | request_timeout=%ss | total_timeout=%ss",
     ",".join(GEMINI_MODELS), AI_MAX_CONCURRENT, AI_MAX_QUEUE, GEMINI_INCLUDE_EXPLANATIONS,
@@ -2010,7 +2016,7 @@ async def create_quiz_from_file_groups(
             "Do not merge, omit, invent, or duplicate source questions. Preserve the original question meaning and answer choices.\n\n"
             + "\n\n".join(group)
         )
-        raw = await asyncio.to_thread(generate_quiz_from_gemini, payload)
+        raw = await generate_quiz_from_gemini_async(payload)
         if not raw:
             return idx, None, "ai_failed"
         try:
@@ -2027,7 +2033,13 @@ async def create_quiz_from_file_groups(
             return idx, None, "invalid_json"
 
     try:
-        results = await asyncio.gather(*(build_group(group, i + 1, len(ai_groups)) for i, group in enumerate(ai_groups)))
+        # Keep batches of the same user's test sequential. This is deliberate:
+        # one 200-question test should occupy only one AI slot at a time, so
+        # 150-200 simultaneous users form a predictable fair queue instead of
+        # one user consuming five or ten Gemini slots at once.
+        results = []
+        for i, group in enumerate(ai_groups):
+            results.append(await build_group(group, i + 1, len(ai_groups)))
         failed = [r for r in results if r[1] is None]
         if failed:
             if reserved:
@@ -2288,9 +2300,9 @@ async def create_quiz_web(
             except Exception: pass
         return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
-    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
-    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
-    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
+    # Gemini request dedicated AI workers orqali navbat bilan ishlaydi.
+    # Async facade FastAPI event loopni va default thread poolni bloklamaydi.
+    quiz_json_raw = await generate_quiz_from_gemini_async(raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
@@ -2410,7 +2422,7 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def generate_quiz_from_gemini(extracted_text):
+def _generate_quiz_from_gemini_worker(extracted_text):
     """
     Production AI Manager: bounded queue + concurrency + model fallback + key rotation.
 
@@ -2441,117 +2453,181 @@ CRITICAL RULES:
 2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
 {explanation_rule}"""
 
-    # Queue slot protects the server from an unbounded number of simultaneous
-    # generation jobs. 200 means the first 200 simultaneous requests can wait
-    # their turn instead of immediately failing.
-    if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        logging.warning("AI Queue kutish vaqti tugadi | queue=%s", AI_MAX_QUEUE)
-        return None
+    # This function runs only inside the dedicated AI worker threads.
+    # Queue admission is handled by generate_quiz_from_gemini_async().
+    total_keys = len(GOOGLE_API_KEYS)
+    with key_lock:
+        start_index = current_key_index
+        current_key_index = (current_key_index + 1) % total_keys
 
-    try:
-        total_keys = len(GOOGLE_API_KEYS)
-        with key_lock:
-            start_index = current_key_index
-            current_key_index = (current_key_index + 1) % total_keys
+    deadline = time.monotonic() + AI_TOTAL_TIMEOUT
+    last_error = None
+    model_attempted = set()
+    unavailable_models = set()
 
-        deadline = time.monotonic() + AI_TOTAL_TIMEOUT
-        last_error = None
-        model_attempted = set()
-        unavailable_models = set()
+    # Each retry round starts from a different key, while model fallback is
+    # independent. This prevents one unavailable model from blocking the other.
+    for retry_round in range(AI_RETRY_PER_KEY):
+        for model_name in GEMINI_MODELS:
+            if model_name in unavailable_models:
+                continue
+            if time.monotonic() >= deadline:
+                logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
+                return None
 
-        # Each retry round starts from a different key, while model fallback is
-        # independent. This prevents one unavailable model from blocking the other.
-        for retry_round in range(AI_RETRY_PER_KEY):
-            for model_name in GEMINI_MODELS:
-                if model_name in unavailable_models:
-                    continue
+            model_attempted.add(model_name)
+            for offset in range(total_keys):
                 if time.monotonic() >= deadline:
                     logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
                     return None
 
-                model_attempted.add(model_name)
-                for offset in range(total_keys):
-                    if time.monotonic() >= deadline:
-                        logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
-                        return None
+                key_idx = (start_index + offset + retry_round) % total_keys
+                api_key = GOOGLE_API_KEYS[key_idx].strip()
+                if not api_key:
+                    continue
 
-                    key_idx = (start_index + offset + retry_round) % total_keys
-                    api_key = GOOGLE_API_KEYS[key_idx].strip()
-                    if not api_key:
-                        continue
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
 
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        return None
+                if not gemini_semaphore.acquire(timeout=remaining):
+                    last_error = "Gemini concurrency kutish vaqti tugadi"
+                    continue
 
-                    if not gemini_semaphore.acquire(timeout=remaining):
-                        last_error = "Gemini concurrency kutish vaqti tugadi"
-                        continue
+                started = time.monotonic()
+                try:
+                    client = genai.Client(api_key=api_key)
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=extracted_text[:MAX_TEXT_INPUT_CHARS],
+                        config=genai_types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_mime_type="application/json",
+                            response_schema=QuizResponse,
+                            temperature=0.2,
+                        ),
+                    )
+                    elapsed = time.monotonic() - started
 
-                    started = time.monotonic()
-                    try:
-                        client = genai.Client(api_key=api_key)
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=extracted_text[:MAX_TEXT_INPUT_CHARS],
-                            config=genai_types.GenerateContentConfig(
-                                system_instruction=system_instruction,
-                                response_mime_type="application/json",
-                                response_schema=QuizResponse,
-                                temperature=0.2,
-                            ),
-                        )
-                        elapsed = time.monotonic() - started
-
-                        if elapsed > AI_REQUEST_TIMEOUT:
-                            logging.warning(
-                                "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo yakunlandi | model=%s | key=%s",
-                                elapsed, AI_REQUEST_TIMEOUT, model_name, key_idx
-                            )
-
-                        if response and response.text:
-                            logging.info(
-                                "AI muvaffaqiyatli | model=%s | key=%s | retry=%s | %.1fs",
-                                model_name, key_idx, retry_round + 1, elapsed
-                            )
-                            return response.text
-
-                        last_error = "Gemini bo'sh javob qaytardi"
-
-                    except Exception as e:
-                        last_error = str(e)
-                        error_text = last_error.lower()
-
-                        # 404/NOT_FOUND normally means the selected model is not
-                        # available for this project/user. Move to the fallback
-                        # model immediately instead of wasting all remaining keys.
-                        if "404" in error_text or "not_found" in error_text or "not found" in error_text:
-                            logging.warning(
-                                "Gemini model mavjud emas | model=%s | key=%s | fallback modelga o'tiladi",
-                                model_name, key_idx
-                            )
-                            unavailable_models.add(model_name)
-                            break
-
-                        # 429/503/UNAVAILABLE are treated as transient capacity
-                        # errors. Rotate to another key/model and back off briefly.
+                    if elapsed > AI_REQUEST_TIMEOUT:
                         logging.warning(
-                            "Gemini vaqtinchalik xato | model=%s | key=%s | retry=%s | %s",
-                            model_name, key_idx, retry_round + 1, e
+                            "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo yakunlandi | model=%s | key=%s",
+                            elapsed, AI_REQUEST_TIMEOUT, model_name, key_idx
                         )
-                    finally:
-                        gemini_semaphore.release()
 
-                    if time.monotonic() < deadline:
-                        time.sleep(min(4.0, 0.75 * (2 ** retry_round)))
+                    if response and response.text:
+                        logging.info(
+                            "AI muvaffaqiyatli | model=%s | key=%s | retry=%s | %.1fs",
+                            model_name, key_idx, retry_round + 1, elapsed
+                        )
+                        return response.text
 
-        logging.error(
-            "Barcha AI urinishlari muvaffaqiyatsiz | models=%s | keys=%s | oxirgi_xato=%s",
-            ",".join(model_attempted), total_keys, last_error
+                    last_error = "Gemini bo'sh javob qaytardi"
+
+                except Exception as e:
+                    last_error = str(e)
+                    error_text = last_error.lower()
+
+                    # 404/NOT_FOUND normally means the selected model is not
+                    # available for this project/user. Move to the fallback
+                    # model immediately instead of wasting all remaining keys.
+                    if "404" in error_text or "not_found" in error_text or "not found" in error_text:
+                        logging.warning(
+                            "Gemini model mavjud emas | model=%s | key=%s | fallback modelga o'tiladi",
+                            model_name, key_idx
+                        )
+                        unavailable_models.add(model_name)
+                        break
+
+                    # 429/503/UNAVAILABLE are treated as transient capacity
+                    # errors. Rotate to another key/model and back off briefly.
+                    logging.warning(
+                        "Gemini vaqtinchalik xato | model=%s | key=%s | retry=%s | %s",
+                        model_name, key_idx, retry_round + 1, e
+                    )
+                finally:
+                    gemini_semaphore.release()
+
+                if time.monotonic() < deadline:
+                    time.sleep(min(4.0, 0.75 * (2 ** retry_round)))
+
+    logging.error(
+        "Barcha AI urinishlari muvaffaqiyatsiz | models=%s | keys=%s | oxirgi_xato=%s",
+        ",".join(model_attempted), total_keys, last_error
+    )
+    return None
+
+
+def _ai_worker_loop():
+    """Dedicated worker loop: exactly AI_MAX_CONCURRENT Gemini jobs at once."""
+    while True:
+        item = ai_job_queue.get()
+        if item is None:
+            ai_job_queue.task_done()
+            break
+        future, payload = item
+        try:
+            if not future.cancelled():
+                future.set_result(_generate_quiz_from_gemini_worker(payload))
+        except Exception as exc:
+            logging.exception("AI worker internal error: %s", exc)
+            if not future.cancelled():
+                future.set_result(None)
+        finally:
+            ai_job_queue.task_done()
+
+
+def _start_ai_workers():
+    if ai_worker_threads:
+        return
+    for idx in range(AI_MAX_CONCURRENT):
+        worker = threading.Thread(
+            target=_ai_worker_loop,
+            name=f"quiz-ai-worker-{idx + 1}",
+            daemon=True,
+        )
+        worker.start()
+        ai_worker_threads.append(worker)
+    logging.info(
+        "AI worker pool started | workers=%s | queue=%s",
+        AI_MAX_CONCURRENT, AI_MAX_QUEUE
+    )
+
+
+def _enqueue_ai_job(payload):
+    future = Future()
+    try:
+        ai_job_queue.put_nowait((future, payload))
+        return future
+    except queue.Full:
+        logging.warning(
+            "AI Queue full | queue=%s | rejecting new generation job safely",
+            AI_MAX_QUEUE,
         )
         return None
-    finally:
-        ai_queue_slots.release()
+
+
+async def generate_quiz_from_gemini_async(extracted_text):
+    """Async facade: queue the job without blocking FastAPI's thread pool."""
+    _start_ai_workers()
+    future = _enqueue_ai_job(extracted_text)
+    if future is None:
+        return None
+
+    # Polling a Future from async code avoids consuming one thread per queued
+    # user. This is important when hundreds of users press Create at once.
+    deadline = time.monotonic() + AI_TOTAL_TIMEOUT + AI_REQUEST_TIMEOUT
+    while not future.done():
+        if time.monotonic() >= deadline:
+            logging.warning("AI client wait timeout reached")
+            return None
+        await asyncio.sleep(0.25)
+
+    try:
+        return future.result()
+    except Exception as exc:
+        logging.exception("AI future result error: %s", exc)
+        return None
 
 
 @app.post("/api/contact-admin")
@@ -4177,6 +4253,8 @@ async def api_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_event():
+    # Start the dedicated AI worker pool once per application process.
+    _start_ai_workers()
     # P2P OCR is an isolated background subsystem. It never blocks the bot/event loop.
     try:
         p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
