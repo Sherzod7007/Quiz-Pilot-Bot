@@ -148,6 +148,130 @@ def file_protection_message(lang: str, key: str) -> str:
     return FILE_PROTECTION_MESSAGES.get(lang, FILE_PROTECTION_MESSAGES["uz"]).get(key, FILE_PROTECTION_MESSAGES["uz"]["unreadable"])
 
 DOWNLOADS_DIR = "downloads"
+
+# Temporary source files for the professional PDF/DOCX test-creation workflow.
+# They live only during the analysis -> user choice -> AI creation flow.
+quiz_source_jobs = {}
+quiz_source_jobs_lock = threading.Lock()
+QUIZ_SOURCE_JOB_TTL = 30 * 60
+
+def _cleanup_quiz_source_jobs():
+    cutoff = time.time() - QUIZ_SOURCE_JOB_TTL
+    stale_paths = []
+    with quiz_source_jobs_lock:
+        for token, job in list(quiz_source_jobs.items()):
+            if float(job.get("created_at", 0)) < cutoff:
+                stale_paths.append(job.get("path"))
+                quiz_source_jobs.pop(token, None)
+    for path in stale_paths:
+        if path:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+def _release_quiz_source_job(token):
+    with quiz_source_jobs_lock:
+        job = quiz_source_jobs.pop(token, None)
+    if job and job.get("path"):
+        try:
+            os.remove(job["path"])
+        except Exception:
+            pass
+    return job
+
+def _extract_source_text(file_path, extension):
+    """Extract protected text from PDF/DOCX without invoking AI."""
+    if extension == ".pdf":
+        reader = PdfReader(file_path)
+        page_count = len(reader.pages)
+        if page_count > MAX_PDF_PAGES:
+            raise ValueError("too_many_pages")
+        parts = []
+        total_len = 0
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            if page_text:
+                total_len += len(page_text)
+                if total_len > MAX_EXTRACTED_TEXT_CHARS:
+                    raise ValueError("too_much_text")
+                parts.append(page_text)
+        return "\n".join(parts)
+    if extension == ".docx":
+        doc = docx.Document(file_path)
+        parts = []
+        total_len = 0
+        for paragraph in doc.paragraphs:
+            part = paragraph.text or ""
+            total_len += len(part)
+            if total_len > MAX_EXTRACTED_TEXT_CHARS:
+                raise ValueError("too_much_text")
+            parts.append(part)
+        return "\n".join(parts)
+    raise ValueError("unsupported")
+
+def _extract_numbered_question_blocks(raw_text):
+    """Find numbered question blocks such as 1. / 2) / 3 - and preserve their text."""
+    text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    pattern = re.compile(r"^\s*(\d{1,4})\s*(?:[.)]|[-–—])\s+(.+?)\s*$")
+    matches = []
+    for idx, line in enumerate(lines):
+        m = pattern.match(line)
+        if not m:
+            continue
+        number = int(m.group(1))
+        # Avoid treating ordinary year/list fragments as questions. A numbered
+        # question sequence is accepted when it starts at 1, or when it follows
+        # another detected number consecutively.
+        if number == 1 or (matches and number == matches[-1][0] + 1):
+            matches.append((number, idx))
+    if not matches or matches[0][0] != 1:
+        return []
+
+    blocks = []
+    for pos, (number, start_idx) in enumerate(matches):
+        end_idx = matches[pos + 1][1] if pos + 1 < len(matches) else len(lines)
+        block = "\n".join(lines[start_idx:end_idx]).strip()
+        if block:
+            blocks.append(block)
+    return blocks
+
+def _reserve_quiz_slot_for_grouped_creation(user_id):
+    """Atomically reserve one free AI-creation slot for the whole grouped job."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            return False, None
+        status, premium_until, free_used, created_at = row
+        status = status or "Oddiy foydalanuvchi"
+        premium_until = premium_until or 0
+        free_used = free_used or 0
+        now = int(time.time())
+        if created_at and now - int(created_at) >= 30 * 24 * 3600:
+            cur.execute("UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, created_at=? WHERE user_id=?", (now, user_id))
+            conn.commit()
+            free_used = 0
+        if "PRO" in status and premium_until > 0 and now > premium_until:
+            cur.execute("UPDATE users SET status='Oddiy foydalanuvchi', premium_until=0 WHERE user_id=?", (user_id,))
+            conn.commit()
+            status = "Oddiy foydalanuvchi"
+        if "PRO" in status:
+            return False, False
+        cur.execute(
+            "UPDATE users SET free_used=COALESCE(free_used,0)+1 WHERE user_id=? AND COALESCE(free_used,0) < ?",
+            (user_id, FREE_QUIZ_LIMIT),
+        )
+        if cur.rowcount != 1:
+            return False, True
+        conn.commit()
+        return True, False
+    finally:
+        conn.close()
+
 DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
@@ -247,6 +371,13 @@ MESSAGES = {
         "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
+        "quiz_file_required": "📄 Iltimos, PDF yoki DOCX fayl tanlang.",
+        "quiz_questions_not_detected": "⚠️ Fayldagi raqamlangan savollar avtomatik aniqlanmadi. Savollar 1., 2., 3. kabi tartibda bo‘lishi kerak.",
+        "quiz_file_session_expired": "⏰ Fayl sessiyasi tugagan. Faylni qayta yuklang.",
+        "quiz_mode_invalid": "⚠️ Test yaratish rejimi noto‘g‘ri.",
+        "quiz_group_size_invalid": "⚠️ 20, 30 yoki 40 ta savolni tanlang.",
+        "quiz_group_generation_failed": "❌ Ayrim test guruhlarini yaratib bo‘lmadi. Qayta urinib ko‘ring.",
+        "quiz_groups_ready": "🎉 {count} ta test muvaffaqiyatli yaratildi!",
         "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan 3 ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
         "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
@@ -296,6 +427,13 @@ MESSAGES = {
         "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
+        "quiz_file_required": "📄 Пожалуйста, выберите файл PDF или DOCX.",
+        "quiz_questions_not_detected": "⚠️ Нумерованные вопросы в файле не удалось автоматически определить. Используйте формат 1., 2., 3. и т.д.",
+        "quiz_file_session_expired": "⏰ Сессия файла истекла. Загрузите файл заново.",
+        "quiz_mode_invalid": "⚠️ Неверный режим создания теста.",
+        "quiz_group_size_invalid": "⚠️ Выберите 20, 30 или 40 вопросов.",
+        "quiz_group_generation_failed": "❌ Не удалось создать некоторые группы тестов. Попробуйте ещё раз.",
+        "quiz_groups_ready": "🎉 Успешно создано тестов: {count}!",
         "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все 3 бесплатных AI-теста. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
         "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали 3 бесплатных публичных теста за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали 3 бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
@@ -345,6 +483,13 @@ MESSAGES = {
         "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
+        "quiz_file_required": "📄 Please select a PDF or DOCX file.",
+        "quiz_questions_not_detected": "⚠️ Numbered questions could not be detected automatically. Use a format such as 1., 2., 3., etc.",
+        "quiz_file_session_expired": "⏰ The file session has expired. Please upload the file again.",
+        "quiz_mode_invalid": "⚠️ Invalid test creation mode.",
+        "quiz_group_size_invalid": "⚠️ Choose 20, 30, or 40 questions.",
+        "quiz_group_generation_failed": "❌ Some test groups could not be created. Please try again.",
+        "quiz_groups_ready": "🎉 Successfully created {count} tests!",
         "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all 3 free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
         "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your 3 free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your 3 free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
@@ -1729,6 +1874,201 @@ def get_premium_status(user_id: int):
     }
 
 MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES  # MAX_UPLOAD_FILE_MB (baytlarda)
+
+@app.post("/api/analyze-quiz-file")
+async def analyze_quiz_file(user_id: int = Form(...), file: Optional[UploadFile] = File(None)):
+    """Analyze PDF/DOCX locally first; no AI request and no free-limit consumption."""
+    add_user_to_db(user_id)
+    lang = get_user_lang(user_id)
+    _cleanup_quiz_source_jobs()
+    if not file or not file.filename:
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_file_required", "Fayl tanlang.")}
+    original_name = Path(file.filename).name
+    extension = Path(original_name).suffix.lower()
+    if extension not in ALLOWED_UPLOAD_EXTENSIONS:
+        return {"status": "error", "message": file_protection_message(lang, "unsupported")}
+    try:
+        contents = await file.read()
+        if len(contents) > MAX_UPLOAD_FILE_BYTES:
+            return {"status": "error", "message": file_protection_message(lang, "too_large")}
+        if not contents:
+            return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        token = uuid.uuid4().hex
+        path = os.path.join(DOWNLOADS_DIR, f"quiz_source_{token}{extension}")
+        with open(path, "wb") as fh:
+            fh.write(contents)
+        try:
+            raw_text = await asyncio.to_thread(_extract_source_text, path, extension)
+            blocks = _extract_numbered_question_blocks(raw_text)
+        except ValueError as exc:
+            try: os.remove(path)
+            except Exception: pass
+            key = str(exc)
+            if key in {"too_many_pages", "too_much_text"}:
+                return {"status": "error", "message": file_protection_message(lang, key)}
+            return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+        except Exception as exc:
+            logging.error("Quiz file analysis error: %s", exc)
+            try: os.remove(path)
+            except Exception: pass
+            return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+
+        if not blocks:
+            try: os.remove(path)
+            except Exception: pass
+            return {"status": "error", "error_code": "questions_not_detected", "message": MESSAGES[lang].get("quiz_questions_not_detected", "Savollar avtomatik aniqlanmadi.")}
+
+        with quiz_source_jobs_lock:
+            quiz_source_jobs[token] = {
+                "path": path,
+                "filename": original_name,
+                "title": Path(original_name).stem,
+                "blocks": blocks,
+                "created_at": time.time(),
+            }
+        return {
+            "status": "ok",
+            "file_token": token,
+            "filename": original_name,
+            "title": Path(original_name).stem,
+            "question_count": len(blocks),
+        }
+    except Exception as exc:
+        logging.error("Quiz file analysis unexpected error: %s", exc)
+        return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+
+
+@app.post("/api/create-quiz-from-file-groups")
+async def create_quiz_from_file_groups(
+    user_id: int = Form(...),
+    file_token: str = Form(...),
+    mode: str = Form("single"),
+    group_size: int = Form(0),
+    quiz_title: Optional[str] = Form(None),
+):
+    """Create one or multiple AI quizzes from already detected question blocks."""
+    add_user_to_db(user_id)
+    lang = get_user_lang(user_id)
+    _cleanup_quiz_source_jobs()
+    with quiz_source_jobs_lock:
+        job = quiz_source_jobs.get(file_token)
+    if not job:
+        return {"status": "error", "error_code": "file_session_expired", "message": MESSAGES[lang].get("quiz_file_session_expired", "Fayl sessiyasi tugagan. Faylni qayta yuklang.")}
+
+    if mode not in {"single", "groups"}:
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_mode_invalid", "Test yaratish rejimi noto‘g‘ri.")}
+    if mode == "groups" and group_size not in {20, 30, 40}:
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_group_size_invalid", "20, 30 yoki 40 ni tanlang.")}
+
+    reserved, limit_hit = _reserve_quiz_slot_for_grouped_creation(user_id)
+    if limit_hit is True:
+        return {"status": "error", "error_code": "free_limit", "message": MESSAGES[lang]["quiz_limit_reached"]}
+
+    blocks = list(job.get("blocks") or [])
+    if not blocks:
+        if reserved:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False); conn.execute("UPDATE users SET free_used=CASE WHEN COALESCE(free_used,0)>0 THEN free_used-1 ELSE 0 END WHERE user_id=?", (user_id,)); conn.commit(); conn.close()
+        _release_quiz_source_job(file_token)
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_questions_not_detected", "Savollar avtomatik aniqlanmadi.")}
+
+    base_title = (quiz_title or "").strip() or job.get("title") or "Test"
+    base_title = base_title[:30]
+    # A single 200-question test is still processed in safe AI batches. This
+    # prevents one oversized Gemini request while the final result remains one
+    # complete quiz. Multiple-group mode already has a safe 20/30/40 batch size.
+    if mode == "single":
+        output_groups = [blocks]
+        ai_groups = [blocks[i:i + 40] for i in range(0, len(blocks), 40)]
+    else:
+        output_groups = [blocks[i:i + group_size] for i in range(0, len(blocks), group_size)]
+        ai_groups = output_groups
+
+    async def build_group(group, idx, total_groups):
+        expected = len(group)
+        payload = (
+            f"IMPORTANT: This is quiz batch {idx} of {total_groups}. Return EXACTLY {expected} quiz questions from the numbered source below. "
+            "Do not merge, omit, invent, or duplicate source questions. Preserve the original question meaning and answer choices.\n\n"
+            + "\n\n".join(group)
+        )
+        raw = await asyncio.to_thread(generate_quiz_from_gemini, payload)
+        if not raw:
+            return idx, None, "ai_failed"
+        try:
+            data = json.loads(raw)
+            items = data.get("quizzes", [])
+            items = randomize_quiz_answer_positions(items)
+            if len(items) != expected:
+                logging.warning("Grouped quiz count mismatch | batch=%s | expected=%s | got=%s", idx, expected, len(items))
+                return idx, None, "count_mismatch"
+            data["quizzes"] = items
+            return idx, data, None
+        except Exception as exc:
+            logging.error("Grouped quiz JSON error | batch=%s | %s", idx, exc)
+            return idx, None, "invalid_json"
+
+    try:
+        results = await asyncio.gather(*(build_group(group, i + 1, len(ai_groups)) for i, group in enumerate(ai_groups)))
+        failed = [r for r in results if r[1] is None]
+        if failed:
+            if reserved:
+                conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn.execute("UPDATE users SET free_used=CASE WHEN COALESCE(free_used,0)>0 THEN free_used-1 ELSE 0 END WHERE user_id=?", (user_id,))
+                conn.commit(); conn.close()
+            _release_quiz_source_job(file_token)
+            return {"status": "error", "error_code": "group_generation_failed", "failed_groups": [r[0] for r in failed], "message": MESSAGES[lang].get("quiz_group_generation_failed", "Ayrim test guruhlarini yaratib bo‘lmadi. Qayta urinib ko‘ring.")}
+
+        # Build the final quiz payloads. In single mode all safe AI batches are
+        # merged into one quiz; in group mode each selected chunk becomes one quiz.
+        final_quizzes = []
+        if mode == "single":
+            merged_items = []
+            for _, data, _ in sorted(results, key=lambda r: r[0]):
+                merged_items.extend(data.get("quizzes", []))
+            final_quizzes = [(1, {"quizzes": merged_items})]
+        else:
+            final_quizzes = [(idx, data) for idx, data, _ in sorted(results, key=lambda r: r[0])]
+
+        created = []
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            for idx, data in final_quizzes:
+                title = base_title if mode == "single" else f"{base_title} {idx}"
+                quiz_id = f"q_{uuid.uuid4().hex}"
+                quiz_json = json.dumps(data, ensure_ascii=False)
+                total = len(data.get("quizzes", []))
+                if mode == "single" and total != len(blocks):
+                    raise ValueError("final_single_quiz_count_mismatch")
+                conn.execute(
+                    "INSERT INTO quizzes (id,user_id,title,total,answered,quiz_json,created_at,last_score,last_percent,is_public) VALUES (?,?,?,?,?,?,?,?,?,0)",
+                    (quiz_id, user_id, title[:30], total, 0, quiz_json, int(time.time()), -1, -1),
+                )
+                created.append({"id": quiz_id, "title": title[:30], "total": total})
+            conn.commit()
+        finally:
+            conn.close()
+
+        if reserved:
+            notify_free_limit_reached(user_id, "quiz")
+        _release_quiz_source_job(file_token)
+        try:
+            q_ready = MESSAGES[lang].get("quiz_groups_ready", "{count} ta test muvaffaqiyatli yaratildi!").format(count=len(created))
+            bot.send_message(user_id, q_ready)
+        except Exception as exc:
+            logging.error("Grouped quiz Telegram notification failed: %s", exc)
+        return {"status": "ok", "created": created, "total_groups": len(created), "question_count": len(blocks)}
+    except Exception as exc:
+        logging.error("Grouped quiz creation error: %s", exc)
+        if reserved:
+            try:
+                conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn.execute("UPDATE users SET free_used=CASE WHEN COALESCE(free_used,0)>0 THEN free_used-1 ELSE 0 END WHERE user_id=?", (user_id,))
+                conn.commit(); conn.close()
+            except Exception: pass
+        _release_quiz_source_job(file_token)
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_group_generation_failed", "Ayrim test guruhlarini yaratib bo‘lmadi. Qayta urinib ko‘ring.")}
+
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
