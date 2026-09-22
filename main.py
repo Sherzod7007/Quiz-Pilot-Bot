@@ -26,6 +26,8 @@ import sqlite3
 import telebot
 import threading
 import time
+import queue
+from concurrent.futures import Future
 from typing import List, Optional
 import uvicorn
 import uuid
@@ -75,15 +77,28 @@ key_lock = threading.Lock()
 # paid key, or later to multiple independent projects/keys.
 #
 # Recommended Railway variables for production can be tuned without code changes:
-#   GEMINI_MODEL=gemini-2.5-flash
+#   GEMINI_MODEL=gemini-3.6-flash
+#   GEMINI_FALLBACK_MODEL=gemini-2.5-flash
 #   AI_MAX_CONCURRENT=10
-#   AI_MAX_QUEUE=150
+#   AI_MAX_QUEUE=500
 #   AI_RETRY_PER_KEY=2
 #   AI_REQUEST_TIMEOUT=600
 #   AI_TOTAL_TIMEOUT=1800
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+# Primary model remains configurable for compatibility, while a second model is
+# always kept as a fallback so generation is not tied to one Gemini model.
+# Production default is Gemini 3.6 Flash. A legacy GEMINI_MODEL=gemini-2.5-flash
+# variable is still accepted, but 3.6 is automatically kept as a fallback so an
+# old Railway variable can never lock the application to 2.5 only.
+_configured_gemini_model = os.getenv("GEMINI_MODEL", "").strip()
+GEMINI_MODEL = _configured_gemini_model or "gemini-3.6-flash"
+_default_fallback = "gemini-2.5-flash" if GEMINI_MODEL == "gemini-3.6-flash" else "gemini-3.6-flash"
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", _default_fallback).strip() or _default_fallback
+GEMINI_MODELS = []
+for _model_name in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
+    if _model_name and _model_name not in GEMINI_MODELS:
+        GEMINI_MODELS.append(_model_name)
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", "10")))
-AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "150")))
+AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "500")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
@@ -100,13 +115,17 @@ GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").s
 # the AI queue. Large books should be split/batched rather than silently truncated.
 MAX_TEXT_INPUT_CHARS = max(10000, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 
-# Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
-# AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
-ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
+# Real bounded AI queue. API requests are accepted into this queue instead of
+# occupying FastAPI's default thread pool while waiting for Gemini. This keeps
+# the AI layer stable under burst traffic and gives us a clean migration path
+# to a distributed queue (Redis/PostgreSQL) later without changing quiz logic.
+ai_job_queue = queue.Queue(maxsize=AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
+ai_worker_threads = []
+
 logging.info(
     "AI Manager initialized | model=%s | concurrent=%s | queue=%s | explanations=%s | request_timeout=%ss | total_timeout=%ss",
-    GEMINI_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE, GEMINI_INCLUDE_EXPLANATIONS,
+    ",".join(GEMINI_MODELS), AI_MAX_CONCURRENT, AI_MAX_QUEUE, GEMINI_INCLUDE_EXPLANATIONS,
     AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
 )
 
@@ -148,6 +167,130 @@ def file_protection_message(lang: str, key: str) -> str:
     return FILE_PROTECTION_MESSAGES.get(lang, FILE_PROTECTION_MESSAGES["uz"]).get(key, FILE_PROTECTION_MESSAGES["uz"]["unreadable"])
 
 DOWNLOADS_DIR = "downloads"
+
+# Temporary source files for the professional PDF/DOCX test-creation workflow.
+# They live only during the analysis -> user choice -> AI creation flow.
+quiz_source_jobs = {}
+quiz_source_jobs_lock = threading.Lock()
+QUIZ_SOURCE_JOB_TTL = 30 * 60
+
+def _cleanup_quiz_source_jobs():
+    cutoff = time.time() - QUIZ_SOURCE_JOB_TTL
+    stale_paths = []
+    with quiz_source_jobs_lock:
+        for token, job in list(quiz_source_jobs.items()):
+            if float(job.get("created_at", 0)) < cutoff:
+                stale_paths.append(job.get("path"))
+                quiz_source_jobs.pop(token, None)
+    for path in stale_paths:
+        if path:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+def _release_quiz_source_job(token):
+    with quiz_source_jobs_lock:
+        job = quiz_source_jobs.pop(token, None)
+    if job and job.get("path"):
+        try:
+            os.remove(job["path"])
+        except Exception:
+            pass
+    return job
+
+def _extract_source_text(file_path, extension):
+    """Extract protected text from PDF/DOCX without invoking AI."""
+    if extension == ".pdf":
+        reader = PdfReader(file_path)
+        page_count = len(reader.pages)
+        if page_count > MAX_PDF_PAGES:
+            raise ValueError("too_many_pages")
+        parts = []
+        total_len = 0
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            if page_text:
+                total_len += len(page_text)
+                if total_len > MAX_EXTRACTED_TEXT_CHARS:
+                    raise ValueError("too_much_text")
+                parts.append(page_text)
+        return "\n".join(parts)
+    if extension == ".docx":
+        doc = docx.Document(file_path)
+        parts = []
+        total_len = 0
+        for paragraph in doc.paragraphs:
+            part = paragraph.text or ""
+            total_len += len(part)
+            if total_len > MAX_EXTRACTED_TEXT_CHARS:
+                raise ValueError("too_much_text")
+            parts.append(part)
+        return "\n".join(parts)
+    raise ValueError("unsupported")
+
+def _extract_numbered_question_blocks(raw_text):
+    """Find numbered question blocks such as 1. / 2) / 3 - and preserve their text."""
+    text = (raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    pattern = re.compile(r"^\s*(\d{1,4})\s*(?:[.)]|[-–—])\s+(.+?)\s*$")
+    matches = []
+    for idx, line in enumerate(lines):
+        m = pattern.match(line)
+        if not m:
+            continue
+        number = int(m.group(1))
+        # Avoid treating ordinary year/list fragments as questions. A numbered
+        # question sequence is accepted when it starts at 1, or when it follows
+        # another detected number consecutively.
+        if number == 1 or (matches and number == matches[-1][0] + 1):
+            matches.append((number, idx))
+    if not matches or matches[0][0] != 1:
+        return []
+
+    blocks = []
+    for pos, (number, start_idx) in enumerate(matches):
+        end_idx = matches[pos + 1][1] if pos + 1 < len(matches) else len(lines)
+        block = "\n".join(lines[start_idx:end_idx]).strip()
+        if block:
+            blocks.append(block)
+    return blocks
+
+def _reserve_quiz_slot_for_grouped_creation(user_id):
+    """Atomically reserve one free AI-creation slot for the whole grouped job."""
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT status, premium_until, free_used, created_at FROM users WHERE user_id = ?", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            return False, None
+        status, premium_until, free_used, created_at = row
+        status = status or "Oddiy foydalanuvchi"
+        premium_until = premium_until or 0
+        free_used = free_used or 0
+        now = int(time.time())
+        if created_at and now - int(created_at) >= 30 * 24 * 3600:
+            cur.execute("UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, created_at=? WHERE user_id=?", (now, user_id))
+            conn.commit()
+            free_used = 0
+        if "PRO" in status and premium_until > 0 and now > premium_until:
+            cur.execute("UPDATE users SET status='Oddiy foydalanuvchi', premium_until=0 WHERE user_id=?", (user_id,))
+            conn.commit()
+            status = "Oddiy foydalanuvchi"
+        if "PRO" in status:
+            return False, False
+        cur.execute(
+            "UPDATE users SET free_used=COALESCE(free_used,0)+1 WHERE user_id=? AND COALESCE(free_used,0) < ?",
+            (user_id, FREE_QUIZ_LIMIT),
+        )
+        if cur.rowcount != 1:
+            return False, True
+        conn.commit()
+        return True, False
+    finally:
+        conn.close()
+
 DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
@@ -219,7 +362,7 @@ MESSAGES = {
             "🌍 O'zbek, Русский va English tillari.\n"
             "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
-            "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
+            "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.«Tranzaksiya ID raqami boʻlmagan cheklar qabul qilinmaydi».\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz AI imkoniyatlaridan foydalaning!"
         ),
@@ -247,6 +390,15 @@ MESSAGES = {
         "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
+        "quiz_generation_failed": "⚠️ AI test yaratish xizmati hozir band. Iltimos, birozdan so‘ng qayta urinib ko‘ring.",
+        "quiz_response_invalid": "⚠️ Test tayyorlash jarayonida vaqtinchalik muammo yuz berdi. Iltimos, qayta urinib ko‘ring.",
+        "quiz_file_required": "📄 Iltimos, PDF yoki DOCX fayl tanlang.",
+        "quiz_questions_not_detected": "⚠️ Fayldagi raqamlangan savollar avtomatik aniqlanmadi. Savollar 1., 2., 3. kabi tartibda bo‘lishi kerak.",
+        "quiz_file_session_expired": "⏰ Fayl sessiyasi tugagan. Faylni qayta yuklang.",
+        "quiz_mode_invalid": "⚠️ Test yaratish rejimi noto‘g‘ri.",
+        "quiz_group_size_invalid": "⚠️ 20, 30 yoki 40 ta savolni tanlang.",
+        "quiz_group_generation_failed": "❌ Ayrim test guruhlarini yaratib bo‘lmadi. Qayta urinib ko‘ring.",
+        "quiz_groups_ready": "🎉 {count} ta test muvaffaqiyatli yaratildi!",
         "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan 3 ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
         "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
@@ -269,7 +421,7 @@ MESSAGES = {
             "🌍 Узбекский, русский и английский языки.\n"
             "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
-            "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
+            "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.«Чеки без номера транзакции не принимаются».\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz AI!"
         ),
@@ -296,6 +448,15 @@ MESSAGES = {
         "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
+        "quiz_generation_failed": "⚠️ Сервис создания AI-тестов сейчас занят. Пожалуйста, попробуйте ещё раз немного позже.",
+        "quiz_response_invalid": "⚠️ Во время подготовки теста возникла временная проблема. Пожалуйста, попробуйте ещё раз.",
+        "quiz_file_required": "📄 Пожалуйста, выберите файл PDF или DOCX.",
+        "quiz_questions_not_detected": "⚠️ Нумерованные вопросы в файле не удалось автоматически определить. Используйте формат 1., 2., 3. и т.д.",
+        "quiz_file_session_expired": "⏰ Сессия файла истекла. Загрузите файл заново.",
+        "quiz_mode_invalid": "⚠️ Неверный режим создания теста.",
+        "quiz_group_size_invalid": "⚠️ Выберите 20, 30 или 40 вопросов.",
+        "quiz_group_generation_failed": "❌ Не удалось создать некоторые группы тестов. Попробуйте ещё раз.",
+        "quiz_groups_ready": "🎉 Успешно создано тестов: {count}!",
         "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все 3 бесплатных AI-теста. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
         "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали 3 бесплатных публичных теста за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали 3 бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
@@ -318,7 +479,7 @@ MESSAGES = {
             "🌍 Uzbek, Russian and English languages.\n"
             "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
-            "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
+            "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.«Checks without a transaction ID number will not be accepted».\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
             "🚀 Tap the button below and start using Quiz AI!"
         ),
@@ -345,6 +506,15 @@ MESSAGES = {
         "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
+        "quiz_generation_failed": "⚠️ The AI quiz service is currently busy. Please try again in a little while.",
+        "quiz_response_invalid": "⚠️ A temporary problem occurred while preparing the quiz. Please try again.",
+        "quiz_file_required": "📄 Please select a PDF or DOCX file.",
+        "quiz_questions_not_detected": "⚠️ Numbered questions could not be detected automatically. Use a format such as 1., 2., 3., etc.",
+        "quiz_file_session_expired": "⏰ The file session has expired. Please upload the file again.",
+        "quiz_mode_invalid": "⚠️ Invalid test creation mode.",
+        "quiz_group_size_invalid": "⚠️ Choose 20, 30, or 40 questions.",
+        "quiz_group_generation_failed": "❌ Some test groups could not be created. Please try again.",
+        "quiz_groups_ready": "🎉 Successfully created {count} tests!",
         "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all 3 free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
         "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your 3 free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your 3 free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
@@ -1343,71 +1513,6 @@ def admin_bonus_command(message):
         pass
 
 
-@bot.message_handler(commands=["bonus_teacher"])
-def admin_bonus_teacher_command(message):
-    """Grant a free Teacher plan for testing; admin-only and never charges the user."""
-    if not _admin_only(message):
-        return
-    parts = (message.text or "").split()
-    if len(parts) != 3:
-        bot.send_message(message.chat.id, "Format: /bonus_teacher USER_ID KUN\nMisol: /bonus_teacher 123456789 30")
-        return
-    try:
-        target_id = int(parts[1])
-        days = int(parts[2])
-        if days <= 0 or days > 3650:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ USER_ID son, KUN esa 1–3650 oralig'ida bo'lishi kerak.")
-        return
-
-    add_user_to_db(target_id)
-    now = int(time.time())
-    duration = days * 24 * 3600
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.cursor()
-        cur.execute("PRAGMA busy_timeout=30000")
-        row = cur.execute(
-            "SELECT status, plan_key, premium_until, premium_source FROM users WHERE user_id=?",
-            (target_id,),
-        ).fetchone()
-        old_until = int(row["premium_until"] or 0) if row else 0
-        old_active = bool(row and is_active_paid_status(row["status"] or "", old_until))
-        if old_active:
-            bot.send_message(
-                message.chat.id,
-                f"ℹ️ User {target_id} hozir faol Premium tarifda. Uning pullik tarifiga tegilmadi."
-            )
-            return
-
-        new_until = now + duration
-        cur.execute(
-            "UPDATE users SET status=?, plan_key=?, premium_until=?, premium_source=? WHERE user_id=?",
-            ("PRO ✨ (Admin Bonus)", "teachers", new_until, "admin_bonus", target_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    uz_time = time.strftime("%d.%m.%Y %H:%M", time.gmtime(new_until + 5 * 3600))
-    bot.send_message(
-        message.chat.id,
-        f"👨‍🏫 Teacher Admin Bonus berildi.\n👤 User: {target_id}\n⏰ Gacha: {uz_time}\n📅 Muddat: {days} kun",
-    )
-    try:
-        lang = get_user_lang(target_id)
-        texts = {
-            "uz": f"👨‍🏫 Sizga administrator tomonidan {days} kunlik bepul Teacher Premium berildi!\n\n⏰ Gacha: {uz_time}\n👑 Status: PRO ✨ (Admin Bonus)",
-            "ru": f"👨‍🏫 Администратор предоставил вам бесплатный Teacher Premium на {days} дней!\n\n⏰ До: {uz_time}\n👑 Статус: PRO ✨ (Admin Bonus)",
-            "en": f"👨‍🏫 The administrator granted you {days} days of free Teacher Premium!\n\n⏰ Until: {uz_time}\n👑 Status: PRO ✨ (Admin Bonus)",
-        }
-        bot.send_message(target_id, texts.get(lang, texts["uz"]))
-    except Exception:
-        pass
-
-
 @bot.message_handler(commands=["bonus_revoke"])
 def admin_bonus_revoke_command(message):
     if not _admin_only(message):
@@ -1794,6 +1899,207 @@ def get_premium_status(user_id: int):
     }
 
 MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES  # MAX_UPLOAD_FILE_MB (baytlarda)
+
+@app.post("/api/analyze-quiz-file")
+async def analyze_quiz_file(user_id: int = Form(...), file: Optional[UploadFile] = File(None)):
+    """Analyze PDF/DOCX locally first; no AI request and no free-limit consumption."""
+    add_user_to_db(user_id)
+    lang = get_user_lang(user_id)
+    _cleanup_quiz_source_jobs()
+    if not file or not file.filename:
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_file_required", "Fayl tanlang.")}
+    original_name = Path(file.filename).name
+    extension = Path(original_name).suffix.lower()
+    if extension not in ALLOWED_UPLOAD_EXTENSIONS:
+        return {"status": "error", "message": file_protection_message(lang, "unsupported")}
+    try:
+        contents = await file.read()
+        if len(contents) > MAX_UPLOAD_FILE_BYTES:
+            return {"status": "error", "message": file_protection_message(lang, "too_large")}
+        if not contents:
+            return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        token = uuid.uuid4().hex
+        path = os.path.join(DOWNLOADS_DIR, f"quiz_source_{token}{extension}")
+        with open(path, "wb") as fh:
+            fh.write(contents)
+        try:
+            raw_text = await asyncio.to_thread(_extract_source_text, path, extension)
+            blocks = _extract_numbered_question_blocks(raw_text)
+        except ValueError as exc:
+            try: os.remove(path)
+            except Exception: pass
+            key = str(exc)
+            if key in {"too_many_pages", "too_much_text"}:
+                return {"status": "error", "message": file_protection_message(lang, key)}
+            return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+        except Exception as exc:
+            logging.error("Quiz file analysis error: %s", exc)
+            try: os.remove(path)
+            except Exception: pass
+            return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+
+        if not blocks:
+            try: os.remove(path)
+            except Exception: pass
+            return {"status": "error", "error_code": "questions_not_detected", "message": MESSAGES[lang].get("quiz_questions_not_detected", "Savollar avtomatik aniqlanmadi.")}
+
+        with quiz_source_jobs_lock:
+            quiz_source_jobs[token] = {
+                "path": path,
+                "filename": original_name,
+                "title": Path(original_name).stem,
+                "blocks": blocks,
+                "created_at": time.time(),
+            }
+        return {
+            "status": "ok",
+            "file_token": token,
+            "filename": original_name,
+            "title": Path(original_name).stem,
+            "question_count": len(blocks),
+        }
+    except Exception as exc:
+        logging.error("Quiz file analysis unexpected error: %s", exc)
+        return {"status": "error", "message": file_protection_message(lang, "unreadable")}
+
+
+@app.post("/api/create-quiz-from-file-groups")
+async def create_quiz_from_file_groups(
+    user_id: int = Form(...),
+    file_token: str = Form(...),
+    mode: str = Form("single"),
+    group_size: int = Form(0),
+    quiz_title: Optional[str] = Form(None),
+):
+    """Create one or multiple AI quizzes from already detected question blocks."""
+    add_user_to_db(user_id)
+    lang = get_user_lang(user_id)
+    _cleanup_quiz_source_jobs()
+    with quiz_source_jobs_lock:
+        job = quiz_source_jobs.get(file_token)
+    if not job:
+        return {"status": "error", "error_code": "file_session_expired", "message": MESSAGES[lang].get("quiz_file_session_expired", "Fayl sessiyasi tugagan. Faylni qayta yuklang.")}
+
+    if mode not in {"single", "groups"}:
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_mode_invalid", "Test yaratish rejimi noto‘g‘ri.")}
+    if mode == "groups" and group_size not in {20, 30, 40}:
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_group_size_invalid", "20, 30 yoki 40 ni tanlang.")}
+
+    reserved, limit_hit = _reserve_quiz_slot_for_grouped_creation(user_id)
+    if limit_hit is True:
+        return {"status": "error", "error_code": "free_limit", "message": MESSAGES[lang]["quiz_limit_reached"]}
+
+    blocks = list(job.get("blocks") or [])
+    if not blocks:
+        if reserved:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False); conn.execute("UPDATE users SET free_used=CASE WHEN COALESCE(free_used,0)>0 THEN free_used-1 ELSE 0 END WHERE user_id=?", (user_id,)); conn.commit(); conn.close()
+        _release_quiz_source_job(file_token)
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_questions_not_detected", "Savollar avtomatik aniqlanmadi.")}
+
+    base_title = (quiz_title or "").strip() or job.get("title") or "Test"
+    base_title = base_title[:30]
+    # A single 200-question test is still processed in safe AI batches. This
+    # prevents one oversized Gemini request while the final result remains one
+    # complete quiz. Multiple-group mode already has a safe 20/30/40 batch size.
+    if mode == "single":
+        output_groups = [blocks]
+        ai_groups = [blocks[i:i + 40] for i in range(0, len(blocks), 40)]
+    else:
+        output_groups = [blocks[i:i + group_size] for i in range(0, len(blocks), group_size)]
+        ai_groups = output_groups
+
+    async def build_group(group, idx, total_groups):
+        expected = len(group)
+        payload = (
+            f"IMPORTANT: This is quiz batch {idx} of {total_groups}. Return EXACTLY {expected} quiz questions from the numbered source below. "
+            "Do not merge, omit, invent, or duplicate source questions. Preserve the original question meaning and answer choices.\n\n"
+            + "\n\n".join(group)
+        )
+        raw = await generate_quiz_from_gemini_async(payload)
+        if not raw:
+            return idx, None, "ai_failed"
+        try:
+            data = json.loads(raw)
+            items = data.get("quizzes", [])
+            items = randomize_quiz_answer_positions(items)
+            if len(items) != expected:
+                logging.warning("Grouped quiz count mismatch | batch=%s | expected=%s | got=%s", idx, expected, len(items))
+                return idx, None, "count_mismatch"
+            data["quizzes"] = items
+            return idx, data, None
+        except Exception as exc:
+            logging.error("Grouped quiz JSON error | batch=%s | %s", idx, exc)
+            return idx, None, "invalid_json"
+
+    try:
+        # Keep batches of the same user's test sequential. This is deliberate:
+        # one 200-question test should occupy only one AI slot at a time, so
+        # 150-200 simultaneous users form a predictable fair queue instead of
+        # one user consuming five or ten Gemini slots at once.
+        results = []
+        for i, group in enumerate(ai_groups):
+            results.append(await build_group(group, i + 1, len(ai_groups)))
+        failed = [r for r in results if r[1] is None]
+        if failed:
+            if reserved:
+                conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn.execute("UPDATE users SET free_used=CASE WHEN COALESCE(free_used,0)>0 THEN free_used-1 ELSE 0 END WHERE user_id=?", (user_id,))
+                conn.commit(); conn.close()
+            _release_quiz_source_job(file_token)
+            return {"status": "error", "error_code": "group_generation_failed", "failed_groups": [r[0] for r in failed], "message": MESSAGES[lang].get("quiz_group_generation_failed", "Ayrim test guruhlarini yaratib bo‘lmadi. Qayta urinib ko‘ring.")}
+
+        # Build the final quiz payloads. In single mode all safe AI batches are
+        # merged into one quiz; in group mode each selected chunk becomes one quiz.
+        final_quizzes = []
+        if mode == "single":
+            merged_items = []
+            for _, data, _ in sorted(results, key=lambda r: r[0]):
+                merged_items.extend(data.get("quizzes", []))
+            final_quizzes = [(1, {"quizzes": merged_items})]
+        else:
+            final_quizzes = [(idx, data) for idx, data, _ in sorted(results, key=lambda r: r[0])]
+
+        created = []
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            for idx, data in final_quizzes:
+                title = base_title if mode == "single" else f"{base_title} {idx}"
+                quiz_id = f"q_{uuid.uuid4().hex}"
+                quiz_json = json.dumps(data, ensure_ascii=False)
+                total = len(data.get("quizzes", []))
+                if mode == "single" and total != len(blocks):
+                    raise ValueError("final_single_quiz_count_mismatch")
+                conn.execute(
+                    "INSERT INTO quizzes (id,user_id,title,total,answered,quiz_json,created_at,last_score,last_percent,is_public) VALUES (?,?,?,?,?,?,?,?,?,0)",
+                    (quiz_id, user_id, title[:30], total, 0, quiz_json, int(time.time()), -1, -1),
+                )
+                created.append({"id": quiz_id, "title": title[:30], "total": total})
+            conn.commit()
+        finally:
+            conn.close()
+
+        if reserved:
+            notify_free_limit_reached(user_id, "quiz")
+        _release_quiz_source_job(file_token)
+        try:
+            q_ready = MESSAGES[lang].get("quiz_groups_ready", "{count} ta test muvaffaqiyatli yaratildi!").format(count=len(created))
+            bot.send_message(user_id, q_ready)
+        except Exception as exc:
+            logging.error("Grouped quiz Telegram notification failed: %s", exc)
+        return {"status": "ok", "created": created, "total_groups": len(created), "question_count": len(blocks)}
+    except Exception as exc:
+        logging.error("Grouped quiz creation error: %s", exc)
+        if reserved:
+            try:
+                conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn.execute("UPDATE users SET free_used=CASE WHEN COALESCE(free_used,0)>0 THEN free_used-1 ELSE 0 END WHERE user_id=?", (user_id,))
+                conn.commit(); conn.close()
+            except Exception: pass
+        _release_quiz_source_job(file_token)
+        return {"status": "error", "message": MESSAGES[lang].get("quiz_group_generation_failed", "Ayrim test guruhlarini yaratib bo‘lmadi. Qayta urinib ko‘ring.")}
+
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1994,9 +2300,9 @@ async def create_quiz_web(
             except Exception: pass
         return {"status": "error", "message": file_protection_message(user_lang, "unreadable")}
 
-    # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
-    # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
-    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
+    # Gemini request dedicated AI workers orqali navbat bilan ishlaydi.
+    # Async facade FastAPI event loopni va default thread poolni bloklamaydi.
+    quiz_json_raw = await generate_quiz_from_gemini_async(raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
@@ -2013,7 +2319,7 @@ async def create_quiz_web(
                 conn_restore.close()
             except Exception as e:
                 logging.error(f"Bepul limitni qaytarishda xato: {e}")
-        return {"status": "error", "message": "AI test generatsiya qila olmadi."}
+        return {"status": "error", "message": MESSAGES[user_lang].get("quiz_generation_failed", "AI test yaratish xizmati hozir band. Iltimos, birozdan so‘ng qayta urinib ko‘ring.")}
 
     try:
         quiz_data = json.loads(quiz_json_raw)
@@ -2025,7 +2331,7 @@ async def create_quiz_web(
         if not items:
             return {
                 "status": "error",
-                "message": "AI savollar ro'yxatini bo'sh qaytardi.",
+                "message": MESSAGES[user_lang].get("quiz_response_invalid", "Test tayyorlash jarayonida vaqtinchalik muammo yuz berdi. Iltimos, qayta urinib ko‘ring."),
             }
 
         quiz_id = f"q_{uuid.uuid4().hex}"
@@ -2067,8 +2373,14 @@ async def create_quiz_web(
             logging.error(f"Telegram xabari yuborilmadi: {e}")
         return {"status": "ok"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
-
+        logging.exception("Quiz creation finalization error: %s", e)
+        return {
+            "status": "error",
+            "message": MESSAGES[user_lang].get(
+                "quiz_response_invalid",
+                "Test tayyorlash jarayonida vaqtinchalik muammo yuz berdi. Iltimos, qayta urinib ko‘ring."
+            ),
+        }
 
 
 def randomize_quiz_answer_positions(items):
@@ -2110,19 +2422,23 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def generate_quiz_from_gemini(extracted_text):
+def _generate_quiz_from_gemini_worker(extracted_text):
     """
-    Professional AI Queue + Retry + Timeout + Concurrency Protection.
-    API Key Rotation saqlanadi; Gemini modeli GEMINI_MODEL orqali boshqariladi.
+    Production AI Manager: bounded queue + concurrency + model fallback + key rotation.
 
-    Muhim: katta testlarni avvalgi 203 savolli ishlagan versiyadek yaratish
-    uchun request 90 soniyada majburan to'xtatilmaydi. Timeout nazorati
-    umumiy jarayonni kuzatadi va katta so'rovlar uchun yetarli vaqt beradi.
+    Model selection and API-key rotation are independent. A request first uses the
+    configured primary model and can fall back to the secondary model without exposing
+    raw Gemini/API errors to the user. Up to AI_MAX_QUEUE generation jobs can wait in
+    the server-side queue, while only AI_MAX_CONCURRENT requests are allowed to call
+    Gemini at the same time.
     """
     global current_key_index
 
     if not GOOGLE_API_KEYS:
         logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
+        return None
+    if not GEMINI_MODELS:
+        logging.error("Gemini modellari sozlanmagan!")
         return None
 
     explanation_rule = (
@@ -2137,30 +2453,35 @@ CRITICAL RULES:
 2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
 {explanation_rule}"""
 
-    # Queue: 150 tagacha bir vaqtning o'zida kelgan foydalanuvchi so'rovini
-    # xavfsiz boshqaradi. Katta test uchun kutish vaqti umumiy timeoutga mos.
-    if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        logging.error("AI Queue kutish vaqti tugadi")
-        return None
+    # This function runs only inside the dedicated AI worker threads.
+    # Queue admission is handled by generate_quiz_from_gemini_async().
+    total_keys = len(GOOGLE_API_KEYS)
+    with key_lock:
+        start_index = current_key_index
+        current_key_index = (current_key_index + 1) % total_keys
 
-    try:
-        total_keys = len(GOOGLE_API_KEYS)
-        with key_lock:
-            start_index = current_key_index
-            current_key_index = (current_key_index + 1) % total_keys
+    deadline = time.monotonic() + AI_TOTAL_TIMEOUT
+    last_error = None
+    model_attempted = set()
+    unavailable_models = set()
 
-        deadline = time.monotonic() + AI_TOTAL_TIMEOUT
-        last_error = None
+    # Each retry round starts from a different key, while model fallback is
+    # independent. This prevents one unavailable model from blocking the other.
+    for retry_round in range(AI_RETRY_PER_KEY):
+        for model_name in GEMINI_MODELS:
+            if model_name in unavailable_models:
+                continue
+            if time.monotonic() >= deadline:
+                logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
+                return None
 
-        # Har bir key bo'yicha retry qilinadi, keylar esa eski versiyadagi
-        # kabi ketma-ket fallback sifatida sinab ko'riladi.
-        for retry_round in range(AI_RETRY_PER_KEY):
+            model_attempted.add(model_name)
             for offset in range(total_keys):
                 if time.monotonic() >= deadline:
                     logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
                     return None
 
-                key_idx = (start_index + offset) % total_keys
+                key_idx = (start_index + offset + retry_round) % total_keys
                 api_key = GOOGLE_API_KEYS[key_idx].strip()
                 if not api_key:
                     continue
@@ -2169,8 +2490,6 @@ CRITICAL RULES:
                 if remaining <= 0:
                     return None
 
-                # Faqat haqiqiy Gemini chaqiruvi concurrent limit ostida.
-                # Queue slot esa butun foydalanuvchi jarayonini boshqaradi.
                 if not gemini_semaphore.acquire(timeout=remaining):
                     last_error = "Gemini concurrency kutish vaqti tugadi"
                     continue
@@ -2179,7 +2498,7 @@ CRITICAL RULES:
                 try:
                     client = genai.Client(api_key=api_key)
                     response = client.models.generate_content(
-                        model=GEMINI_MODEL,
+                        model=model_name,
                         contents=extracted_text[:MAX_TEXT_INPUT_CHARS],
                         config=genai_types.GenerateContentConfig(
                             system_instruction=system_instruction,
@@ -2189,16 +2508,17 @@ CRITICAL RULES:
                         ),
                     )
                     elapsed = time.monotonic() - started
+
                     if elapsed > AI_REQUEST_TIMEOUT:
                         logging.warning(
-                            "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo muvaffaqiyatli yakunlandi",
-                            elapsed, AI_REQUEST_TIMEOUT
+                            "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo yakunlandi | model=%s | key=%s",
+                            elapsed, AI_REQUEST_TIMEOUT, model_name, key_idx
                         )
 
                     if response and response.text:
                         logging.info(
-                            "AI muvaffaqiyatli | key=%s | retry=%s | %.1fs",
-                            key_idx, retry_round + 1, elapsed
+                            "AI muvaffaqiyatli | model=%s | key=%s | retry=%s | %.1fs",
+                            model_name, key_idx, retry_round + 1, elapsed
                         )
                         return response.text
 
@@ -2206,22 +2526,108 @@ CRITICAL RULES:
 
                 except Exception as e:
                     last_error = str(e)
+                    error_text = last_error.lower()
+
+                    # 404/NOT_FOUND normally means the selected model is not
+                    # available for this project/user. Move to the fallback
+                    # model immediately instead of wasting all remaining keys.
+                    if "404" in error_text or "not_found" in error_text or "not found" in error_text:
+                        logging.warning(
+                            "Gemini model mavjud emas | model=%s | key=%s | fallback modelga o'tiladi",
+                            model_name, key_idx
+                        )
+                        unavailable_models.add(model_name)
+                        break
+
+                    # 429/503/UNAVAILABLE are treated as transient capacity
+                    # errors. Rotate to another key/model and back off briefly.
                     logging.warning(
-                        "API kalit [%s] ishlamadi yoki vaqtincha xato berdi: %s. Keyingi keyga o'tilmoqda...",
-                        key_idx, e
+                        "Gemini vaqtinchalik xato | model=%s | key=%s | retry=%s | %s",
+                        model_name, key_idx, retry_round + 1, e
                     )
                 finally:
                     gemini_semaphore.release()
 
-                # Exponential backoff: faqat xatodan keyin, server/APIga
-                # ortiqcha bosim bermasdan.
                 if time.monotonic() < deadline:
-                    time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
+                    time.sleep(min(4.0, 0.75 * (2 ** retry_round)))
 
-        logging.error("Barcha API key/retry urinishlari muvaffaqiyatsiz. Oxirgi xato: %s", last_error)
+    logging.error(
+        "Barcha AI urinishlari muvaffaqiyatsiz | models=%s | keys=%s | oxirgi_xato=%s",
+        ",".join(model_attempted), total_keys, last_error
+    )
+    return None
+
+
+def _ai_worker_loop():
+    """Dedicated worker loop: exactly AI_MAX_CONCURRENT Gemini jobs at once."""
+    while True:
+        item = ai_job_queue.get()
+        if item is None:
+            ai_job_queue.task_done()
+            break
+        future, payload = item
+        try:
+            if not future.cancelled():
+                future.set_result(_generate_quiz_from_gemini_worker(payload))
+        except Exception as exc:
+            logging.exception("AI worker internal error: %s", exc)
+            if not future.cancelled():
+                future.set_result(None)
+        finally:
+            ai_job_queue.task_done()
+
+
+def _start_ai_workers():
+    if ai_worker_threads:
+        return
+    for idx in range(AI_MAX_CONCURRENT):
+        worker = threading.Thread(
+            target=_ai_worker_loop,
+            name=f"quiz-ai-worker-{idx + 1}",
+            daemon=True,
+        )
+        worker.start()
+        ai_worker_threads.append(worker)
+    logging.info(
+        "AI worker pool started | workers=%s | queue=%s",
+        AI_MAX_CONCURRENT, AI_MAX_QUEUE
+    )
+
+
+def _enqueue_ai_job(payload):
+    future = Future()
+    try:
+        ai_job_queue.put_nowait((future, payload))
+        return future
+    except queue.Full:
+        logging.warning(
+            "AI Queue full | queue=%s | rejecting new generation job safely",
+            AI_MAX_QUEUE,
+        )
         return None
-    finally:
-        ai_queue_slots.release()
+
+
+async def generate_quiz_from_gemini_async(extracted_text):
+    """Async facade: queue the job without blocking FastAPI's thread pool."""
+    _start_ai_workers()
+    future = _enqueue_ai_job(extracted_text)
+    if future is None:
+        return None
+
+    # Polling a Future from async code avoids consuming one thread per queued
+    # user. This is important when hundreds of users press Create at once.
+    deadline = time.monotonic() + AI_TOTAL_TIMEOUT + AI_REQUEST_TIMEOUT
+    while not future.done():
+        if time.monotonic() >= deadline:
+            logging.warning("AI client wait timeout reached")
+            return None
+        await asyncio.sleep(0.25)
+
+    try:
+        return future.result()
+    except Exception as exc:
+        logging.exception("AI future result error: %s", exc)
+        return None
 
 
 @app.post("/api/contact-admin")
@@ -3847,6 +4253,8 @@ async def api_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def startup_event():
+    # Start the dedicated AI worker pool once per application process.
+    _start_ai_workers()
     # P2P OCR is an isolated background subsystem. It never blocks the bot/event loop.
     try:
         p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
