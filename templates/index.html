@@ -12813,79 +12813,86 @@ html[data-performance-mode="lite"] .btn-delete,
 html[data-performance-mode="lite"] .btn-public{transition-duration:.08s !important;}
 html[data-performance-mode="lite"] body,
 html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !important;}
-/* ===== Yengil rejim: maxsus yengil AI loader =====
-   Faqat AI loader uchun animatsiya qayta yoqiladi.
-   Og'ir blur/glow va murakkab effektlar ishlatilmaydi. */
+</style>
+
+
+
 <style id="quizpilot-performance-lite-ai-loader">
+/* ===== Yengil rejim — minimalist AI loader =====
+   Faqat AI loaderga taalluqli. Boshqa UI/funksiyalarga tegilmaydi. */
 html[data-performance-mode="lite"] .ai-loader-orbit{
-    width:46px !important;
-    height:46px !important;
-    margin:1px auto 10px !important;
-    border-width:2px !important;
-    border-color:rgba(0,210,255,.18) !important;
+    width:42px !important;
+    height:42px !important;
+    margin:2px auto 11px !important;
+    border:2px solid rgba(0,210,255,.16) !important;
     box-shadow:none !important;
-    animation:lite-ai-loader-breathe 1.6s ease-in-out infinite !important;
+    background:transparent !important;
+    animation:lite-ai-breathe 1.8s ease-in-out infinite !important;
     will-change:transform,opacity;
 }
 html[data-performance-mode="lite"] .ai-loader-orbit::before{
-    inset:4px !important;
-    border-width:2px !important;
+    inset:5px !important;
+    border:2px solid transparent !important;
     border-top-color:#00d2ff !important;
-    border-right-color:transparent !important;
-    border-bottom-color:transparent !important;
-    border-left-color:transparent !important;
+    border-right-color:rgba(0,210,255,.18) !important;
     filter:none !important;
-    animation:lite-ai-loader-spin .8s linear infinite !important;
+    box-shadow:none !important;
+    animation:lite-ai-spin .9s linear infinite !important;
     will-change:transform;
 }
 html[data-performance-mode="lite"] .ai-loader-orbit::after{
-    inset:9px !important;
-    border-width:2px !important;
-    border-color:transparent !important;
-    border-bottom-color:rgba(0,210,255,.72) !important;
-    animation:lite-ai-loader-spin 1.15s linear infinite reverse !important;
+    inset:10px !important;
+    border:1.5px solid transparent !important;
+    border-bottom-color:rgba(0,210,255,.65) !important;
     filter:none !important;
+    box-shadow:none !important;
+    animation:lite-ai-spin 1.3s linear infinite reverse !important;
     will-change:transform;
 }
 html[data-performance-mode="lite"] .ai-loader-core{
-    inset:13px !important;
-    font-size:14px !important;
-    background:rgba(0,210,255,.12) !important;
+    inset:14px !important;
+    font-size:12px !important;
+    background:rgba(0,210,255,.08) !important;
+    box-shadow:none !important;
     text-shadow:none !important;
-    animation:lite-ai-loader-core 1.15s ease-in-out infinite !important;
+    animation:lite-ai-core 1.25s ease-in-out infinite !important;
     will-change:transform,opacity;
 }
 html[data-performance-mode="lite"] .ai-loader-progress span{
-    animation:lite-ai-loader-progress 1.35s ease-in-out infinite !important;
     box-shadow:none !important;
+    animation:lite-ai-progress 1.5s ease-in-out infinite !important;
     will-change:transform;
 }
 html[data-performance-mode="lite"] .ai-loader-dots i{
-    animation:lite-ai-loader-dot 1s ease-in-out infinite !important;
     box-shadow:none !important;
+    animation:lite-ai-dot 1.05s ease-in-out infinite !important;
     will-change:transform,opacity;
 }
-html[data-performance-mode="lite"] .ai-loader-dots i:nth-child(2){animation-delay:.14s !important;}
-html[data-performance-mode="lite"] .ai-loader-dots i:nth-child(3){animation-delay:.28s !important;}
+html[data-performance-mode="lite"] .ai-loader-dots i:nth-child(2){
+    animation-delay:.15s !important;
+}
+html[data-performance-mode="lite"] .ai-loader-dots i:nth-child(3){
+    animation-delay:.30s !important;
+}
 
-@keyframes lite-ai-loader-spin{
+@keyframes lite-ai-spin{
     to{transform:rotate(360deg);}
 }
-@keyframes lite-ai-loader-breathe{
+@keyframes lite-ai-breathe{
     0%,100%{transform:scale(.97);opacity:.82;}
     50%{transform:scale(1.02);opacity:1;}
 }
-@keyframes lite-ai-loader-core{
-    0%,100%{transform:scale(.88);opacity:.72;}
+@keyframes lite-ai-core{
+    0%,100%{transform:scale(.90);opacity:.72;}
     50%{transform:scale(1.04);opacity:1;}
 }
-@keyframes lite-ai-loader-progress{
+@keyframes lite-ai-progress{
     0%{transform:translateX(-135%);}
     100%{transform:translateX(335%);}
 }
-@keyframes lite-ai-loader-dot{
+@keyframes lite-ai-dot{
     0%,60%,100%{transform:translateY(0);opacity:.35;}
-    30%{transform:translateY(-3px);opacity:1;}
+    30%{transform:translateY(-2px);opacity:1;}
 }
 </style>
 
