@@ -14615,9 +14615,10 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             icon.innerText = '🏁';
             msg.innerHTML = `${timePrefix}<div>${langPack[currentLang].quiz_result_label || 'Natija'}: <span style="color:#72f297;font-weight:800;">${correct}</span>/${total} (${scorePercent}%)</div><div style="margin-top:8px;color:#ff6b6b;font-weight:700;">${wrongText}</div>`;
             footer.style.flexDirection = 'column';
+            const allowRetryActions = currentTab !== 'group_join';
             footer.innerHTML = `
-                <button class="app-dialog-btn primary" id="quiz-retry-btn" style="width:100%;">${langPack[currentLang].quiz_retry}</button>
-                ${wrong > 0 ? `<button class="app-dialog-btn secondary" id="quiz-review-btn" style="width:100%;color:#ff8b94;border-color:rgba(232,17,35,.45);">${langPack[currentLang].quiz_review_errors}</button>` : ''}
+                ${allowRetryActions ? `<button class="app-dialog-btn primary" id="quiz-retry-btn" style="width:100%;">${langPack[currentLang].quiz_retry}</button>` : ''}
+                ${allowRetryActions && wrong > 0 ? `<button class="app-dialog-btn secondary" id="quiz-review-btn" style="width:100%;color:#ff8b94;border-color:rgba(232,17,35,.45);">${langPack[currentLang].quiz_review_errors}</button>` : ''}
                 <button class="app-dialog-btn secondary" id="quiz-result-ok-btn" style="width:100%;">${langPack[currentLang].btn_ok || 'OK'}</button>
             `;
             dialog.style.display = 'flex';
