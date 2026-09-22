@@ -14623,7 +14623,8 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             `;
             dialog.style.display = 'flex';
 
-            document.getElementById('quiz-retry-btn').onclick = function() {
+            const retryBtn = document.getElementById('quiz-retry-btn');
+            if (retryBtn) retryBtn.onclick = function() {
                 dialog.style.display = 'none';
                 footer.style.flexDirection = '';
                 currentQuizQuestions = originalQuizQuestions.map(q => ({
