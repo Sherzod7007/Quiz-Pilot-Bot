@@ -12805,12 +12805,6 @@ html[data-performance-mode="lite"] .tariff-card{
 html[data-performance-mode="lite"] .screen.swipe-enter-left,
 html[data-performance-mode="lite"] .screen.swipe-enter-right{animation:none !important;}
 html[data-performance-mode="lite"] .create-promo-slide{transition:opacity .12s ease,transform .12s ease !important;}
-html[data-performance-mode="lite"] .ai-loader-orbit,
-html[data-performance-mode="lite"] .ai-loader-orbit::before,
-html[data-performance-mode="lite"] .ai-loader-orbit::after,
-html[data-performance-mode="lite"] .ai-loader-core,
-html[data-performance-mode="lite"] .ai-loader-progress span,
-html[data-performance-mode="lite"] .ai-loader-dots i,
 html[data-performance-mode="lite"] .news-badge.has-new{animation:none !important;}
 html[data-performance-mode="lite"] .nav-item,
 html[data-performance-mode="lite"] .tab,
@@ -12819,8 +12813,81 @@ html[data-performance-mode="lite"] .btn-delete,
 html[data-performance-mode="lite"] .btn-public{transition-duration:.08s !important;}
 html[data-performance-mode="lite"] body,
 html[data-performance-mode="lite"] #game-screen{background-attachment:scroll !important;}
-</style>
+/* ===== Yengil rejim: maxsus yengil AI loader =====
+   Faqat AI loader uchun animatsiya qayta yoqiladi.
+   Og'ir blur/glow va murakkab effektlar ishlatilmaydi. */
+<style id="quizpilot-performance-lite-ai-loader">
+html[data-performance-mode="lite"] .ai-loader-orbit{
+    width:46px !important;
+    height:46px !important;
+    margin:1px auto 10px !important;
+    border-width:2px !important;
+    border-color:rgba(0,210,255,.18) !important;
+    box-shadow:none !important;
+    animation:lite-ai-loader-breathe 1.6s ease-in-out infinite !important;
+    will-change:transform,opacity;
+}
+html[data-performance-mode="lite"] .ai-loader-orbit::before{
+    inset:4px !important;
+    border-width:2px !important;
+    border-top-color:#00d2ff !important;
+    border-right-color:transparent !important;
+    border-bottom-color:transparent !important;
+    border-left-color:transparent !important;
+    filter:none !important;
+    animation:lite-ai-loader-spin .8s linear infinite !important;
+    will-change:transform;
+}
+html[data-performance-mode="lite"] .ai-loader-orbit::after{
+    inset:9px !important;
+    border-width:2px !important;
+    border-color:transparent !important;
+    border-bottom-color:rgba(0,210,255,.72) !important;
+    animation:lite-ai-loader-spin 1.15s linear infinite reverse !important;
+    filter:none !important;
+    will-change:transform;
+}
+html[data-performance-mode="lite"] .ai-loader-core{
+    inset:13px !important;
+    font-size:14px !important;
+    background:rgba(0,210,255,.12) !important;
+    text-shadow:none !important;
+    animation:lite-ai-loader-core 1.15s ease-in-out infinite !important;
+    will-change:transform,opacity;
+}
+html[data-performance-mode="lite"] .ai-loader-progress span{
+    animation:lite-ai-loader-progress 1.35s ease-in-out infinite !important;
+    box-shadow:none !important;
+    will-change:transform;
+}
+html[data-performance-mode="lite"] .ai-loader-dots i{
+    animation:lite-ai-loader-dot 1s ease-in-out infinite !important;
+    box-shadow:none !important;
+    will-change:transform,opacity;
+}
+html[data-performance-mode="lite"] .ai-loader-dots i:nth-child(2){animation-delay:.14s !important;}
+html[data-performance-mode="lite"] .ai-loader-dots i:nth-child(3){animation-delay:.28s !important;}
 
+@keyframes lite-ai-loader-spin{
+    to{transform:rotate(360deg);}
+}
+@keyframes lite-ai-loader-breathe{
+    0%,100%{transform:scale(.97);opacity:.82;}
+    50%{transform:scale(1.02);opacity:1;}
+}
+@keyframes lite-ai-loader-core{
+    0%,100%{transform:scale(.88);opacity:.72;}
+    50%{transform:scale(1.04);opacity:1;}
+}
+@keyframes lite-ai-loader-progress{
+    0%{transform:translateX(-135%);}
+    100%{transform:translateX(335%);}
+}
+@keyframes lite-ai-loader-dot{
+    0%,60%,100%{transform:translateY(0);opacity:.35;}
+    30%{transform:translateY(-3px);opacity:1;}
+}
+</style>
 
 <style id="quizpilot-performance-lite-navigation-fix">
 /* ===== Yengil rejim: swipe va bo'lim ochilish effektlarini o'chirish ===== */
