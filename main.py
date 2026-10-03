@@ -1502,6 +1502,11 @@ def handle_receipt_photo(message):
             pass
 
 
+@bot.callback_query_handler(func=lambda call: bool(call.data) and call.data.startswith("p2p_"))
+def handle_p2p_admin_decision(call):
+    p2p_payment_ai.handle_admin_decision(call)
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
 def handle_admin_decision(call):
     if ADMIN_ID and call.from_user.id != ADMIN_ID:
