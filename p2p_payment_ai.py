@@ -76,6 +76,8 @@ class ReceiptAIResult(BaseModel):
     recipient_name: str = ""
     bank_or_app: str = ""
     confidence: float = 0
+    suspicious_edits: bool = False
+    suspicion_reason: str = ""
     reason: str = ""
 
 
@@ -373,8 +375,13 @@ Rules:
 - recipient_name and bank_or_app: visible values only.
 - confidence: 0..1 reflecting extraction confidence, not proof of real payment.
 - is_receipt=false if this does not clearly look like a payment receipt.
+- suspicious_edits=true if visible signs suggest an important field may have been altered, pasted, covered, overlaid, digitally replaced, or composited (especially amount, date/time, recipient card/name, transaction/operation ID, status, or bank branding).
+- suspicion_reason: state the exact visible clue(s); empty if none are visible.
+- Inspect transaction/operation IDs carefully: do not confuse a watermark, stamp, background text, or overlapping text with the ID. If the ID appears to have a different font, weight, sharpness, baseline, spacing, background, alignment, compression pattern, or overlap from neighboring fields, mark suspicious_edits=true.
+- Inspect the whole receipt for inconsistent fonts, misaligned rows, uneven backgrounds, duplicated/blurred characters, unexplained patches, inconsistent shadows, clipped labels, or text covering other fields.
+- If a value is obscured, overlapped, ambiguous, or looks edited, do not guess it; report it as unknown and mark suspicious_edits=true when alteration is plausible.
 - reason: concise explanation of missing/ambiguous data.
-Do not claim that a receipt is authentic. OCR is not bank verification.
+Do not claim that a receipt is authentic. OCR is not bank verification. A visually plausible receipt can still be fake; never use visual appearance alone as proof of payment.
 """
     client = genai.Client(api_key=api_key)
     return client.models.generate_content(
@@ -876,19 +883,25 @@ def _process(item):
         conf_ok = result.confidence >= 0.85
         receipt_ok = bool(result.is_receipt)
         txid_ok = bool((result.transaction_id or "").strip())
+        # Any model-detected visual tampering signal blocks automatic approval.
+        # Admin must compare the original image and transaction details manually.
+        suspicious_edits = bool(result.suspicious_edits)
         expected_card = _last4(P2P_CARD_NUMBER)
         actual_card = _last4(result.recipient_card_last4)
         card_ok = bool(expected_card) and bool(actual_card) and expected_card == actual_card
         receipt_date = _parse_receipt_date(result.transaction_date)
         today_uz = datetime.now(UZ_TZ).date()
         date_ok = receipt_date is not None and receipt_date == today_uz
-        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok:
+        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok or suspicious_edits:
             reasons = []
             if not receipt_ok: reasons.append("chek aniqlanmadi")
             if not amount_ok: reasons.append(f"summa mos emas: {result.amount} != {expected}")
             if not conf_ok: reasons.append(f"confidence past: {result.confidence:.2f}")
             if not txid_ok: reasons.append("transaction ID topilmadi")
             if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
+            if suspicious_edits:
+                reasons.append("chekda tahrirlash/almashtirish alomatlari bo'lishi mumkin" +
+                               (f": {result.suspicion_reason.strip()}" if result.suspicion_reason.strip() else ""))
             if receipt_date is None:
                 reasons.append("chek sanasi aniqlanmadi yoki formati tushunarsiz")
             elif receipt_date != today_uz:
@@ -908,6 +921,8 @@ def _process(item):
                 f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\n"
                 f"📊 Confidence: {result.confidence:.2f}\n"
                 f"🔢 Transaction ID: {result.transaction_id or 'aniqlanmadi'}\n"
+                f"🛡️ Tahrir alomatlari: {'ANIQLANDI' if suspicious_edits else 'AI ko‘rinadigan alomat topmadi'}"
+                f"{' — ' + result.suspicion_reason.strip() if suspicious_edits and result.suspicion_reason.strip() else ''}\n"
                 f"🤖 Model: {used_model}\n\n"
                 f"🔎 Tekshiruv sababi: {reason_text}\n\n"
                 f"ℹ️ Premium avtomatik faollashtirilmadi. Qo‘shimcha tekshiruv talab qilinadi.",
