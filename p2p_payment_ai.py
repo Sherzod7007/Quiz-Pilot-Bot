@@ -365,7 +365,7 @@ def _retry_delay(attempt):
 def _vision_once(file_bytes, mime_type, model, api_key):
     prompt = """
 You analyze a payment receipt image. Extract only visible facts; never invent missing values.
-Return JSON matching the requested schema.
+Return JSON matching the requested schema. All free-text fields, especially suspicion_reason and reason, MUST be written in Uzbek (Latin script) only. Never include English phrases in these fields.
 Rules:
 - amount: numeric payment amount, 0 if unknown.
 - currency: visible currency, e.g. UZS.
@@ -900,8 +900,9 @@ def _process(item):
             if not txid_ok: reasons.append("transaction ID topilmadi")
             if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
             if suspicious_edits:
-                reasons.append("chekda tahrirlash/almashtirish alomatlari bo'lishi mumkin" +
-                               (f": {result.suspicion_reason.strip()}" if result.suspicion_reason.strip() else ""))
+                # Keep the admin-facing explanation Uzbek-only; do not expose raw model text,
+                # which may unexpectedly be returned in English.
+                reasons.append("chekda tahrirlash yoki muhim ma'lumotni almashtirish alomatlari bo'lishi mumkin; rasmni qo'lda tekshiring")
             if receipt_date is None:
                 reasons.append("chek sanasi aniqlanmadi yoki formati tushunarsiz")
             elif receipt_date != today_uz:
@@ -921,8 +922,7 @@ def _process(item):
                 f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\n"
                 f"📊 Confidence: {result.confidence:.2f}\n"
                 f"🔢 Transaction ID: {result.transaction_id or 'aniqlanmadi'}\n"
-                f"🛡️ Tahrir alomatlari: {'ANIQLANDI' if suspicious_edits else 'AI ko‘rinadigan alomat topmadi'}"
-                f"{' — ' + result.suspicion_reason.strip() if suspicious_edits and result.suspicion_reason.strip() else ''}\n"
+                f"🛡️ Tahrir alomatlari: {'ANIQLANDI — rasmni qo‘lda tekshiring' if suspicious_edits else 'AI ko‘rinadigan alomat topmadi'}\n"
                 f"🤖 Model: {used_model}\n\n"
                 f"🔎 Tekshiruv sababi: {reason_text}\n\n"
                 f"ℹ️ Premium avtomatik faollashtirilmadi. Qo‘shimcha tekshiruv talab qilinadi.",
