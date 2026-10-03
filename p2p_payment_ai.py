@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 import re
 
+import telebot
 from google import genai
 from google.genai import types as genai_types
 from pydantic import BaseModel, Field
@@ -516,6 +517,102 @@ def _notify_admin(text):
         logging.warning("P2P admin notification failed: %s", exc)
 
 
+def _notify_admin_review(text, file_id, tx_id, user_id):
+    """Send the original receipt image with admin decision buttons."""
+    if not _bot or not _admin_id:
+        return
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"p2p_approve|{tx_id}|{int(user_id)}"),
+        telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p2p_reject|{tx_id}|{int(user_id)}"),
+    )
+    try:
+        _bot.send_photo(_admin_id, file_id, caption=text[:1000], reply_markup=markup)
+    except Exception as exc:
+        logging.warning("P2P admin receipt photo notification failed | tx=%s | %s", tx_id, exc)
+        try:
+            _bot.send_message(_admin_id, text[:4000], reply_markup=markup)
+        except Exception:
+            logging.exception("P2P admin fallback notification failed | tx=%s", tx_id)
+
+
+def handle_admin_decision(call):
+    """Handle admin approval/rejection for a receipt requiring manual review."""
+    try:
+        action, tx_id, raw_user_id = (call.data or "").split("|", 2)
+        user_id = int(raw_user_id)
+    except (ValueError, AttributeError):
+        _bot.answer_callback_query(call.id, "Noto'g'ri to'lov so'rovi.", show_alert=True)
+        return
+
+    if not _admin_id or int(call.from_user.id) != int(_admin_id):
+        _bot.answer_callback_query(call.id, "Bu amal faqat administrator uchun.", show_alert=True)
+        return
+
+    conn = _connect()
+    try:
+        pay = conn.execute("SELECT status FROM payments WHERE tx_id=? AND user_id=?", (tx_id, user_id)).fetchone()
+        receipt = conn.execute("SELECT status FROM p2p_receipts WHERE tx_id=? AND user_id=?", (tx_id, user_id)).fetchone()
+        if not pay or pay["status"] != "pending" or not receipt or receipt["status"] != "review":
+            _bot.answer_callback_query(call.id, "Bu to'lov allaqachon ko'rib chiqilgan yoki ko'rib chiqishga tayyor emas.", show_alert=True)
+            return
+    finally:
+        conn.close()
+
+    lang = _get_user_lang(user_id)
+    if action == "p2p_approve":
+        ok, _plan = _approve(tx_id, user_id)
+        if not ok:
+            _bot.answer_callback_query(call.id, "To'lov tasdiqlanmadi: holat o'zgargan.", show_alert=True)
+            return
+        _mark_by_tx(tx_id, status="approved", reason="Admin tomonidan tasdiqlandi", processed_at=_now(), next_retry_at=0)
+        messages = {
+            "uz": "🎉 Admin to'lovingizni tasdiqladi. Premium/PRO faollashtirildi! 👑",
+            "ru": "🎉 Администратор подтвердил платёж. Premium/PRO активирован! 👑",
+            "en": "🎉 The administrator approved your payment. Premium/PRO is now active! 👑",
+        }
+        _notify_user(user_id, messages.get(lang, messages["uz"]))
+        result_text, answer = "🟢 ADMIN TOMONIDAN TASDIQLANDI", "To'lov tasdiqlandi."
+    elif action == "p2p_reject":
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cur = conn.execute("UPDATE payments SET status='rejected' WHERE tx_id=? AND user_id=? AND status='pending'", (tx_id, user_id))
+            if cur.rowcount != 1:
+                conn.rollback()
+                _bot.answer_callback_query(call.id, "To'lov holati o'zgargan.", show_alert=True)
+                return
+            conn.execute("UPDATE p2p_receipts SET status='rejected', reason='Admin tomonidan rad etildi', processed_at=?, next_retry_at=0 WHERE tx_id=?", (_now(), tx_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        messages = {
+            "uz": "❌ Admin to'lov chekingizni rad etdi. Sababini aniqlash uchun administrator bilan bog'laning.",
+            "ru": "❌ Администратор отклонил ваш чек. Свяжитесь с администратором, чтобы уточнить причину.",
+            "en": "❌ The administrator rejected your receipt. Contact the administrator for details.",
+        }
+        _notify_user(user_id, messages.get(lang, messages["uz"]))
+        result_text, answer = "🔴 ADMIN TOMONIDAN RAD ETILDI", "To'lov rad etildi."
+    else:
+        _bot.answer_callback_query(call.id, "Noma'lum amal.", show_alert=True)
+        return
+
+    _bot.answer_callback_query(call.id, answer)
+    try:
+        if getattr(call.message, "photo", None):
+            _bot.edit_message_caption((getattr(call.message, "caption", "") or "") + "\n\n" + result_text,
+                                      call.message.chat.id, call.message.message_id)
+        else:
+            _bot.edit_message_text((getattr(call.message, "text", "") or "") + "\n\n" + result_text,
+                                   call.message.chat.id, call.message.message_id)
+        _bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except Exception as exc:
+        logging.warning("Could not mark P2P admin decision in Telegram | tx=%s | %s", tx_id, exc)
+
+
 def _approve(tx_id, user_id):
     """Reuse the same Premium semantics as existing manual approval, but atomically."""
     import sqlite3
@@ -765,7 +862,7 @@ def _process(item):
             reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
             _mark_by_tx(tx_id, status="review", reason=reason_text)
             display_name, username = _user_identity(user_id)
-            _notify_admin(
+            _notify_admin_review(
                 f"⚠️ P2P TO‘LOV — QO‘SHIMCHA TEKSHIRUV KERAK\n\n"
                 f"🧾 TX: {tx_id}\n"
                 f"👤 Foydalanuvchi: {display_name}\n"
@@ -778,7 +875,8 @@ def _process(item):
                 f"🔢 Transaction ID: {result.transaction_id or 'aniqlanmadi'}\n"
                 f"🤖 Model: {used_model}\n\n"
                 f"🔎 Tekshiruv sababi: {reason_text}\n\n"
-                f"ℹ️ Premium avtomatik faollashtirilmadi. Qo‘shimcha tekshiruv talab qilinadi."
+                f"ℹ️ Premium avtomatik faollashtirilmadi. Qo‘shimcha tekshiruv talab qilinadi.",
+                file_id, tx_id, user_id
             )
             return
 
