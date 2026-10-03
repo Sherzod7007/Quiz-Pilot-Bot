@@ -95,6 +95,33 @@ def _periods(ts=None):
     return dt.strftime("%Y-%m-%d"), dt.strftime("%Y-%m")
 
 
+def _parse_receipt_date(value):
+    """Parse common bank receipt date formats without guessing missing dates."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = (
+        "%d.%m.%Y", "%d-%m-%Y", "%d/%m/%Y",
+        "%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d",
+        "%d.%m.%y", "%d/%m/%y", "%d-%m-%y",
+    )
+    for pattern in patterns:
+        try:
+            return datetime.strptime(text, pattern).date()
+        except ValueError:
+            pass
+    # If the model returned a longer date/time string, try visible date tokens.
+    match = re.search(r"(?<!\d)(\d{1,4}[./-]\d{1,2}[./-]\d{2,4})(?!\d)", text)
+    if match:
+        token = match.group(1)
+        for pattern in patterns:
+            try:
+                return datetime.strptime(token, pattern).date()
+            except ValueError:
+                pass
+    return None
+
+
 def _connect():
     import sqlite3
     conn = sqlite3.connect(_db_path, timeout=30, check_same_thread=False)
@@ -852,13 +879,20 @@ def _process(item):
         expected_card = _last4(P2P_CARD_NUMBER)
         actual_card = _last4(result.recipient_card_last4)
         card_ok = bool(expected_card) and bool(actual_card) and expected_card == actual_card
-        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok:
+        receipt_date = _parse_receipt_date(result.transaction_date)
+        today_uz = datetime.now(UZ_TZ).date()
+        date_ok = receipt_date is not None and receipt_date == today_uz
+        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok:
             reasons = []
             if not receipt_ok: reasons.append("chek aniqlanmadi")
             if not amount_ok: reasons.append(f"summa mos emas: {result.amount} != {expected}")
             if not conf_ok: reasons.append(f"confidence past: {result.confidence:.2f}")
             if not txid_ok: reasons.append("transaction ID topilmadi")
             if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
+            if receipt_date is None:
+                reasons.append("chek sanasi aniqlanmadi yoki formati tushunarsiz")
+            elif receipt_date != today_uz:
+                reasons.append(f"chek sanasi bugungi sana bilan mos emas: {receipt_date.strftime('%d.%m.%Y')} / bugun: {today_uz.strftime('%d.%m.%Y')}")
             reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
             _mark_by_tx(tx_id, status="review", reason=reason_text)
             display_name, username = _user_identity(user_id)
@@ -871,6 +905,7 @@ def _process(item):
                 f"💰 Kutilgan summa: {pay['tariff_price']}\n"
                 f"🤖 AI aniqlagan summa: {result.amount}\n"
                 f"💳 Karta oxiri: {actual_card or 'aniqlanmadi'} / kutilgan: {expected_card or 'sozlanmagan'}\n"
+                f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\n"
                 f"📊 Confidence: {result.confidence:.2f}\n"
                 f"🔢 Transaction ID: {result.transaction_id or 'aniqlanmadi'}\n"
                 f"🤖 Model: {used_model}\n\n"
