@@ -13101,10 +13101,10 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
     50% { transform: translate(-50%, -50%) scale(1.08); opacity: 1; }
 }
 #quizpilot-entry-splash.entry-splash-hide {
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transition: opacity .22s ease, visibility 0s linear .22s;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    display: none !important;
 }
 </style>
 
@@ -15350,14 +15350,20 @@ window.onload = function() {
         var elapsed = now - startedAt;
         var delay = Math.max(0, MIN_VISIBLE - elapsed);
         window.setTimeout(function () {
+            if (!splash) return;
+            /* Splashni qat'iy yopamiz: uning Loading/brand matni asosiy ilovada qolib ketmasin. */
             splash.classList.add('entry-splash-hide');
-            window.setTimeout(function () {
-                if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
-            }, 280);
+            splash.style.display = 'none';
+            splash.innerHTML = '';
+            if (splash.parentNode) splash.parentNode.removeChild(splash);
         }, delay);
     }
-    if (document.readyState === 'complete') closeSplash();
-    else window.addEventListener('load', closeSplash, { once: true });
+    /* Initial loading faqat 1.5 soniya. Sahifaning boshqa yuklanishlari splashni ushlab turmaydi. */
+    if (document.readyState === 'loading') {
+        window.setTimeout(closeSplash, MIN_VISIBLE);
+    } else {
+        closeSplash();
+    }
 })();
 </script>
 
