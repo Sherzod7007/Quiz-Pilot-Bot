@@ -1852,17 +1852,24 @@ async def create_quiz_web(
             and current_now > premium_until
         ):
             cursor_check.execute(
-                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
+                "UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0, premium_source = 'paid' WHERE user_id = ?",
                 (user_id,),
             )
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
+        # Premium/Admin Bonus/Teacher bonus faol bo'lsa, bepul limit umuman ishlamaydi.
+        # Muhim: statusni faqat matn bo'yicha emas, premium_until bilan birga
+        # markaziy is_active_paid_status() qoidasi orqali tekshiramiz.
+        # Shu bilan Admin Bonus va Teacher Admin Bonus bir xil tarzda Premium
+        # sifatida ishlaydi va bepul limitga tushib qolmaydi.
+        premium_active = is_active_paid_status(current_status, premium_until)
+
         # 30 kunlik bepul limit: faqat 1 ta.
         # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
         # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
         # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
-        if "PRO" not in current_status:
+        if not premium_active:
             cursor_check.execute(
                 "UPDATE users "
                 "SET free_used = COALESCE(free_used, 0) + 1 "
