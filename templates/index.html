@@ -525,6 +525,9 @@
         /* ===== AI Generation Full-Screen Lock =====
            Faqat AI test yaratish jarayonida ishlaydi. Mavjud AI loaderlar o'zgartirilmaydi. */
         body.ai-generation-active { overflow: hidden !important; }
+        /* Full-screen AI oynasi faol bo'lganda eski inline loader faqat yashiriladi.
+           Uning HTML/CSS/animatsiyasi o'zgartirilmaydi; ikki loader bir vaqtda animatsiya qilmaydi. */
+        body.ai-generation-active #loading-status { display: none !important; }
         #ai-generation-overlay {
             position: fixed; inset: 0; z-index: 18000; display: none;
             align-items: center; justify-content: center; padding: 22px;
@@ -14367,8 +14370,10 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             singleBtn.innerHTML = `<span class="quiz-split-option-main">${langPack[currentLang].quiz_split_single}</span><span class="quiz-split-option-count">${langPack[currentLang].quiz_split_questions.replace('{count}', total)}</span>`;
             singleBtn.onclick = () => {
                 closeQuizSplitModal();
+                // Bitta test tanlanganda faqat Kutubxonaga qaytamiz.
+                // Testni avtomatik boshlash bu oynadan qilinmaydi.
+                currentTab = 'personal';
                 switchScreen('library');
-                setTimeout(() => playQuiz(quizId), 120);
             };
             options.appendChild(singleBtn);
             modal.style.display = 'flex';
