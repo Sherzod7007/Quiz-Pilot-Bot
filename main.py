@@ -1165,6 +1165,16 @@ def send_welcome(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
 
+    # Mini App tugmasi: faqat MINI_APP_URL sozlangan bo'lsa qo'shiladi.
+    # Qolgan /start va welcome logikasi o'zgartirilmaydi.
+    mini_app_url = os.getenv("MINI_APP_URL", "").strip()
+    if mini_app_url:
+        btn_open_app = telebot.types.KeyboardButton(
+            text=MESSAGES[user_lang]["open_app"],
+            web_app=telebot.types.WebAppInfo(url=mini_app_url)
+        )
+        markup.row(btn_open_app)
+
     markup.row(btn_start)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
