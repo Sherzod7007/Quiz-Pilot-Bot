@@ -2072,10 +2072,94 @@ async def create_quiz_web(
             bot.send_message(user_id, q_ready_msg)
         except Exception as e:
             logging.error(f"Telegram xabari yuborilmadi: {e}")
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "quiz_id": quiz_id,
+            "title": final_title[:30],
+            "count": len(items),
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/api/split-quiz-web")
+def split_quiz_web(user_id: int = Form(...), quiz_id: str = Form(...), chunk_size: int = Form(...)):
+    """Split one already-generated personal quiz into smaller independent quizzes.
+
+    This operation does NOT call Gemini and does NOT consume another free AI-test slot.
+    Questions keep their original order. The source quiz is replaced only after all
+    requested parts have been created successfully inside one SQLite transaction.
+    """
+    allowed_sizes = {20, 30, 40}
+    if int(chunk_size) not in allowed_sizes:
+        return {"status": "error", "message": "Noto'g'ri test hajmi."}
+
+    add_user_to_db(user_id)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        row = conn.execute(
+            "SELECT id, title, total, quiz_json, is_public FROM quizzes WHERE id = ? AND user_id = ?",
+            (quiz_id, user_id),
+        ).fetchone()
+        if not row:
+            return {"status": "error", "message": "Test topilmadi."}
+
+        try:
+            payload = json.loads(row["quiz_json"] or "{}")
+            items = payload.get("quizzes", [])
+        except Exception:
+            return {"status": "error", "message": "Test ma'lumotlarini o'qib bo'lmadi."}
+
+        if not isinstance(items, list) or not items:
+            return {"status": "error", "message": "Test savollari topilmadi."}
+
+        size = int(chunk_size)
+        if len(items) <= size:
+            return {"status": "error", "message": "Bu hajmga bo'lish uchun savollar yetarli emas."}
+
+        total_parts = (len(items) + size - 1) // size
+        original_title = (row["title"] or "Test").strip() or "Test"
+        # Sarlavha mavjud interfeysdagi 30 belgilik ko'rinishga mos saqlanadi.
+        suffix_len = len(str(total_parts)) + 1
+        base_title = original_title[:max(1, 30 - suffix_len)].rstrip()
+        now = int(time.time())
+        created = []
+
+        for part_index in range(total_parts):
+            part_items = items[part_index * size:(part_index + 1) * size]
+            part_payload = dict(payload)
+            part_payload["quizzes"] = part_items
+            part_id = f"q_{uuid.uuid4().hex}"
+            part_title = f"{base_title} {part_index + 1}"
+            conn.execute(
+                """INSERT INTO quizzes
+                   (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                (
+                    part_id, user_id, part_title, len(part_items), 0,
+                    json.dumps(part_payload, ensure_ascii=False), now - (total_parts - part_index), -1, -1,
+                ),
+            )
+            created.append({"id": part_id, "title": part_title, "count": len(part_items)})
+
+        # Split muvaffaqiyatli tugagandan keyingina katta original test olib tashlanadi.
+        conn.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+        conn.commit()
+        return {
+            "status": "ok",
+            "source_quiz_id": quiz_id,
+            "chunk_size": size,
+            "created_count": len(created),
+            "created_quizzes": created,
+        }
+    except Exception as e:
+        conn.rollback()
+        logging.exception(f"Testni bo'lib saqlashda xato: {e}")
+        return {"status": "error", "message": "Testlarni bo'lib saqlashda xatolik yuz berdi."}
+    finally:
+        conn.close()
 
 
 def randomize_quiz_answer_positions(items):
