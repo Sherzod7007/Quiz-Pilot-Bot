@@ -1165,16 +1165,6 @@ def send_welcome(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
 
-    # Mini App tugmasi: faqat MINI_APP_URL sozlangan bo'lsa qo'shiladi.
-    # Qolgan /start va welcome logikasi o'zgartirilmaydi.
-    mini_app_url = os.getenv("MINI_APP_URL", "").strip()
-    if mini_app_url:
-        btn_open_app = telebot.types.KeyboardButton(
-            text=MESSAGES[user_lang]["open_app"],
-            web_app=telebot.types.WebAppInfo(url=mini_app_url)
-        )
-        markup.row(btn_open_app)
-
     markup.row(btn_start)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -1852,24 +1842,17 @@ async def create_quiz_web(
             and current_now > premium_until
         ):
             cursor_check.execute(
-                "UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0, premium_source = 'paid' WHERE user_id = ?",
+                "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
                 (user_id,),
             )
             conn_check.commit()
             current_status = "Oddiy foydalanuvchi"
 
-        # Premium/Admin Bonus/Teacher bonus faol bo'lsa, bepul limit umuman ishlamaydi.
-        # Muhim: statusni faqat matn bo'yicha emas, premium_until bilan birga
-        # markaziy is_active_paid_status() qoidasi orqali tekshiramiz.
-        # Shu bilan Admin Bonus va Teacher Admin Bonus bir xil tarzda Premium
-        # sifatida ishlaydi va bepul limitga tushib qolmaydi.
-        premium_active = is_active_paid_status(current_status, premium_until)
-
         # 30 kunlik bepul limit: faqat 1 ta.
         # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
         # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
         # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
-        if not premium_active:
+        if "PRO" not in current_status:
             cursor_check.execute(
                 "UPDATE users "
                 "SET free_used = COALESCE(free_used, 0) + 1 "
@@ -2089,92 +2072,78 @@ async def create_quiz_web(
             bot.send_message(user_id, q_ready_msg)
         except Exception as e:
             logging.error(f"Telegram xabari yuborilmadi: {e}")
-        return {
-            "status": "ok",
-            "quiz_id": quiz_id,
-            "title": final_title[:30],
-            "count": len(items),
-        }
+        return {"status": "ok", "quiz_id": quiz_id, "title": final_title[:30], "total": len(items)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 
-@app.post("/api/split-quiz-web")
-def split_quiz_web(user_id: int = Form(...), quiz_id: str = Form(...), chunk_size: int = Form(...)):
-    """Split one already-generated personal quiz into smaller independent quizzes.
+@app.post("/api/split-quiz")
+def split_quiz(quiz_id: str, user_id: int, question_count: int):
+    # Tayyor AI testini tanlangan savol soniga bo'lib, alohida testlar yaratadi.
+    # Bu amal yangi AI test yaratmaydi va bepul/Premium limitiga tegmaydi.
+    if question_count not in (20, 30, 40):
+        raise HTTPException(status_code=400, detail="Noto'g'ri test hajmi")
 
-    This operation does NOT call Gemini and does NOT consume another free AI-test slot.
-    Questions keep their original order. The source quiz is replaced only after all
-    requested parts have been created successfully inside one SQLite transaction.
-    """
-    allowed_sizes = {20, 30, 40}
-    if int(chunk_size) not in allowed_sizes:
-        return {"status": "error", "message": "Noto'g'ri test hajmi."}
-
-    add_user_to_db(user_id)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "SELECT id, user_id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?",
+        (quiz_id, user_id),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+
     try:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        row = conn.execute(
-            "SELECT id, title, total, quiz_json, is_public FROM quizzes WHERE id = ? AND user_id = ?",
-            (quiz_id, user_id),
-        ).fetchone()
-        if not row:
-            return {"status": "error", "message": "Test topilmadi."}
+        quiz_data = json.loads(row["quiz_json"])
+        items = quiz_data.get("quizzes", [])
+        if not isinstance(items, list) or not items:
+            raise ValueError("Savollar topilmadi")
+
+        chunks = [items[i:i + question_count] for i in range(0, len(items), question_count)]
+        if len(chunks) <= 1:
+            conn.close()
+            return {"status": "ok", "created": 0, "total": len(items), "message": "Bo'lish talab qilinmadi."}
+
+        created_ids = []
+        base_title = (row["title"] or "Test").strip() or "Test"
+        created_at = int(time.time())
 
         try:
-            payload = json.loads(row["quiz_json"] or "{}")
-            items = payload.get("quizzes", [])
+            cursor.execute("BEGIN")
+            for index, chunk in enumerate(chunks, start=1):
+                new_id = f"q_{uuid.uuid4().hex}"
+                chunk_json = json.dumps({"quizzes": chunk}, ensure_ascii=False)
+                chunk_title = f"{base_title[:24]} — {index}/{len(chunks)}"
+                cursor.execute(
+                    """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                    (new_id, user_id, chunk_title[:30], len(chunk), 0, chunk_json, created_at, -1, -1),
+                )
+                created_ids.append(new_id)
+
+            # Faqat barcha qismlar muvaffaqiyatli yaratilgandan keyin asl katta test o'chiriladi.
+            cursor.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+            conn.commit()
         except Exception:
-            return {"status": "error", "message": "Test ma'lumotlarini o'qib bo'lmadi."}
+            conn.rollback()
+            raise
 
-        if not isinstance(items, list) or not items:
-            return {"status": "error", "message": "Test savollari topilmadi."}
-
-        size = int(chunk_size)
-        if len(items) <= size:
-            return {"status": "error", "message": "Bu hajmga bo'lish uchun savollar yetarli emas."}
-
-        total_parts = (len(items) + size - 1) // size
-        original_title = (row["title"] or "Test").strip() or "Test"
-        # Sarlavha mavjud interfeysdagi 30 belgilik ko'rinishga mos saqlanadi.
-        suffix_len = len(str(total_parts)) + 1
-        base_title = original_title[:max(1, 30 - suffix_len)].rstrip()
-        now = int(time.time())
-        created = []
-
-        for part_index in range(total_parts):
-            part_items = items[part_index * size:(part_index + 1) * size]
-            part_payload = dict(payload)
-            part_payload["quizzes"] = part_items
-            part_id = f"q_{uuid.uuid4().hex}"
-            part_title = f"{base_title} {part_index + 1}"
-            conn.execute(
-                """INSERT INTO quizzes
-                   (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
-                (
-                    part_id, user_id, part_title, len(part_items), 0,
-                    json.dumps(part_payload, ensure_ascii=False), now - (total_parts - part_index), -1, -1,
-                ),
-            )
-            created.append({"id": part_id, "title": part_title, "count": len(part_items)})
-
-        # Split muvaffaqiyatli tugagandan keyingina katta original test olib tashlanadi.
-        conn.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
-        conn.commit()
         return {
             "status": "ok",
-            "source_quiz_id": quiz_id,
-            "chunk_size": size,
-            "created_count": len(created),
-            "created_quizzes": created,
+            "created": len(created_ids),
+            "total": len(items),
+            "question_count": question_count,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         conn.rollback()
-        logging.exception(f"Testni bo'lib saqlashda xato: {e}")
-        return {"status": "error", "message": "Testlarni bo'lib saqlashda xatolik yuz berdi."}
+        raise HTTPException(status_code=500, detail=f"Testni bo'lishda xatolik: {e}")
     finally:
         conn.close()
 
