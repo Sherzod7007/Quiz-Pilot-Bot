@@ -788,6 +788,44 @@
         .app-dialog-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--aero-border); font-size: 14px; font-weight: 600; cursor: pointer; }
         .app-dialog-btn.primary { background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: #fff; border-color: #00d2ff; }
         .app-dialog-btn.secondary { background: rgba(255,255,255,0.1); color: var(--text-hint); }
+        /* ===== Premium Aero buttons — ONLY Quiz Result dialog ===== */
+        #app-dialog .app-dialog-footer .quiz-result-btn {
+            width: 100%; min-height: 46px; padding: 11px 14px; box-sizing: border-box;
+            border-radius: 12px; border: 1px solid rgba(170, 210, 240, 0.34);
+            color: #fff; font-size: 14px; font-weight: 700; letter-spacing: .05px;
+            text-shadow: 0 1px 2px rgba(0,0,0,.68); cursor: pointer;
+            transition: transform .16s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+            -webkit-tap-highlight-color: transparent;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.30), 0 4px 12px rgba(0,0,0,.28);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-btn:active { transform: scale(.985); }
+        #app-dialog .app-dialog-footer .quiz-result-primary {
+            background: linear-gradient(180deg, #10b9ff 0%, #087dcc 48%, #005a9e 100%);
+            border-color: #35d9ff;
+            box-shadow: 0 4px 15px rgba(0,164,239,.42), 0 0 10px rgba(0,153,255,.18), inset 0 1px 0 rgba(255,255,255,.46);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-primary:hover {
+            background: linear-gradient(180deg, #26c3ff 0%, #0a8cde 48%, #0067ad 100%);
+            border-color: #68e5ff; box-shadow: 0 0 14px rgba(0,174,255,.58), inset 0 1px 0 rgba(255,255,255,.50);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-danger {
+            background: linear-gradient(180deg, rgba(255,92,108,.96) 0%, rgba(208,45,63,.96) 52%, rgba(143,25,40,.98) 100%);
+            border-color: rgba(255,137,149,.82); color: #fff;
+            box-shadow: 0 4px 14px rgba(220,53,69,.34), 0 0 9px rgba(220,53,69,.14), inset 0 1px 0 rgba(255,255,255,.34);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-danger:hover {
+            background: linear-gradient(180deg, #ff7180 0%, #df344c 52%, #a61d34 100%);
+            border-color: #ffabb5; box-shadow: 0 0 14px rgba(255,59,78,.48), inset 0 1px 0 rgba(255,255,255,.40);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-neutral {
+            background: linear-gradient(180deg, rgba(91,111,133,.92) 0%, rgba(48,64,82,.96) 52%, rgba(27,39,54,.98) 100%);
+            border-color: rgba(184,211,235,.48); color: #f1f7fc;
+            box-shadow: 0 4px 12px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.30);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-neutral:hover {
+            background: linear-gradient(180deg, rgba(108,137,164,.98) 0%, rgba(55,80,105,.98) 52%, rgba(29,48,69,.99) 100%);
+            border-color: rgba(0,210,255,.72); box-shadow: 0 0 12px rgba(0,174,255,.30), inset 0 1px 0 rgba(255,255,255,.38);
+        }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         /* ===== AI Test Split Window ===== */
@@ -14802,9 +14840,9 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             footer.style.flexDirection = 'column';
             const allowRetryActions = currentTab !== 'group_join';
             footer.innerHTML = `
-                ${allowRetryActions ? `<button class="app-dialog-btn primary" id="quiz-retry-btn" style="width:100%;">${langPack[currentLang].quiz_retry}</button>` : ''}
-                ${allowRetryActions && wrong > 0 ? `<button class="app-dialog-btn secondary" id="quiz-review-btn" style="width:100%;color:#ff8b94;border-color:rgba(232,17,35,.45);">${langPack[currentLang].quiz_review_errors}</button>` : ''}
-                <button class="app-dialog-btn secondary" id="quiz-result-ok-btn" style="width:100%;">${langPack[currentLang].btn_ok || 'OK'}</button>
+                ${allowRetryActions ? `<button class="app-dialog-btn quiz-result-btn quiz-result-primary" id="quiz-retry-btn">${langPack[currentLang].quiz_retry}</button>` : ''}
+                ${allowRetryActions && wrong > 0 ? `<button class="app-dialog-btn quiz-result-btn quiz-result-danger" id="quiz-review-btn">${langPack[currentLang].quiz_review_errors}</button>` : ''}
+                <button class="app-dialog-btn quiz-result-btn quiz-result-neutral" id="quiz-result-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>
             `;
             dialog.style.display = 'flex';
 
