@@ -9757,11 +9757,17 @@ html[data-quiz-theme="nebula"] #game-progress{color:#000000!important;text-shado
 
 /* Nebula: correct/wrong answers glow and pulse in their state colors. */
 html[data-quiz-theme="nebula"] #options-container button.correct{
+    background:linear-gradient(135deg,#19b978,#137d5b)!important;
     color:#ffffff!important;
+    border-color:#54e8b1!important;
+    box-shadow:0 0 10px rgba(25,185,120,.72),0 0 22px rgba(25,185,120,.38),inset 0 1px 0 rgba(255,255,255,.22)!important;
     animation:nebulaCorrectPulse .85s ease-in-out 2;
 }
 html[data-quiz-theme="nebula"] #options-container button.wrong{
+    background:linear-gradient(135deg,#e05267,#9f2639)!important;
     color:#ffffff!important;
+    border-color:#ff8b98!important;
+    box-shadow:0 0 10px rgba(224,82,103,.78),0 0 22px rgba(224,82,103,.40),inset 0 1px 0 rgba(255,255,255,.22)!important;
     animation:nebulaWrongPulse .85s ease-in-out 2;
 }
 @keyframes nebulaCorrectPulse{
