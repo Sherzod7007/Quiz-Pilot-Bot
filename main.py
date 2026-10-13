@@ -2353,12 +2353,14 @@ MUHIM QOIDALAR:
                                 "kirish_tokenlari=%s | chiqish_tokenlari=%s | jami_tokenlar=%s | "
                                 "Gemini_API_vaqti=%.2f soniya | navbatda_kutish=%.2f soniya | "
                                 "parallel_cheklovda_kutish=%.2f soniya | JSON_to'g'ri=%s | "
-                                "umumiy_vaqt=%.2f soniya",
+                                "izoh_rejimi=%s | umumiy_vaqt=%.2f soniya",
                                 model_name, key_idx, retry_round + 1,
                                 len(extracted_text[:MAX_TEXT_INPUT_CHARS]), len(response.text),
                                 question_count, prompt_tokens, output_tokens, total_tokens,
                                 elapsed, queue_wait_seconds, semaphore_wait_seconds,
-                                json_valid, time.monotonic() - queue_wait_started
+                                json_valid,
+                                "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN",
+                                time.monotonic() - queue_wait_started
                             )
                             return response.text
 
