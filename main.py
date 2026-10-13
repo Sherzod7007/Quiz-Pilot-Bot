@@ -111,6 +111,10 @@ logging.info(
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
     GEMINI_INCLUDE_EXPLANATIONS, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
 )
+logging.info(
+    "IZOH SOZLAMASI | Gemini izoh yaratishi: %s",
+    "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN"
+)
 
 # --- PROFESSIONAL FILE PROTECTION LAYER ---
 # Katta kitob yoki juda og'ir fayllar server, parser va AI Queue ga
@@ -886,8 +890,19 @@ class QuizItem(BaseModel):
     explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
 
 
+class QuizItemWithoutExplanation(BaseModel):
+    """Izoh o'chirilganda Gemini javob sxemasida izoh maydoni bo'lmaydi."""
+    question: str = Field(description="Savol matni")
+    options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz)")
+    correct_index: int = Field(description="To'g'ri javob indeks (0 dan 3 gacha)")
+
+
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
+
+
+class QuizResponseWithoutExplanation(BaseModel):
+    quizzes: List[QuizItemWithoutExplanation] = Field(description="Test savollari ro'yxati")
 
 
 class ProgressUpdateRequest(BaseModel):
@@ -2051,6 +2066,12 @@ async def create_quiz_web(
     try:
         quiz_data = json.loads(quiz_json_raw)
         items = quiz_data.get("quizzes", [])
+        if not GEMINI_INCLUDE_EXPLANATIONS:
+            # UI va saqlash formati bilan moslik uchun izoh maydoni bo'sh qoladi.
+            # Gemini sxemasida bu maydon yo'q, shuning uchun undan izoh tokenlari so'ralmaydi.
+            for item in items:
+                if isinstance(item, dict):
+                    item["explanation"] = ""
         # Gemini qanday joylashtirishidan qat'i nazar, javob variantlari shu yerda
         # xavfsiz va muvozanatli random qilinadi.
         items = randomize_quiz_answer_positions(items)
@@ -2228,16 +2249,19 @@ def generate_quiz_from_gemini(extracted_text):
         logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
         return None
 
-    explanation_rule = (
-        "3. EXPLANATION RULE: Generate a short explanation for every question."
-        if GEMINI_INCLUDE_EXPLANATIONS
-        else
-        "3. EXPLANATION RULE: Do NOT spend output tokens on explanations. Return an empty string in the explanation field for every question."
-    )
-    system_instruction = f"""You are an advanced AI quiz generator.
-CRITICAL RULES:
-1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
+    if GEMINI_INCLUDE_EXPLANATIONS:
+        explanation_rule = "3. IZOH QOIDASI: Har bir savol uchun qisqa izoh yozing."
+        response_schema = QuizResponse
+        language_rule = "Savollar, javob variantlari va izohlarni kirish matni bilan AYNAN BIR TILDA yarating."
+    else:
+        explanation_rule = "3. IZOH QOIDASI: IZOH YARATMANG. Javobda izoh maydoni umuman bo'lmasin."
+        response_schema = QuizResponseWithoutExplanation
+        language_rule = "Savollar va javob variantlarini kirish matni bilan AYNAN BIR TILDA yarating."
+
+    system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
+MUHIM QOIDALAR:
+1. TIL QOIDASI: {language_rule}
+2. SAVOLLAR SONI QOIDASI: Agar matnda tayyor savollar ro'yxati bo'lsa, FAQAT O'SHA savollarni oling va formatlang. Agar matn katta, uzluksiz darslik bo'lsa, ko'pi bilan 40-50 ta savol yarating.
 {explanation_rule}"""
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
@@ -2295,7 +2319,7 @@ CRITICAL RULES:
                             config=genai_types.GenerateContentConfig(
                                 system_instruction=system_instruction,
                                 response_mime_type="application/json",
-                                response_schema=QuizResponse,
+                                response_schema=response_schema,
                                 temperature=0.2,
                             ),
                         )
