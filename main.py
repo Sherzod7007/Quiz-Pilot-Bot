@@ -2261,7 +2261,10 @@ def generate_quiz_from_gemini(extracted_text):
     system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
 MUHIM QOIDALAR:
 1. TIL QOIDASI: {language_rule}
-2. SAVOLLAR SONI QOIDASI: Agar matnda tayyor savollar ro'yxati bo'lsa, FAQAT O'SHA savollarni oling va formatlang. Agar matn katta, uzluksiz darslik bo'lsa, ko'pi bilan 40-50 ta savol yarating.
+2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
+   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi savollar soniga teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
+   B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
+   C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Savollar sonini o'zingizcha kamaytirmang.
 {explanation_rule}"""
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
