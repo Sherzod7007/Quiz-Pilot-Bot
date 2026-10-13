@@ -1915,7 +1915,7 @@ async def create_quiz_web(
             contents = await file.read()
             faylni_oqish_vaqti = time.perf_counter() - faylni_oqish_boshlanishi
             logging.info(
-                "FAYL DIAGNOSTIKASI | Fayl xotiraga o'qildi | nomi=%s | turi=%s | hajmi=%.2f MB | o'qish_vaqti=%.3f soniya",
+                "TEST YARATISH | Fayl xotiraga o'qildi | nomi=%s | turi=%s | hajmi=%.2f MB | faylni_o'qish_vaqti=%.3f soniya",
                 original_name, extension, len(contents) / (1024 * 1024), faylni_oqish_vaqti
             )
             if len(contents) > MAX_UPLOAD_FILE_BYTES:
@@ -1991,7 +1991,7 @@ async def create_quiz_web(
 
                 matn_ajratish_vaqti = time.perf_counter() - matn_ajratish_boshlanishi
                 logging.info(
-                    "FAYL DIAGNOSTIKASI | Matn ajratildi | turi=%s | PDF_sahifalari=%s | Word_paragraflari=%s | matn_belgilari=%s | ajratish_vaqti=%.3f soniya",
+                    "TEST YARATISH | Fayldan matn ajratildi | turi=%s | PDF_sahifalari=%s | Word_paragraflari=%s | matn_belgilari=%s | matn_ajratish_vaqti=%.3f soniya",
                     extension, pdf_sahifalar_soni, word_paragraflar_soni, len(raw_text), matn_ajratish_vaqti
                 )
         except Exception as e:
@@ -2041,7 +2041,7 @@ async def create_quiz_web(
     # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
     # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
     logging.info(
-        "FAYL DIAGNOSTIKASI | Gemini so'rovi boshlanmoqda | matn_belgilari=%s",
+        "TEST YARATISH | Gemini so'roviga yuborish boshlandi | matn_belgilari=%s",
         len(raw_text)
     )
     quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
@@ -2270,9 +2270,11 @@ MUHIM QOIDALAR:
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        logging.error("AI navbatida kutish vaqti tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
+        logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
+    if queue_wait_seconds >= 1.0:
+        logging.info("AI NAVBATI | So'rov navbat joyini kutdi | kutish=%.2f soniya", queue_wait_seconds)
 
     try:
         total_keys = len(GOOGLE_API_KEYS)
@@ -2295,7 +2297,7 @@ MUHIM QOIDALAR:
             for model_name in models:
                 for offset in range(total_keys):
                     if time.monotonic() >= deadline:
-                        logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
+                        logging.error("AI test yaratish uchun umumiy vaqt chegarasi tugadi (%s soniya)", AI_TOTAL_TIMEOUT)
                         return None
 
                     key_idx = (start_index + offset) % total_keys
@@ -2309,9 +2311,11 @@ MUHIM QOIDALAR:
 
                     semaphore_wait_started = time.monotonic()
                     if not gemini_semaphore.acquire(timeout=remaining):
-                        last_error = "Gemini parallel so'rov cheklovi uchun kutish vaqti tugadi"
+                        last_error = "Gemini parallel so'rovlar chegarasida kutish muddati tugadi"
                         continue
                     semaphore_wait_seconds = time.monotonic() - semaphore_wait_started
+                    if semaphore_wait_seconds >= 1.0:
+                        logging.info("GEMINI PARALLELLIGI | Bo'sh so'rov o'rnini kutish yakunlandi | kutish=%.2f soniya", semaphore_wait_seconds)
 
                     started = time.monotonic()
                     try:
@@ -2329,7 +2333,7 @@ MUHIM QOIDALAR:
                         elapsed = time.monotonic() - started
                         if elapsed > AI_REQUEST_TIMEOUT:
                             logging.warning(
-                                "AI so'rovi uzoq davom etdi (%0.1f s > %s s), ammo muvaffaqiyatli yakunlandi",
+                                "Gemini so'rovi odatdagidan uzoq davom etdi (%.1f soniya; ogohlantirish chegarasi %s soniya), lekin muvaffaqiyatli yakunlandi",
                                 elapsed, AI_REQUEST_TIMEOUT
                             )
 
@@ -2354,12 +2358,12 @@ MUHIM QOIDALAR:
                                 json_valid = False
 
                             logging.info(
-                                "AI TEST YARATILDI | model=%s | API kalit indeksi=%s | urinish=%s | "
+                                "AI TEST MUVAFFAQIYATLI YARATILDI | model=%s | API kalit indeksi=%s | urinish=%s | "
                                 "kiruvchi_matn_belgilari=%s | chiquvchi_matn_belgilari=%s | savollar_soni=%s | "
                                 "kirish_tokenlari=%s | chiqish_tokenlari=%s | "
                                 "kirish_va_chiqish_yig'indisi=%s | Gemini_jami_tokenlari=%s | "
-                                "Gemini_API_vaqti=%.2f soniya | navbatda_kutish=%.2f soniya | "
-                                "parallel_cheklovda_kutish=%.2f soniya | JSON_to'g'ri=%s | "
+                                "Gemini_API_vaqti=%.2f soniya | AI_navbatida_kutish=%.2f soniya | "
+                                "parallel_so'rov_chegarasida_kutish=%.2f soniya | JSON_to'g'ri=%s | "
                                 "izoh_rejimi=%s | umumiy_vaqt=%.2f soniya",
                                 model_name, key_idx, retry_round + 1,
                                 len(extracted_text[:MAX_TEXT_INPUT_CHARS]), len(response.text),
@@ -2377,7 +2381,7 @@ MUHIM QOIDALAR:
                     except Exception as e:
                         last_error = str(e)
                         logging.warning(
-                            "AI so'rovi muvaffaqiyatsiz | model=%s | kalit_indeksi=%s | urinish=%s | xato=%s",
+                            "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_tafsiloti=%s",
                             model_name, key_idx, retry_round + 1, e
                         )
                     finally:
@@ -2387,7 +2391,7 @@ MUHIM QOIDALAR:
                         time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
 
         logging.error(
-            "Barcha AI model/kalit/qayta_urinishlar muvaffaqiyatsiz. Oxirgi xato: %s",
+            "Barcha AI model, kalit va qayta urinishlar muvaffaqiyatsiz yakunlandi. Oxirgi xato tafsiloti: %s",
             last_error
         )
         return None
