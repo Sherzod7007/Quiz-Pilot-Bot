@@ -1892,7 +1892,13 @@ async def create_quiz_web(
             return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
 
         try:
+            faylni_oqish_boshlanishi = time.perf_counter()
             contents = await file.read()
+            faylni_oqish_vaqti = time.perf_counter() - faylni_oqish_boshlanishi
+            logging.info(
+                "FAYL DIAGNOSTIKASI | Fayl xotiraga o'qildi | nomi=%s | turi=%s | hajmi=%.2f MB | o'qish_vaqti=%.3f soniya",
+                original_name, extension, len(contents) / (1024 * 1024), faylni_oqish_vaqti
+            )
             if len(contents) > MAX_UPLOAD_FILE_BYTES:
                 if free_slot_reserved:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -1908,9 +1914,14 @@ async def create_quiz_web(
                 with open(file_path, "wb") as f:
                     f.write(contents)
 
+                matn_ajratish_boshlanishi = time.perf_counter()
+                pdf_sahifalar_soni = 0
+                word_paragraflar_soni = 0
+
                 if extension == ".pdf":
                     reader = PdfReader(file_path)
                     page_count = len(reader.pages)
+                    pdf_sahifalar_soni = page_count
                     if page_count > MAX_PDF_PAGES:
                         try: os.remove(file_path)
                         except Exception: pass
@@ -1940,6 +1951,7 @@ async def create_quiz_web(
                     auto_title = Path(original_name).stem
                 elif extension == ".docx":
                     doc = docx.Document(file_path)
+                    word_paragraflar_soni = len(doc.paragraphs)
                     text_parts = []
                     text_len = 0
                     for paragraph in doc.paragraphs:
@@ -1957,8 +1969,14 @@ async def create_quiz_web(
                         text_parts.append(part)
                     raw_text = "\n".join(text_parts)
                     auto_title = Path(original_name).stem
+
+                matn_ajratish_vaqti = time.perf_counter() - matn_ajratish_boshlanishi
+                logging.info(
+                    "FAYL DIAGNOSTIKASI | Matn ajratildi | turi=%s | PDF_sahifalari=%s | Word_paragraflari=%s | matn_belgilari=%s | ajratish_vaqti=%.3f soniya",
+                    extension, pdf_sahifalar_soni, word_paragraflar_soni, len(raw_text), matn_ajratish_vaqti
+                )
         except Exception as e:
-            logging.error(f"Professional file protection / parsing error: {e}")
+            logging.error(f"Faylni o'qish yoki matnni ajratishda xatolik: {e}")
             if free_slot_reserved:
                 try:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -2003,6 +2021,10 @@ async def create_quiz_web(
 
     # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
     # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
+    logging.info(
+        "FAYL DIAGNOSTIKASI | Gemini so'rovi boshlanmoqda | matn_belgilari=%s",
+        len(raw_text)
+    )
     quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
