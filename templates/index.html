@@ -13532,6 +13532,9 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
     </div>
 
     <script>
+        // Railway Variables orqali boshqariladi: SHOW_QUIZ_EXPLANATIONS=true/false.
+        const SHOW_QUIZ_EXPLANATIONS = {{ show_quiz_explanations | tojson }};
+
         const tg = window.Telegram.WebApp;
         tg.ready(); tg.expand();
         tg.setHeaderColor('#121214');
@@ -14818,9 +14821,13 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             } else {
                 btn.classList.add('wrong'); wrongAnswersCount++; q._answered = true; q._wrong = true; playQuizSound('wrong');
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
-                const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
-                expBox.innerText = `${expLabel} ` + (explanation || "...");
-                expBox.style.display = 'block';
+                if (SHOW_QUIZ_EXPLANATIONS) {
+                    const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
+                    expBox.innerText = `${expLabel} ` + (explanation || "...");
+                    expBox.style.display = 'block';
+                } else {
+                    expBox.style.display = 'none';
+                }
             }
             document.getElementById('next-question-btn').style.display = 'block';
         }
