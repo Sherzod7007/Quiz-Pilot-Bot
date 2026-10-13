@@ -2188,13 +2188,11 @@ def randomize_quiz_answer_positions(items):
     return items
 
 def generate_quiz_from_gemini(extracted_text):
-    """
-    Professional AI Queue + Model Fallback + API Key Rotation + Retry +
-    Timeout + Concurrency Protection.
+    """Generate quiz with the existing queue/retry/fallback behavior and safe diagnostics.
 
-    Primary model: GEMINI_MODEL.
-    Fallback model: GEMINI_FALLBACK_MODEL.
-    API key rotation and concurrency control remain independent.
+    This function intentionally preserves the current generation settings and output
+    schema. Diagnostics report timing, input/output size, and token usage when the SDK
+    exposes it; API keys and source text are never logged.
     """
     global current_key_index
 
@@ -2214,11 +2212,14 @@ CRITICAL RULES:
 2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
 {explanation_rule}"""
 
-    # Queue slot so'rovni boshqaradi. Gemini semaphore esa haqiqiy parallel
-    # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
+    input_text = extracted_text[:MAX_TEXT_INPUT_CHARS]
+    input_chars = len(input_text)
+    call_started = time.monotonic()
+    queue_started = call_started
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        logging.error("AI Queue kutish vaqti tugadi")
+        logging.error("AI Queue kutish vaqti tugadi | input_chars=%s", input_chars)
         return None
+    queue_wait = time.monotonic() - queue_started
 
     try:
         total_keys = len(GOOGLE_API_KEYS)
@@ -2233,15 +2234,16 @@ CRITICAL RULES:
 
         deadline = time.monotonic() + AI_TOTAL_TIMEOUT
         last_error = None
+        attempts = 0
 
-        # Har bir retry roundida avval PRIMARY modelning barcha keylari,
-        # keyin FALLBACK modelning barcha keylari sinab ko'riladi.
-        # Shu bilan 3.6 ishlayotgan paytda 2.5 ga bekorchi request yuborilmaydi.
         for retry_round in range(AI_RETRY_PER_KEY):
             for model_name in models:
                 for offset in range(total_keys):
                     if time.monotonic() >= deadline:
-                        logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
+                        logging.error(
+                            "AI umumiy timeout | input_chars=%s | attempts=%s | elapsed=%.1fs",
+                            input_chars, attempts, time.monotonic() - call_started
+                        )
                         return None
 
                     key_idx = (start_index + offset) % total_keys
@@ -2253,16 +2255,19 @@ CRITICAL RULES:
                     if remaining <= 0:
                         return None
 
+                    semaphore_started = time.monotonic()
                     if not gemini_semaphore.acquire(timeout=remaining):
                         last_error = "Gemini concurrency kutish vaqti tugadi"
                         continue
+                    semaphore_wait = time.monotonic() - semaphore_started
 
                     started = time.monotonic()
+                    attempts += 1
                     try:
                         client = genai.Client(api_key=api_key)
                         response = client.models.generate_content(
                             model=model_name,
-                            contents=extracted_text[:MAX_TEXT_INPUT_CHARS],
+                            contents=input_text,
                             config=genai_types.GenerateContentConfig(
                                 system_instruction=system_instruction,
                                 response_mime_type="application/json",
@@ -2271,26 +2276,46 @@ CRITICAL RULES:
                             ),
                         )
                         elapsed = time.monotonic() - started
-                        if elapsed > AI_REQUEST_TIMEOUT:
-                            logging.warning(
-                                "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo muvaffaqiyatli yakunlandi",
-                                elapsed, AI_REQUEST_TIMEOUT
-                            )
 
                         if response and response.text:
+                            usage = getattr(response, "usage_metadata", None)
+                            prompt_tokens = getattr(usage, "prompt_token_count", None) if usage else None
+                            output_tokens = getattr(usage, "candidates_token_count", None) if usage else None
+                            total_tokens = getattr(usage, "total_token_count", None) if usage else None
+                            try:
+                                parsed = json.loads(response.text)
+                                generated_count = len(parsed.get("quizzes", [])) if isinstance(parsed, dict) else None
+                                json_valid = True
+                            except Exception:
+                                generated_count = None
+                                json_valid = False
+
                             logging.info(
-                                "AI muvaffaqiyatli | model=%s | key=%s | retry=%s | %.1fs",
-                                model_name, key_idx, retry_round + 1, elapsed
+                                "AI generation diagnostics | model=%s | key_index=%s | retry=%s | "
+                                "attempt=%s | input_chars=%s | output_chars=%s | questions=%s | "
+                                "prompt_tokens=%s | output_tokens=%s | total_tokens=%s | "
+                                "api_seconds=%.2f | queue_wait_seconds=%.2f | semaphore_wait_seconds=%.2f | "
+                                "json_valid=%s | total_elapsed_seconds=%.2f",
+                                model_name, key_idx, retry_round + 1, attempts, input_chars,
+                                len(response.text), generated_count, prompt_tokens, output_tokens,
+                                total_tokens, elapsed, queue_wait, semaphore_wait, json_valid,
+                                time.monotonic() - call_started
                             )
+                            if elapsed > AI_REQUEST_TIMEOUT:
+                                logging.warning(
+                                    "AI request uzoq davom etdi | model=%s | seconds=%.1f | limit=%s",
+                                    model_name, elapsed, AI_REQUEST_TIMEOUT
+                                )
                             return response.text
 
                         last_error = f"{model_name}: Gemini bo'sh javob qaytardi"
-
                     except Exception as e:
                         last_error = str(e)
                         logging.warning(
-                            "AI request muvaffaqiyatsiz | model=%s | key=%s | retry=%s: %s",
-                            model_name, key_idx, retry_round + 1, e
+                            "AI request muvaffaqiyatsiz | model=%s | key_index=%s | retry=%s | "
+                            "attempt=%s | input_chars=%s | api_seconds=%.2f | error_type=%s | error=%s",
+                            model_name, key_idx, retry_round + 1, attempts, input_chars,
+                            time.monotonic() - started, type(e).__name__, e
                         )
                     finally:
                         gemini_semaphore.release()
@@ -2299,8 +2324,9 @@ CRITICAL RULES:
                         time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
 
         logging.error(
-            "Barcha AI model/key/retry urinishlari muvaffaqiyatsiz. Oxirgi xato: %s",
-            last_error
+            "Barcha AI model/key/retry urinishlari muvaffaqiyatsiz | attempts=%s | "
+            "input_chars=%s | total_elapsed_seconds=%.2f | last_error=%s",
+            attempts, input_chars, time.monotonic() - call_started, last_error
         )
         return None
     finally:
