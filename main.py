@@ -1693,7 +1693,11 @@ app.add_middleware(
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
-    response = templates.TemplateResponse("index.html", {"request": request})
+    show_quiz_explanations = os.getenv("SHOW_QUIZ_EXPLANATIONS", "false").strip().lower() in ("1", "true", "yes", "on")
+    response = templates.TemplateResponse("index.html", {
+        "request": request,
+        "show_quiz_explanations": show_quiz_explanations,
+    })
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
