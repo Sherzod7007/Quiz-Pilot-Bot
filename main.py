@@ -2335,7 +2335,10 @@ MUHIM QOIDALAR:
                             usage = getattr(response, "usage_metadata", None)
                             prompt_tokens = getattr(usage, "prompt_token_count", None) or 0
                             output_tokens = getattr(usage, "candidates_token_count", None) or 0
+                            # Gemini qaytargan jami tokenlar va kirish/chiqish yig'indisi
+                            # alohida yoziladi: ular model hisobiga ko'ra farq qilishi mumkin.
                             total_tokens = getattr(usage, "total_token_count", None) or 0
+                            input_output_tokens = prompt_tokens + output_tokens
 
                             # Savollar soni va JSON holati faqat log uchun tekshiriladi.
                             try:
@@ -2350,13 +2353,15 @@ MUHIM QOIDALAR:
                             logging.info(
                                 "AI TEST YARATILDI | model=%s | API kalit indeksi=%s | urinish=%s | "
                                 "kiruvchi_matn_belgilari=%s | chiquvchi_matn_belgilari=%s | savollar_soni=%s | "
-                                "kirish_tokenlari=%s | chiqish_tokenlari=%s | jami_tokenlar=%s | "
+                                "kirish_tokenlari=%s | chiqish_tokenlari=%s | "
+                                "kirish_va_chiqish_yig'indisi=%s | Gemini_jami_tokenlari=%s | "
                                 "Gemini_API_vaqti=%.2f soniya | navbatda_kutish=%.2f soniya | "
                                 "parallel_cheklovda_kutish=%.2f soniya | JSON_to'g'ri=%s | "
                                 "izoh_rejimi=%s | umumiy_vaqt=%.2f soniya",
                                 model_name, key_idx, retry_round + 1,
                                 len(extracted_text[:MAX_TEXT_INPUT_CHARS]), len(response.text),
-                                question_count, prompt_tokens, output_tokens, total_tokens,
+                                question_count, prompt_tokens, output_tokens,
+                                input_output_tokens, total_tokens,
                                 elapsed, queue_wait_seconds, semaphore_wait_seconds,
                                 json_valid,
                                 "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN",
