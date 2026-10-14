@@ -3866,13 +3866,92 @@ def teacher_export(session_id: str, user_id: int, format: str):
     if fmt=="pdf":
         path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
+        # PDF-only fallback fonts and emoji-to-image support; other export formats stay untouched.
+        symbol_font = font
+        for _symbol_path in (
+            str(Path(__file__).resolve().parent / "fonts" / "NotoSansSymbols2-Regular.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            if os.path.exists(_symbol_path):
+                try:
+                    pdfmetrics.registerFont(TTFont("QuizPilotSymbols", _symbol_path))
+                    symbol_font = "QuizPilotSymbols"
+                    break
+                except Exception:
+                    pass
+
+        emoji_font_path = next((p for p in (
+            str(Path(__file__).resolve().parent / "fonts" / "NotoColorEmoji.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+            "/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
+        ) if os.path.exists(p)), None)
+        _emoji_images = []
+        def _pdf_cell_text(value):
+            # Escape user-supplied text so markup characters render literally.
+            text = str(value if value is not None else "")
+            text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            if not emoji_font_path:
+                # Keep the original Unicode text; use a broad symbol font where available.
+                return text.replace("№", f'<font name="{symbol_font}">№</font>')
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+                import unicodedata
+                pieces = []
+                i = 0
+                while i < len(text):
+                    ch = text[i]
+                    cp = ord(ch)
+                    # Emoji/pictograph ranges, including flags and supplementary emoji.
+                    is_emoji = (0x1F000 <= cp <= 0x1FAFF or 0x2600 <= cp <= 0x27BF
+                                or 0x1F1E6 <= cp <= 0x1F1FF)
+                    if not is_emoji:
+                        pieces.append(ch)
+                        i += 1
+                        continue
+                    seq = ch
+                    i += 1
+                    while i < len(text) and (ord(text[i]) in (0xFE0E, 0xFE0F, 0x200D, 0x20E3)
+                                             or 0x1F3FB <= ord(text[i]) <= 0x1F3FF
+                                             or 0x1F1E6 <= ord(text[i]) <= 0x1F1FF):
+                        seq += text[i]
+                        i += 1
+                        if seq.endswith("\u200d") and i < len(text):
+                            seq += text[i]
+                            i += 1
+                    try:
+                        _efont = ImageFont.truetype(emoji_font_path, 109)
+                        _bbox = _efont.getbbox(seq)
+                        _im = Image.new("RGBA", (max(72, _bbox[2]-_bbox[0]+12), max(72, _bbox[3]-_bbox[1]+12)), (255,255,255,0))
+                        ImageDraw.Draw(_im).text((6-_bbox[0], 6-_bbox[1]), seq, font=_efont, embedded_color=True)
+                        _emoji_path = os.path.join(DOWNLOADS_DIR, f"_emoji_{uuid.uuid4().hex}.png")
+                        _im.save(_emoji_path)
+                        _emoji_images.append(_emoji_path)
+                        pieces.append(f'<img src="{_emoji_path}" width="10" height="10" valign="middle"/>')
+                    except Exception:
+                        pieces.append(seq)
+                return "".join(pieces).replace("№", f'<font name="{symbol_font}">№</font>')
+            except Exception:
+                return text.replace("№", f'<font name="{symbol_font}">№</font>')
+
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=28,leftMargin=28,topMargin=28,bottomMargin=28)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("qp_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER)
         body_style=ParagraphStyle("qp_body",parent=styles["BodyText"],fontName=font,fontSize=8)
-        story=[Paragraph(s["title"],title_style),Spacer(1,8),Paragraph(f"Session: {s['code']}",body_style),Spacer(1,8)]
-        data=[["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]]
-        for i,r in enumerate(rows,1): data.append([str(i),str(r["first_name"]),str(r["username"]),str(r["score"]),str(r["total"]),f"{r['percent']}%"] )
-        table=Table(data,repeatRows=1,colWidths=[24,170,100,45,40,45]); table.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("FONTNAME",(0,0),(-1,0),bold),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"MIDDLE")])); story.append(table); doc.build(story)
+        story=[Paragraph(_pdf_cell_text(s["title"]),title_style),Spacer(1,8),Paragraph(_pdf_cell_text(f"Session: {s['code']}"),body_style),Spacer(1,8)]
+        data=[[Paragraph(_pdf_cell_text(v), body_style) for v in ["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]]]
+        for i,r in enumerate(rows,1):
+            data.append([Paragraph(_pdf_cell_text(v), body_style) for v in
+                         [str(i),r["first_name"],r["username"],str(r["score"]),str(r["total"]),f"{r['percent']}%"]])
+        table=Table(data,repeatRows=1,colWidths=[24,170,100,45,40,45])
+        table.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("FONTNAME",(0,0),(-1,0),bold),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        story.append(table)
+        try:
+            doc.build(story)
+        finally:
+            for _emoji_path in _emoji_images:
+                try: os.remove(_emoji_path)
+                except OSError: pass
         return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
