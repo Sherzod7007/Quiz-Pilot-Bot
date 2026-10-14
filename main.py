@@ -62,12 +62,39 @@ except Exception as e:
 support_waiting_users = set()
 support_reply_targets = {}
 
-raw_keys = os.getenv("GOOGLE_API_KEYS", "")
-GOOGLE_API_KEYS = (
-    [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
-)
+# Test yaratish API kalitlari:
+# 1) Eski usul saqlanadi: GOOGLE_API_KEYS=key1,key2,key3
+# 2) Railway Variables'da alohida o'zgaruvchilar: GOOGLE_API_KEY_001 ... GOOGLE_API_KEY_110
+# 3) Muqobil nomlash ham qo'llab-quvvatlanadi: GEMINI_API_KEY_001 ... GEMINI_API_KEY_110
+# Kalit qiymatlari hech qachon logga chiqarilmaydi.
+def _load_generation_api_keys():
+    collected = []
+    raw_keys = os.getenv("GOOGLE_API_KEYS", "")
+    if raw_keys:
+        collected.extend(k.strip() for k in raw_keys.split(",") if k.strip())
+
+    for prefix in ("GOOGLE_API_KEY_", "GEMINI_API_KEY_"):
+        indexed = []
+        for env_name, env_value in os.environ.items():
+            if not env_name.startswith(prefix) or not env_value or not env_value.strip():
+                continue
+            suffix = env_name[len(prefix):]
+            if suffix.isdigit():
+                indexed.append((int(suffix), env_value.strip()))
+        indexed.sort(key=lambda item: item[0])
+        collected.extend(value for _, value in indexed)
+
+    # Bir xil kalit ikki marta kiritilgan bo'lsa, takrorini olib tashlaymiz.
+    return list(dict.fromkeys(collected))
+
+
+GOOGLE_API_KEYS = _load_generation_api_keys()
 current_key_index = 0
 key_lock = threading.Lock()
+logging.info(
+    "AI test kalitlari sozlamasi | topilgan_kalitlar_soni=%s | manba=GOOGLE_API_KEYS va raqamlangan Railway Variables",
+    len(GOOGLE_API_KEYS),
+)
 
 # --- PROFESSIONAL AI MANAGER: KEY ROTATION != CONCURRENCY CONTROL ---
 # API key rotation must never determine the number of simultaneous Gemini requests.
@@ -2246,7 +2273,7 @@ def generate_quiz_from_gemini(extracted_text):
     global current_key_index
 
     if not GOOGLE_API_KEYS:
-        logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
+        logging.error("AI test API kalitlari topilmadi. GOOGLE_API_KEYS yoki GOOGLE_API_KEY_001... kabi raqamlangan Railway Variables sozlang.")
         return None
 
     if GEMINI_INCLUDE_EXPLANATIONS:
