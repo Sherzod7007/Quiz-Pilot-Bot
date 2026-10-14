@@ -3858,9 +3858,24 @@ def teacher_export(session_id: str, user_id: int, format: str):
         doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
         table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
         for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
+        # Faqat MTA Word eksportida ishtirokchi ismi/username ichidagi
+        # Telegram emoji belgilarini olib tashlaymiz: Word'da '?' bo'lib chiqmaydi.
+        # PDF, Excel va ilovaning boshqa qismlariga tegilmaydi.
+        _mta_word_emoji_pattern = re.compile(
+            "["
+            "\\U0001F1E6-\\U0001F1FF"
+            "\\U0001F300-\\U0001FAFF"
+            "\\u2600-\\u27BF"
+            "\\uFE0E\\uFE0F\\u200D\\u20E3"
+            "\\U0001F3FB-\\U0001F3FF"
+            "]"
+        )
+        def _mta_word_without_telegram_emoji(value):
+            return _mta_word_emoji_pattern.sub("", str(value if value is not None else ""))
+
         for i,r in enumerate(rows,1):
             cells=table.add_row().cells
-            vals=[i,r["first_name"],r["username"],r["score"],r["total"],f"{r['percent']}%"]
+            vals=[i,_mta_word_without_telegram_emoji(r["first_name"]),_mta_word_without_telegram_emoji(r["username"]),r["score"],r["total"],f"{r['percent']}%"]
             for j,v in enumerate(vals): cells[j].text=str(v)
         doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     if fmt=="pdf":
