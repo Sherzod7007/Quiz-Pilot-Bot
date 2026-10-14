@@ -3867,25 +3867,18 @@ def teacher_export(session_id: str, user_id: int, format: str):
         path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         # PDF-only fallback fonts and emoji-to-image support; other export formats stay untouched.
-        # Choose a font only if it actually contains U+2116 (NUMERO SIGN).
-        # DejaVu Sans is checked first because some Symbols2 builds do not
-        # include this glyph even though the font file loads successfully.
         symbol_font = font
         for _symbol_path in (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
             str(Path(__file__).resolve().parent / "fonts" / "NotoSansSymbols2-Regular.ttf"),
             "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
             "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ):
             if os.path.exists(_symbol_path):
                 try:
-                    _candidate_name = "QuizPilotSymbols"
-                    pdfmetrics.registerFont(TTFont(_candidate_name, _symbol_path))
-                    _candidate_font = pdfmetrics.getFont(_candidate_name)
-                    if 0x2116 in getattr(_candidate_font.face, "charWidths", {}):
-                        symbol_font = _candidate_name
-                        break
+                    pdfmetrics.registerFont(TTFont("QuizPilotSymbols", _symbol_path))
+                    symbol_font = "QuizPilotSymbols"
+                    break
                 except Exception:
                     pass
 
