@@ -2993,13 +2993,23 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
-        story=[Paragraph(row["title"],title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
+
+        # Faqat Teacher PDF eksporti uchun matnni ReportLab va Helvetica bilan moslaymiz.
+        # Uzbekcha U+02BB/U+02BC belgilarini WinAnsi shriftida mavjud apostroflarga
+        # almashtiramiz; aks holda ular qora kvadrat bo'lib ko'rinishi mumkin.
+        # AI savollaridagi &, <, > belgilarini XML/HTML tegi deb talqin qilmasligi uchun escape qilamiz.
+        def _teacher_pdf_safe(value):
+            text = str(value or "")
+            text = text.replace("\u02bb", "\u2018").replace("\u02bc", "\u2019").replace("`", "\u2018")
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        story=[Paragraph(_teacher_pdf_safe(row["title"]),title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
         for code,payload in variant_payloads:
             story.append(Paragraph(f"<b>Variant {code}</b>", q_style)); story.append(Spacer(1,5))
             for i,q in enumerate(payload.get("quizzes",[]),1):
-                story.append(Paragraph(f"{i}. {q.get('question','')}",q_style))
+                story.append(Paragraph(f"{i}. {_teacher_pdf_safe(q.get('question',''))}",q_style))
                 opts=(q.get("options") or [])+['','','','']
-                for j in range(4): story.append(Paragraph(f"{chr(65+j)}) {opts[j]}",q_style))
+                for j in range(4): story.append(Paragraph(f"{chr(65+j)}) {_teacher_pdf_safe(opts[j])}",q_style))
                 story.append(Spacer(1,4))
             story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
         doc.build(story)
