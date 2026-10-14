@@ -3001,6 +3001,15 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
         def _teacher_pdf_safe(value):
             text = str(value or "")
             text = text.replace("\u02bb", "\u2018").replace("\u02bc", "\u2019").replace("`", "\u2018")
+            # Helvetica fallbackida subscript raqamlar (masalan, I₀ va U₀)
+            # ba'zi serverlarda qora kvadrat bo'lib chiqadi. Faqat Teacher PDF
+            # eksportida ularni oddiy raqamlarga aylantiramiz.
+            text = text.translate(str.maketrans({
+                "\u2080": "0", "\u2081": "1", "\u2082": "2",
+                "\u2083": "3", "\u2084": "4", "\u2085": "5",
+                "\u2086": "6", "\u2087": "7", "\u2088": "8",
+                "\u2089": "9",
+            }))
             return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
         story=[Paragraph(_teacher_pdf_safe(row["title"]),title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
