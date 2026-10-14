@@ -23,9 +23,31 @@ from pydantic import BaseModel, Field
 
 UZ_TZ = timezone(timedelta(hours=5))
 
-PAYMENT_GEMINI_API_KEYS = [
-    k.strip() for k in os.getenv("PAYMENT_GEMINI_API_KEYS", "").split(",") if k.strip()
-]
+# P2P OCR API kalitlari Generation AI kalitlaridan mustaqil ishlaydi.
+# Eski usul saqlanadi: PAYMENT_GEMINI_API_KEYS=key1,key2,key3
+# Raqamlangan Railway Variables ham qo'llab-quvvatlanadi:
+# PAYMENT_GEMINI_API_KEY_001 ... PAYMENT_GEMINI_API_KEY_110
+# Kalit qiymatlari logga chiqarilmaydi.
+def _load_payment_gemini_api_keys():
+    collected = []
+    raw_keys = os.getenv("PAYMENT_GEMINI_API_KEYS", "")
+    if raw_keys:
+        collected.extend(k.strip() for k in raw_keys.split(",") if k.strip())
+
+    prefix = "PAYMENT_GEMINI_API_KEY_"
+    indexed = []
+    for env_name, env_value in os.environ.items():
+        if not env_name.startswith(prefix) or not env_value or not env_value.strip():
+            continue
+        suffix = env_name[len(prefix):]
+        if suffix.isdigit():
+            indexed.append((int(suffix), env_value.strip()))
+    indexed.sort(key=lambda item: item[0])
+    collected.extend(value for _, value in indexed)
+    return list(dict.fromkeys(collected))
+
+
+PAYMENT_GEMINI_API_KEYS = _load_payment_gemini_api_keys()
 PAYMENT_GEMINI_MODEL = os.getenv("PAYMENT_GEMINI_MODEL", "gemini-3.6-flash").strip()
 _fallback_env = os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "")
 PAYMENT_GEMINI_FALLBACK_MODELS = [
@@ -429,7 +451,7 @@ def _vision(file_bytes, mime_type, attempt_number):
                 if best_incomplete is None or result.confidence > best_incomplete[0].confidence:
                     best_incomplete = (result, key_idx, inp, out, model)
                 logging.warning(
-                    "P2P Gemini Vision incomplete result | model=%s | key=%s | receipt_attempt=%s | confidence=%.2f",
+                    "P2P Gemini Vision natijasi to‘liq emas | model=%s | key=%s | receipt_attempt=%s | confidence=%.2f",
                     model, key_idx, attempt_number, result.confidence
                 )
                 continue
@@ -540,7 +562,7 @@ def _notify_user(user_id, text):
         if _bot:
             _bot.send_message(user_id, text)
     except Exception as exc:
-        logging.warning("P2P user notification failed: %s", exc)
+        logging.warning("P2P foydalanuvchiga xabar yuborilmadi: %s", exc)
 
 
 def _notify_admin(text):
@@ -548,7 +570,7 @@ def _notify_admin(text):
         if _bot and _admin_id:
             _bot.send_message(_admin_id, text)
     except Exception as exc:
-        logging.warning("P2P admin notification failed: %s", exc)
+        logging.warning("P2P adminga xabar yuborilmadi: %s", exc)
 
 
 def _notify_admin_review(text, file_id, tx_id, user_id):
@@ -563,11 +585,11 @@ def _notify_admin_review(text, file_id, tx_id, user_id):
     try:
         _bot.send_photo(_admin_id, file_id, caption=text[:1000], reply_markup=markup)
     except Exception as exc:
-        logging.warning("P2P admin receipt photo notification failed | tx=%s | %s", tx_id, exc)
+        logging.warning("P2P chek rasmini adminga yuborishda xato | tx=%s | %s", tx_id, exc)
         try:
             _bot.send_message(_admin_id, text[:4000], reply_markup=markup)
         except Exception:
-            logging.exception("P2P admin fallback notification failed | tx=%s", tx_id)
+            logging.exception("P2P admin uchun zaxira xabar yuborishda xato | tx=%s", tx_id)
 
 
 def handle_admin_decision(call):
@@ -644,7 +666,7 @@ def handle_admin_decision(call):
                                    call.message.chat.id, call.message.message_id)
         _bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
     except Exception as exc:
-        logging.warning("Could not mark P2P admin decision in Telegram | tx=%s | %s", tx_id, exc)
+        logging.warning("Telegramda P2P admin qarorini belgilab bo‘lmadi | tx=%s | %s", tx_id, exc)
 
 
 def _approve(tx_id, user_id):
@@ -779,7 +801,7 @@ def _recover_queued(force=False):
             finally:
                 conn.close()
     if recovered:
-        logging.info("P2P OCR recovery: %s receipt(s) restored to worker queue", recovered)
+        logging.info("P2P OCR: %s ta chek ishchilar navbatiga qaytarildi", recovered)
     return recovered
 
 
@@ -788,7 +810,7 @@ def _retry_scheduler():
         try:
             _recover_queued(force=False)
         except Exception:
-            logging.exception("P2P OCR retry scheduler error")
+            logging.exception("P2P OCR qayta urinish rejasida xato")
         time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
@@ -809,7 +831,7 @@ def _user_identity(user_id):
             if raw_username:
                 username = f"@{raw_username}"
     except Exception as exc:
-        logging.debug("P2P Telegram profile lookup failed | user=%s | %s", user_id, exc)
+        logging.debug("P2P Telegram profilini olishda xato | user=%s | %s", user_id, exc)
     return name, username
 
 
@@ -947,7 +969,7 @@ def _process(item):
         if ok:
             _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
             _notify_user(user_id, _p2p_message(user_id, "approved"))
-            logging.info("P2P payment auto-approved | tx=%s | user=%s | model=%s | cost=$%.6f", tx_id, user_id, used_model, cost)
+            logging.info("P2P to‘lov avtomatik tasdiqlandi | tx=%s | user=%s | model=%s | xarajat=$%.6f", tx_id, user_id, used_model, cost)
         else:
             _mark_by_tx(tx_id, status="review", reason=info)
     except BudgetBlockedError as exc:
@@ -955,14 +977,14 @@ def _process(item):
         _mark_by_tx(tx_id, status="budget_blocked", reason=str(exc), last_error=str(exc), next_retry_at=_now() + 3600)
         if attempts <= 1:
             _notify_user(user_id, _p2p_message(user_id, "budget"))
-        logging.warning("P2P OCR budget blocked | tx=%s | user=%s | reason=%s", tx_id, user_id, exc)
+        logging.warning("P2P OCR budjet limiti sabab to‘xtatildi | tx=%s | user=%s | sabab=%s", tx_id, user_id, exc)
     except Exception as exc:
         attempts = _get_attempts(tx_id)
         transient = _is_transient_error(exc) or isinstance(exc, TemporaryAIError)
         if transient:
             delay = _retry_delay(min(attempts, PAYMENT_OCR_MAX_RETRIES))
             _mark_by_tx(tx_id, status="retry_wait", reason="Vaqtinchalik AI xatosi; avtomatik qayta uriniladi", last_error=str(exc), next_retry_at=_now() + delay)
-            logging.warning("P2P OCR temporary failure | tx=%s | attempt=%s | retry_in=%ss | %s", tx_id, attempts, delay, exc)
+            logging.warning("P2P OCR vaqtinchalik xatosi | tx=%s | urinish=%s | qayta_urinish=%s soniyadan_so‘ng | %s", tx_id, attempts, delay, exc)
             if attempts == 1:
                 _notify_user(user_id, _p2p_message(user_id, "received"))
             # Do not spam the admin for every transient 503. The receipt remains durable.
@@ -1010,14 +1032,14 @@ def _mark_by_tx(tx_id, **fields):
 
 
 def _worker():
-    logging.info("P2P OCR worker started | model=%s | concurrency=%s | queue=%s | keys=%s",
+    logging.info("P2P OCR ishchi jarayoni ishga tushdi | model=%s | parallel_ish=%s | navbat=%s | kalitlar_soni=%s",
                  PAYMENT_GEMINI_MODEL, PAYMENT_OCR_MAX_CONCURRENT, PAYMENT_OCR_QUEUE_MAX, len(PAYMENT_GEMINI_API_KEYS))
     while True:
         item = _queue.get()
         try:
             _process(item)
         except Exception:
-            logging.exception("P2P OCR worker unexpected error")
+            logging.exception("P2P OCR ishchi jarayonida kutilmagan xato")
         finally:
             _queue.task_done()
 
