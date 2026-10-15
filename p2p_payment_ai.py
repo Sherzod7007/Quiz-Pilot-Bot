@@ -598,7 +598,7 @@ def _p2p_review_message(user_id, issue_keys):
     lines = [messages["review_title"], "", messages["review_intro"]]
     lines.extend(messages[key] for key in issue_keys if key in messages)
     lines.extend(["", messages["review_next"]])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _notify_user(user_id, text):
