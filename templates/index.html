@@ -14367,16 +14367,45 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
             loader.style.display = "block";
             setAIGenerationLock(true);
 
+            let uploadLimits = { max_upload_file_mb: 10, max_text_input_chars: 80000 };
+            try {
+                const limitsResponse = await fetch(BASE_URL + '/api/upload-limits');
+                if (limitsResponse.ok) {
+                    const limitsData = await limitsResponse.json();
+                    if (limitsData && Number(limitsData.max_upload_file_mb) > 0) {
+                        uploadLimits.max_upload_file_mb = Number(limitsData.max_upload_file_mb);
+                    }
+                    if (limitsData && Number(limitsData.max_text_input_chars) > 0) {
+                        uploadLimits.max_text_input_chars = Number(limitsData.max_text_input_chars);
+                    }
+                }
+            } catch (limitsError) {
+                console.warn("Yuklash limitlarini serverdan olish imkoni bo‘lmadi; standart qiymatlar ishlatiladi.");
+            }
+
+            if (textInput.length > uploadLimits.max_text_input_chars) {
+                const textLimitAlerts = {
+                    uz: `Matn ${uploadLimits.max_text_input_chars.toLocaleString()} ta belgidan oshmasligi kerak!`,
+                    ru: `Текст не должен превышать ${uploadLimits.max_text_input_chars.toLocaleString()} символов!`,
+                    en: `Text must not exceed ${uploadLimits.max_text_input_chars.toLocaleString()} characters!`
+                };
+                showAppAlert("⚠️", textLimitAlerts[currentLang] || textLimitAlerts.uz);
+                genBtn.style.display = "block";
+                loader.style.display = "none";
+                setAIGenerationLock(false);
+                return;
+            }
+
             const formData = new FormData();
             formData.append('user_id', userId);
             if (textInput) formData.append('text', textInput);
             if (fileInput.files.length > 0) {
             const selectedFile = fileInput.files[0];
-            if (selectedFile.size > 10 * 1024 * 1024) { // 10 MB limit
+            if (selectedFile.size > uploadLimits.max_upload_file_mb * 1024 * 1024) {
                 const fileLimitAlerts = {
-    uz: "Fayl hajmi 10 MB dan oshmasligi kerak!",
-    ru: "Размер файла не должен превышать 10 МБ!",
-    en: "File size must not exceed 10 MB!"
+    uz: `Fayl hajmi ${uploadLimits.max_upload_file_mb} MB dan oshmasligi kerak!`,
+    ru: `Размер файла не должен превышать ${uploadLimits.max_upload_file_mb} МБ!`,
+    en: `File size must not exceed ${uploadLimits.max_upload_file_mb} MB!`
 };
 showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 genBtn.style.display = "block";
