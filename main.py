@@ -2415,10 +2415,53 @@ def randomize_quiz_answer_positions(items):
     return items
 
 def _split_source_into_batches(source_text, max_chars):
-    """Matnni imkon qadar paragraf chegaralarida bo'laklarga ajratadi."""
+    """Matnni savol chegaralari yoki paragraf chegaralarida sozlanadigan bo'laklarga ajratadi."""
     source_text = (source_text or "").strip()
     if not source_text:
         return []
+
+    # Tayyor raqamlangan savollar ro'yxati bo'lsa, 50+ savol bitta AI
+    # so'roviga tushib qolmasligi uchun savol boshlanishlarini aniqlaymiz.
+    # Raqamlangan savollar aniqlanmasa, avvalgi paragraf/harf chegarasi usuli ishlaydi.
+    question_start = re.compile(
+        r"(?m)^\s*(?:(?:Savol|Question|Вопрос)\s*)?\d{1,4}\s*[.)]\s+"
+    )
+    starts = list(question_start.finditer(source_text))
+    if len(starts) >= 2:
+        prefix = source_text[:starts[0].start()].strip()
+        question_blocks = []
+        for idx, match in enumerate(starts):
+            block_end = starts[idx + 1].start() if idx + 1 < len(starts) else len(source_text)
+            block = source_text[match.start():block_end].strip()
+            if block:
+                question_blocks.append(block)
+
+        # Savol bloklarini ham savol soni, ham matn uzunligi bo'yicha yig'amiz.
+        batches = []
+        current_blocks = []
+        current_chars = len(prefix)
+        for block in question_blocks:
+            candidate_chars = current_chars + len(block) + (2 if current_blocks or prefix else 0)
+            if current_blocks and (
+                len(current_blocks) >= MAX_QUESTIONS_PER_REQUEST
+                or candidate_chars > max_chars
+            ):
+                batches.append("\n\n".join(([prefix] if prefix and not batches else []) + current_blocks))
+                current_blocks = []
+                current_chars = 0
+            current_blocks.append(block)
+            current_chars += len(block) + 2
+
+        if current_blocks:
+            batches.append("\n\n".join(([prefix] if prefix and not batches else []) + current_blocks))
+        if batches:
+            logging.info(
+                "SAVOL RO'YXATI BO'LAKLANDI | aniqlangan_savollar=%s | bo'laklar_soni=%s | bitta_bolak_savol_limiti=%s",
+                len(question_blocks), len(batches), MAX_QUESTIONS_PER_REQUEST
+            )
+            return batches
+
+    # Raqamlangan savollar ro'yxati topilmasa, avvalgi usul saqlanadi.
     batches = []
     current = ""
     for paragraph in re.split(r"\n\s*\n", source_text):
@@ -2477,11 +2520,11 @@ def generate_quiz_from_gemini(extracted_text, user_id=None):
             logging.error("TEST BO'LAK JSON XATOSI | bo'lak=%s/%s | tafsilot=%s", batch_index, len(source_batches), e)
             return None
         remaining_file_slots = MAX_QUESTIONS_PER_FILE - len(combined_items)
-        allowed_count = min(MAX_QUESTIONS_PER_REQUEST, remaining_file_slots)
+        allowed_count = remaining_file_slots
         if len(batch_items) > allowed_count:
             logging.warning(
-                "TEST SAVOLLARI CHEGARALANDI | bo'lak=%s/%s | olingan=%s | qabul_qilingan=%s",
-                batch_index, len(source_batches), len(batch_items), allowed_count
+                "TEST SAVOLLARI CHEGARALANDI | bo'lak=%s/%s | olingan=%s | faylda_qabul_qilingan=%s | fayl_limiti=%s",
+                batch_index, len(source_batches), len(batch_items), allowed_count, MAX_QUESTIONS_PER_FILE
             )
             batch_items = batch_items[:allowed_count]
         combined_items.extend(batch_items)
