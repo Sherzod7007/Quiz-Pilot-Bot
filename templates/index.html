@@ -13103,6 +13103,30 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 #settings-screen #performance-toggle:active{ transform:scale(.96) !important; }
 </style>
 
+<!-- Telegram Fullscreen va telefon viewportiga moslash: faqat ekran/scroll sozlamalari. -->
+<style id="quiz-ai-telegram-viewport-fix">
+    html {
+        min-height: 100%;
+        background: transparent !important;
+        overscroll-behavior-y: none;
+    }
+    body {
+        min-height: var(--tg-viewport-height, 100dvh) !important;
+        box-sizing: border-box !important;
+        padding-top: env(safe-area-inset-top, 0px) !important;
+        padding-bottom: max(108px, calc(100px + env(safe-area-inset-bottom, 0px))) !important;
+        background-color: transparent !important;
+    }
+    @supports (height: 100dvh) {
+        body {
+            min-height: var(--tg-viewport-height, 100dvh) !important;
+        }
+    }
+    #game-screen, #newsModal, #ai-generation-overlay {
+        min-height: var(--tg-viewport-height, 100dvh);
+    }
+</style>
+
 </head>
 <body>
 
@@ -13537,35 +13561,19 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 
         const tg = window.Telegram.WebApp;
         tg.ready();
-        tg.expand();
 
-        // Telegram tashqi panellari ilovaning tanlangan foniga moslashadi.
-        // Fon rangi qotirib qo'yilmaydi: foydalanuvchi oboyni almashtirsa, yuqori/pastki panellar ham yangilanadi.
-        function syncTelegramChromeColor() {
-            try {
-                const rootStyle = getComputedStyle(document.documentElement);
-                const wallpaper = rootStyle.getPropertyValue('--quizpilot-wallpaper').trim();
-                const aeroBg = rootStyle.getPropertyValue('--aero-bg').trim();
-                const backgroundValue = wallpaper || aeroBg;
-                const gradientMatch = backgroundValue.match(/linear-gradient\([^,]+,\s*(#[0-9a-fA-F]{3,8})/);
-                const colorMatch = backgroundValue.match(/#[0-9a-fA-F]{6}\b/);
-                const chromeColor = (gradientMatch && gradientMatch[1]) || (colorMatch && colorMatch[0]) || '#1c2b3a';
-
-                if (typeof tg.setHeaderColor === 'function') tg.setHeaderColor(chromeColor);
-                if (typeof tg.setBackgroundColor === 'function') tg.setBackgroundColor(chromeColor);
-                if (typeof tg.setBottomBarColor === 'function') tg.setBottomBarColor(chromeColor);
-            } catch (e) {
-                console.warn('Telegram tashqi panellari rangini moslashda xatolik:', e);
+        // Telegram qo'llasa, Mini App'ni haqiqiy Fullscreen rejimida ochish.
+        // Eski Telegram versiyalarida avvalgi expand() rejimi saqlanadi.
+        try {
+            if (typeof tg.requestFullscreen === 'function') {
+                tg.requestFullscreen();
+            } else {
+                tg.expand();
             }
+        } catch (e) {
+            try { tg.expand(); } catch (_) {}
+            console.warn('Fullscreen rejimini yoqishda xatolik:', e);
         }
-
-        syncTelegramChromeColor();
-        const telegramChromeObserver = new MutationObserver(syncTelegramChromeColor);
-        telegramChromeObserver.observe(document.documentElement, {
-            attributes: true,
-            attributeFilter: ['style', 'data-quiz-theme']
-        });
-        document.addEventListener('DOMContentLoaded', syncTelegramChromeColor);
 
         const BASE_URL = window.location.origin;
         let userId = 99999; 
@@ -13773,11 +13781,11 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(paymentData)
                     });
-                } catch(e) { console.log("API Fetch xatosi:", e); }
+                } catch(e) { console.log("API so‘rovini yuborishda xatolik:", e); }
                 
                 try {
                     tg.sendData(JSON.stringify(paymentData));
-                } catch(e) { console.log("tg.sendData ishlamadi (Oddiy holat):", e); }
+                } catch(e) { console.log("Telegram ma’lumot yuborish funksiyasi ishlamadi (odatiy holat):", e); }
                 
                 setTimeout(() => { tg.close(); }, 200);
             });
@@ -13976,7 +13984,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                     tg.close();
                 }
             } catch (e) {
-                console.error("Admin bilan bog\'lanish xatosi:", e);
+                console.error("Administrator bilan bog‘lanishda xatolik:", e);
                 showAppAlert('❌', e.message || langPack[currentLang].contact_admin_desc);
                 if (btn) btn.disabled = false;
             }
@@ -14037,7 +14045,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 }
                 return items;
             } catch (error) {
-                console.warn('News tekshiruvida xatolik:', error);
+                console.warn('Yangiliklarni tekshirishda xatolik:', error);
                 return null;
             } finally {
                 newsRequestInFlight = false;
@@ -14540,7 +14548,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 } else {
                     listDiv.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_tests}</div>`;
                 }
-            } catch (error) { console.error(error); }
+            } catch (error) { console.error('Testlar ro‘yxatini yuklashda xatolik:', error); }
         }
 
         async function loadPublicQuizzes() {
@@ -14580,7 +14588,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 } else {
                     container.innerHTML = `<div style="text-align: center; color: var(--text-hint); padding: 40px;">${langPack[currentLang].msg_no_public}</div>`;
                 }
-            } catch(e) { container.innerHTML = "Error."; }
+            } catch(e) { console.error("Ommaviy testlarni yuklashda xatolik:", e); container.innerHTML = "Error."; }
         }
 
         async function togglePublic(quizId, newState) {
@@ -14595,7 +14603,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 try {
                     const response = await fetch(`${BASE_URL}/api/delete-quiz?quiz_id=${quizId}&user_id=${userId}`, { method: 'DELETE' });
                     if ((await response.json()).status === "ok") loadQuizzes();
-                } catch (error) { console.log(error); }
+                } catch (error) { console.error('Testni o‘chirishda xatolik:', error); }
             });
         }
 
@@ -14991,7 +14999,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 if(!status.is_teacher) return;
                 await loadTeacherAssignmentQuizzes();
                 await loadTeacherGroups();
-            } catch(e) { console.log('Teacher panel load:', e); }
+            } catch(e) { console.log('O‘qituvchi panelini yuklashda xatolik:', e); }
         }
 
         async function createTeacherSession() {
