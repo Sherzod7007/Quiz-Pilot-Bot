@@ -1858,8 +1858,8 @@ async def get_upload_limits():
     }
 
 logging.info(
-    "Yuklash limitlari | fayl_hajmi=%s MB | kiritilgan_matn=%s belgi | fayldan_ajratilgan_matn=%s belgi",
-    MAX_UPLOAD_FILE_MB, MAX_TEXT_INPUT_CHARS, MAX_EXTRACTED_TEXT_CHARS
+    "Yuklash limitlari | fayl_hajmi=%s MB | PDF_sahifalari=%s ta | kiritilgan_matn=%s belgi | fayldan_ajratilgan_matn=%s belgi",
+    MAX_UPLOAD_FILE_MB, MAX_PDF_PAGES, MAX_TEXT_INPUT_CHARS, MAX_EXTRACTED_TEXT_CHARS
 )
 
 @app.post("/api/create-quiz-web")
