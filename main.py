@@ -127,7 +127,7 @@ GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").s
 # Input protection: pasted text gets a visible hard limit; extracted files are
 # protected separately below. This prevents unexpectedly large requests entering
 # the AI queue. Large books should be split/batched rather than silently truncated.
-MAX_TEXT_INPUT_CHARS = max(10000, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
+MAX_TEXT_INPUT_CHARS = max(1, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 
 # Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
 # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
@@ -149,7 +149,7 @@ logging.info(
 MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "10")))
 MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
-MAX_EXTRACTED_TEXT_CHARS = max(10000, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "300000")))
+MAX_EXTRACTED_TEXT_CHARS = max(1, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "80000")))
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx"}
 
 FILE_PROTECTION_MESSAGES = {
@@ -1847,6 +1847,21 @@ def get_premium_status(user_id: int):
     }
 
 MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES  # MAX_UPLOAD_FILE_MB (baytlarda)
+
+@app.get("/api/upload-limits")
+async def get_upload_limits():
+    """Mini App uchun Railway orqali sozlangan yuklash limitlari."""
+    return {
+        "max_upload_file_mb": MAX_UPLOAD_FILE_MB,
+        "max_text_input_chars": MAX_TEXT_INPUT_CHARS,
+        "max_extracted_text_chars": MAX_EXTRACTED_TEXT_CHARS,
+    }
+
+logging.info(
+    "Yuklash limitlari | fayl_hajmi=%s MB | kiritilgan_matn=%s belgi | fayldan_ajratilgan_matn=%s belgi",
+    MAX_UPLOAD_FILE_MB, MAX_TEXT_INPUT_CHARS, MAX_EXTRACTED_TEXT_CHARS
+)
+
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1946,6 +1961,10 @@ async def create_quiz_web(
                 original_name, extension, len(contents) / (1024 * 1024), faylni_oqish_vaqti
             )
             if len(contents) > MAX_UPLOAD_FILE_BYTES:
+                logging.warning(
+                    "Fayl yuklanmadi: hajm belgilangan limitdan oshdi | foydalanuvchi=%s | fayl=%s | hajm=%.2f MB | limit=%s MB",
+                    user_id, original_name, len(contents) / (1024 * 1024), MAX_UPLOAD_FILE_MB
+                )
                 if free_slot_reserved:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                     cur_restore = conn_restore.cursor()
@@ -1984,6 +2003,10 @@ async def create_quiz_web(
                         if page_text:
                             text_len += len(page_text)
                             if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                logging.warning(
+                                    "PDF fayli rad etildi: ajratilgan matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                    user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                )
                                 try: os.remove(file_path)
                                 except Exception: pass
                                 if free_slot_reserved:
@@ -2004,6 +2027,10 @@ async def create_quiz_web(
                         part = paragraph.text or ""
                         text_len += len(part)
                         if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                            logging.warning(
+                                "DOCX fayli rad etildi: ajratilgan matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                            )
                             try: os.remove(file_path)
                             except Exception: pass
                             if free_slot_reserved:
@@ -2034,6 +2061,10 @@ async def create_quiz_web(
 
     if not raw_text.strip() and text:
         if len(text) > MAX_TEXT_INPUT_CHARS:
+            logging.warning(
+                "Matn yuborilmadi: belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                user_id, len(text), MAX_TEXT_INPUT_CHARS
+            )
             if free_slot_reserved:
                 try:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
