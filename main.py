@@ -2520,7 +2520,9 @@ def generate_quiz_from_gemini(extracted_text, user_id=None):
             logging.error("TEST BO'LAK JSON XATOSI | bo'lak=%s/%s | tafsilot=%s", batch_index, len(source_batches), e)
             return None
         remaining_file_slots = MAX_QUESTIONS_PER_FILE - len(combined_items)
-        allowed_count = remaining_file_slots
+        # Har bir AI javobi 50 ta (yoki sozlangan limit) bilan cheklanadi;
+        # fayl limiti esa barcha bo'laklar bo'yicha alohida saqlanadi.
+        allowed_count = min(MAX_QUESTIONS_PER_REQUEST, remaining_file_slots)
         if len(batch_items) > allowed_count:
             logging.warning(
                 "TEST SAVOLLARI CHEGARALANDI | bo'lak=%s/%s | olingan=%s | faylda_qabul_qilingan=%s | fayl_limiti=%s",
@@ -2574,9 +2576,9 @@ def _generate_quiz_batch_from_gemini(extracted_text, user_id=None):
 MUHIM QOIDALAR:
 1. TIL QOIDASI: {language_rule}
 2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
-   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi savollar soniga teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
-   B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
-   C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Joriy bo'lakdagi savollarni saqlang, ammo ushbu so'rovda ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta savol qaytaring.
+   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Faqat JORIY BO'LAK ichidagi savollarni qaytaring; boshqa bo'lakdagi savollarni qo'shmang.
+   B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta yangi savol yarating.
+   C) Har qanday holatda bitta javobdagi savollar soni {MAX_QUESTIONS_PER_REQUEST} tadan OSHMASIN. Agar joriy bo'lakda bundan ko'p savol bo'lsa, tartib bo'yicha faqat birinchi {MAX_QUESTIONS_PER_REQUEST} tasini qaytaring.
    D) Nazariy matndan ushbu so'rovda ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta savol yarating.
 {explanation_rule}"""
 
