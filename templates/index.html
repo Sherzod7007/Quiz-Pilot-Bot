@@ -13103,24 +13103,29 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 #settings-screen #performance-toggle:active{ transform:scale(.96) !important; }
 </style>
 
-<!-- Telegram Fullscreen va telefon viewportiga moslash: faqat ekran/scroll sozlamalari. -->
+<!-- Telegram Fullscreen va turli telefonlarning safe-area/viewportiga moslash.
+     Faqat ekran chetlari, tizim panellari va scroll o'lchamlari sozlanadi. -->
 <style id="quiz-ai-telegram-viewport-fix">
     html {
         min-height: 100%;
-        background: transparent !important;
+        background: var(--aero-bg) !important;
         overscroll-behavior-y: none;
     }
     body {
         min-height: var(--tg-viewport-height, 100dvh) !important;
         box-sizing: border-box !important;
-        padding-top: env(safe-area-inset-top, 0px) !important;
-        padding-bottom: max(108px, calc(100px + env(safe-area-inset-bottom, 0px))) !important;
-        background-color: transparent !important;
+        /* Telegram API qiymatlari mavjud bo'lsa ulardan foydalanadi;
+           Android fullscreen'da status-bar ustma-ust tushsa 30px xavfsiz joy qoldiradi. */
+        padding-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px)) !important;
+        padding-bottom: max(108px, calc(100px + env(safe-area-inset-bottom, 0px)), calc(100px + var(--tg-safe-area-inset-bottom, 0px)), calc(100px + var(--tg-content-safe-area-inset-bottom, 0px))) !important;
+        background: var(--aero-bg) !important;
+        background-attachment: fixed !important;
+    }
+    html.quiz-ai-native-fullscreen body {
+        padding-top: max(30px, env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px)) !important;
     }
     @supports (height: 100dvh) {
-        body {
-            min-height: var(--tg-viewport-height, 100dvh) !important;
-        }
+        body { min-height: var(--tg-viewport-height, 100dvh) !important; }
     }
     #game-screen, #newsModal, #ai-generation-overlay {
         min-height: var(--tg-viewport-height, 100dvh);
@@ -13562,11 +13567,28 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
         const tg = window.Telegram.WebApp;
         tg.ready();
 
-        // Telegram qo'llasa, Mini App'ni haqiqiy Fullscreen rejimida ochish.
-        // Eski Telegram versiyalarida avvalgi expand() rejimi saqlanadi.
+        // Telegram qo'llasa Fullscreen; telefon status-baridan matnlar o'tib ketmasligi
+        // uchun fullscreen holati va viewport o'zgarishlarini kuzatamiz.
+        const syncTelegramViewport = () => {
+            try {
+                const isNativeFullscreen = !!(tg.isFullscreen || tg.is_fullscreen);
+                document.documentElement.classList.toggle('quiz-ai-native-fullscreen', isNativeFullscreen);
+                const height = Number(tg.viewportHeight || tg.viewportStableHeight || 0);
+                if (height > 0) document.documentElement.style.setProperty('--tg-viewport-height', `${height}px`);
+            } catch (_) {}
+        };
         try {
+            if (typeof tg.onEvent === 'function') {
+                tg.onEvent('fullscreenChanged', syncTelegramViewport);
+                tg.onEvent('viewportChanged', syncTelegramViewport);
+                tg.onEvent('safeAreaChanged', syncTelegramViewport);
+                tg.onEvent('contentSafeAreaChanged', syncTelegramViewport);
+            }
             if (typeof tg.requestFullscreen === 'function') {
-                tg.requestFullscreen();
+                const fullscreenRequest = tg.requestFullscreen();
+                if (fullscreenRequest && typeof fullscreenRequest.catch === 'function') {
+                    fullscreenRequest.catch(() => { try { tg.expand(); } catch (_) {} });
+                }
             } else {
                 tg.expand();
             }
@@ -13574,6 +13596,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
             try { tg.expand(); } catch (_) {}
             console.warn('Fullscreen rejimini yoqishda xatolik:', e);
         }
+        syncTelegramViewport();
 
         const BASE_URL = window.location.origin;
         let userId = 99999; 
