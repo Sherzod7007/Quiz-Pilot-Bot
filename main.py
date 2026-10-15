@@ -208,9 +208,14 @@ TARIFFS = {
         "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
     },
 }
-FREE_QUIZ_LIMIT = 3
-FREE_PUBLIC_LIMIT = 3
-FREE_FLASHCARD_LIMIT = 3
+# Bepul foydalanuvchi limitlari Railway Variables orqali boshqariladi.
+FREE_QUIZ_LIMIT = max(0, int(os.getenv("FREE_QUIZ_LIMIT", "3")))
+FREE_PUBLIC_LIMIT = max(0, int(os.getenv("FREE_PUBLIC_LIMIT", "3")))
+FREE_FLASHCARD_LIMIT = max(0, int(os.getenv("FREE_FLASHCARD_LIMIT", "3")))
+logging.info(
+    "Bepul limitlar sozlamasi | AI_test=%s | ommaviy_test=%s | flash_kartochka=%s",
+    FREE_QUIZ_LIMIT, FREE_PUBLIC_LIMIT, FREE_FLASHCARD_LIMIT
+)
 P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
@@ -250,7 +255,7 @@ MESSAGES = {
             "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
             "🔊 Ovoz va vibratsiya sozlamalari.\n"
             "🌍 O'zbek, Русский va English tillari.\n"
-            "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
+            "🆓 *Bepul:* har 30 kunda {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -280,11 +285,11 @@ MESSAGES = {
         "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
-        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan 3 ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
-        "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
-        "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
+        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan {limit} ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
+        "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
+        "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
-        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi yana 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochkadan bepul foydalanishingiz mumkin.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
+        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi yana {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochkadan bepul foydalanishingiz mumkin.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
     },
     "ru": {
         "welcome": (
@@ -300,7 +305,7 @@ MESSAGES = {
             "📊 Удобный просмотр и анализ результатов.\n"
             "🔊 Настройки звука и вибрации.\n"
             "🌍 Узбекский, русский и английский языки.\n"
-            "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
+            "🆓 *Бесплатно:* {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
@@ -329,11 +334,11 @@ MESSAGES = {
         "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
-        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все 3 бесплатных AI-теста. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
-        "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали 3 бесплатных публичных теста за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
-        "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали 3 бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
+        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все {limit} бесплатных AI-тестов. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
+        "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали {limit} бесплатных публичных тестов за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
+        "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали {limit} бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите новый тариф в разделе Premium.",
-        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Теперь вы снова можете бесплатно использовать 3 AI-теста, 3 публичных теста и 3 флеш-карточки.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
+        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Теперь вы снова можете бесплатно использовать {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
     },
     "en": {
         "welcome": (
@@ -349,7 +354,7 @@ MESSAGES = {
             "📊 Easy results viewing and analysis.\n"
             "🔊 Sound and vibration settings.\n"
             "🌍 Uzbek, Russian and English languages.\n"
-            "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
+            "🆓 *Free:* {quiz_limit} AI quizzes, {public_limit} public quizzes and {flashcard_limit} flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -378,11 +383,11 @@ MESSAGES = {
         "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
-        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all 3 free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
-        "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your 3 free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
-        "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your 3 free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
+        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all {limit} free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
+        "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your {limit} free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
+        "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your {limit} free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a new plan in the Premium section.",
-        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. You can now use 3 AI quizzes, 3 public quizzes, and 3 flashcards for free again.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
+        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. You can now use {quiz_limit} AI quizzes, {public_limit} public quizzes, and {flashcard_limit} flashcards for free again.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
     }
 }
 
@@ -999,7 +1004,7 @@ def notify_free_limit_reached(user_id: int, kind: str):
         conn.commit()
         conn.close()
         if changed:
-            _send_limit_message(user_id, message_key)
+            _send_limit_message(user_id, message_key, limit=limit)
     except Exception as e:
         logging.error(f"Bepul limit notification xatosi ({user_id}, {kind}): {e}")
 
@@ -1043,7 +1048,7 @@ def process_expired_free_limits():
             if cur.rowcount == 1 and had_exhausted_limit and already_notified != old_cycle:
                 try:
                     lang = get_user_lang(user_id)
-                    text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"]
+                    text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"].format(quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
                     bot.send_message(user_id, text, parse_mode="Markdown")
                 except Exception as e:
                     logging.error(f"Bepul limit qaytgani haqida xabar yuborilmadi ({user_id}): {e}")
@@ -1202,7 +1207,7 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name)
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
