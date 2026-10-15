@@ -150,11 +150,6 @@ MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "10")))
 MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
 MAX_EXTRACTED_TEXT_CHARS = max(1, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "80000")))
-# Test yaratish hajmi Railway Variables orqali boshqariladi.
-MAX_QUESTIONS_PER_REQUEST = max(1, int(os.getenv("MAX_QUESTIONS_PER_REQUEST", "50")))
-MAX_SOURCE_CHARS_PER_BATCH = max(1000, int(os.getenv("MAX_SOURCE_CHARS_PER_BATCH", "20000")))
-MAX_QUESTIONS_PER_FILE = max(1, int(os.getenv("MAX_QUESTIONS_PER_FILE", "200")))
-
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx"}
 
 FILE_PROTECTION_MESSAGES = {
@@ -1865,18 +1860,11 @@ async def get_upload_limits():
         "max_upload_file_mb": MAX_UPLOAD_FILE_MB,
         "max_text_input_chars": MAX_TEXT_INPUT_CHARS,
         "max_extracted_text_chars": MAX_EXTRACTED_TEXT_CHARS,
-        "max_questions_per_file": MAX_QUESTIONS_PER_FILE,
-        "max_questions_per_request": MAX_QUESTIONS_PER_REQUEST,
-        "max_source_chars_per_batch": MAX_SOURCE_CHARS_PER_BATCH,
     }
 
 logging.info(
     "Yuklash limitlari | fayl_hajmi=%s MB | PDF_sahifalari=%s ta | kiritilgan_matn=%s belgi | fayldan_ajratilgan_matn=%s belgi",
     MAX_UPLOAD_FILE_MB, MAX_PDF_PAGES, MAX_TEXT_INPUT_CHARS, MAX_EXTRACTED_TEXT_CHARS
-)
-logging.info(
-    "Test yaratish hajmi sozlamalari | bitta_fayl_savol_limiti=%s | bitta_AI_so'rovi_savol_limiti=%s | har_bir_bolak_matni=%s belgi",
-    MAX_QUESTIONS_PER_FILE, MAX_QUESTIONS_PER_REQUEST, MAX_SOURCE_CHARS_PER_BATCH
 )
 
 @app.post("/api/create-quiz-web")
@@ -2309,92 +2297,7 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def _split_source_into_batches(source_text, max_chars):
-    """Matnni imkon qadar paragraf chegaralarida bo'laklarga ajratadi."""
-    source_text = (source_text or "").strip()
-    if not source_text:
-        return []
-    batches = []
-    current = ""
-    for paragraph in re.split(r"\n\s*\n", source_text):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        while len(paragraph) > max_chars:
-            if current:
-                batches.append(current)
-                current = ""
-            batches.append(paragraph[:max_chars])
-            paragraph = paragraph[max_chars:]
-        candidate = (current + "\n\n" + paragraph).strip() if current else paragraph
-        if len(candidate) > max_chars:
-            if current:
-                batches.append(current)
-            current = paragraph
-        else:
-            current = candidate
-    if current:
-        batches.append(current)
-    return batches
-
-
 def generate_quiz_from_gemini(extracted_text):
-    """Manbani sozlanadigan hajmdagi bo'laklarda ishlab, natijalarni birlashtiradi."""
-    source_batches = _split_source_into_batches(extracted_text, MAX_SOURCE_CHARS_PER_BATCH)
-    if not source_batches:
-        logging.warning("Test yaratish bekor qilindi | sabab=manba_matni_bo'sh")
-        return None
-
-    logging.info(
-        "TEST BO'LAKLASH | manba_belgilari=%s | bo'laklar_soni=%s | bo'lak_limit_belgi=%s | so'rov_savol_limiti=%s | fayl_savol_limiti=%s",
-        len(extracted_text), len(source_batches), MAX_SOURCE_CHARS_PER_BATCH,
-        MAX_QUESTIONS_PER_REQUEST, MAX_QUESTIONS_PER_FILE
-    )
-    combined_items = []
-    for batch_index, batch_text in enumerate(source_batches, start=1):
-        if len(combined_items) >= MAX_QUESTIONS_PER_FILE:
-            logging.info("TEST BO'LAKLASH | fayl_savol_limiti_toldi=%s | qolgan_bolaklar_tekshirilmaydi", MAX_QUESTIONS_PER_FILE)
-            break
-        logging.info(
-            "TEST BO'LAK ISHLANMOQDA | bo'lak=%s/%s | matn_belgilari=%s | yig'ilgan_savollar=%s",
-            batch_index, len(source_batches), len(batch_text), len(combined_items)
-        )
-        response_text = _generate_quiz_batch_from_gemini(batch_text)
-        if not response_text:
-            logging.error("TEST BO'LAK MUVAFFAQIYATSIZ | bo'lak=%s/%s | sabab=AI_javobi_olinmadi", batch_index, len(source_batches))
-            return None
-        try:
-            payload = json.loads(response_text)
-            batch_items = payload.get("quizzes", [])
-            if not isinstance(batch_items, list):
-                raise ValueError("Savollar ro'yxati noto'g'ri formatda")
-        except Exception as e:
-            logging.error("TEST BO'LAK JSON XATOSI | bo'lak=%s/%s | tafsilot=%s", batch_index, len(source_batches), e)
-            return None
-        remaining_file_slots = MAX_QUESTIONS_PER_FILE - len(combined_items)
-        allowed_count = min(MAX_QUESTIONS_PER_REQUEST, remaining_file_slots)
-        if len(batch_items) > allowed_count:
-            logging.warning(
-                "TEST SAVOLLARI CHEGARALANDI | bo'lak=%s/%s | olingan=%s | qabul_qilingan=%s",
-                batch_index, len(source_batches), len(batch_items), allowed_count
-            )
-            batch_items = batch_items[:allowed_count]
-        combined_items.extend(batch_items)
-        logging.info(
-            "TEST BO'LAK TAYYOR | bo'lak=%s/%s | bo'lak_savollari=%s | jami_savollar=%s",
-            batch_index, len(source_batches), len(batch_items), len(combined_items)
-        )
-    if not combined_items:
-        logging.error("TEST YARATILMADI | sabab=birorta_savol_yaratilmadi")
-        return None
-    logging.info(
-        "TEST YARATISH YAKUNLANDI | jami_savollar=%s | ishlangan_bo'laklar=%s | fayl_savol_limiti=%s",
-        len(combined_items), len(source_batches), MAX_QUESTIONS_PER_FILE
-    )
-    return json.dumps({"quizzes": combined_items}, ensure_ascii=False)
-
-
-def _generate_quiz_batch_from_gemini(extracted_text):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
     Timeout + Concurrency Protection.
@@ -2424,8 +2327,7 @@ MUHIM QOIDALAR:
 2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
    A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi savollar soniga teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
    B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
-   C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Joriy bo'lakdagi savollarni saqlang, ammo ushbu so'rovda ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta savol qaytaring.
-   D) Nazariy matndan ushbu so'rovda ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta savol yarating.
+   C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Savollar sonini o'zingizcha kamaytirmang.
 {explanation_rule}"""
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
