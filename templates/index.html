@@ -14213,8 +14213,9 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                     document.getElementById('p-status-val').innerText =
                         data.is_paid ? (data.user_status || "PRO") : localizedRegularUser;
 
-                    // Premium oynasida foydalanuvchiga TEST yaratish bo'yicha qolgan
-                    // 30 kunlik bepul limit ko'rsatiladi: 3 → 2 → 1 → 0.
+                    // Qolgan bepul test limiti serverdan olinadi.
+                    // Railway'dagi FREE_QUIZ_LIMIT qiymati o'zgarsa, status oynasi
+                    // quiz_remaining orqali yangi qiymatni avtomatik ko'rsatadi.
                     document.getElementById('p-limit-val').innerText =
                         data.quiz_remaining !== undefined ? data.quiz_remaining : "0";
 
