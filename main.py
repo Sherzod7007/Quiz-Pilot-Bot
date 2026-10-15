@@ -117,14 +117,6 @@ AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
-# --- AI XARAJATLARINI BOSHQARISH (Railway Variables orqali) ---
-AI_DAILY_REQUEST_LIMIT = max(1, int(os.getenv("AI_DAILY_REQUEST_LIMIT", "1000")))
-AI_USER_MAX_ACTIVE_REQUESTS = max(1, int(os.getenv("AI_USER_MAX_ACTIVE_REQUESTS", "1")))
-GEMINI_INPUT_USD_PER_1M_TOKENS = max(0.0, float(os.getenv("GEMINI_INPUT_USD_PER_1M_TOKENS", "0")))
-GEMINI_OUTPUT_USD_PER_1M_TOKENS = max(0.0, float(os.getenv("GEMINI_OUTPUT_USD_PER_1M_TOKENS", "0")))
-_ai_cost_lock = threading.Lock()
-_ai_user_active = {}
-
 # Explanation generation is configurable. When disabled, the schema still stays
 # compatible, but Gemini returns an empty explanation string instead of spending
 # output tokens on explanations. Default remains ON for the educational value.
@@ -150,11 +142,6 @@ logging.info(
     "IZOH SOZLAMASI | Gemini izoh yaratishi: %s",
     "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN"
 )
-logging.info(
-    "AI XARAJAT SOZLAMALARI | kunlik_so'rov_limiti=%s | bir_foydalanuvchining_faol_so'rovlari=%s | kirish_token_narxi_USD_1M=%s | chiqish_token_narxi_USD_1M=%s",
-    AI_DAILY_REQUEST_LIMIT, AI_USER_MAX_ACTIVE_REQUESTS,
-    GEMINI_INPUT_USD_PER_1M_TOKENS, GEMINI_OUTPUT_USD_PER_1M_TOKENS
-)
 
 # --- PROFESSIONAL FILE PROTECTION LAYER ---
 # Katta kitob yoki juda og'ir fayllar server, parser va AI Queue ga
@@ -163,11 +150,6 @@ MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "10")))
 MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
 MAX_EXTRACTED_TEXT_CHARS = max(1, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "80000")))
-# Test yaratish hajmi Railway Variables orqali boshqariladi.
-MAX_QUESTIONS_PER_REQUEST = max(1, int(os.getenv("MAX_QUESTIONS_PER_REQUEST", "50")))
-MAX_SOURCE_CHARS_PER_BATCH = max(1000, int(os.getenv("MAX_SOURCE_CHARS_PER_BATCH", "20000")))
-MAX_QUESTIONS_PER_FILE = max(1, int(os.getenv("MAX_QUESTIONS_PER_FILE", "200")))
-
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx"}
 
 FILE_PROTECTION_MESSAGES = {
@@ -202,98 +184,6 @@ DOWNLOADS_DIR = "downloads"
 DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
-
-
-def _init_ai_cost_table():
-    try:
-        with sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False) as conn:
-            conn.execute("PRAGMA busy_timeout=30000")
-            conn.execute("""CREATE TABLE IF NOT EXISTS ai_usage_daily (
-                usage_date TEXT PRIMARY KEY,
-                request_count INTEGER NOT NULL DEFAULT 0,
-                input_tokens INTEGER NOT NULL DEFAULT 0,
-                output_tokens INTEGER NOT NULL DEFAULT 0,
-                total_tokens INTEGER NOT NULL DEFAULT 0,
-                estimated_cost_usd REAL NOT NULL DEFAULT 0
-            )""")
-    except Exception as e:
-        logging.error("AI xarajatlari jadvalini tayyorlashda xato: %s", e)
-
-
-def _uzbekistan_date():
-    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600))
-
-
-def _reserve_ai_daily_request():
-    sana = _uzbekistan_date()
-    try:
-        with sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False) as conn:
-            conn.execute("PRAGMA busy_timeout=30000")
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute("INSERT OR IGNORE INTO ai_usage_daily (usage_date) VALUES (?)", (sana,))
-            row = conn.execute("SELECT request_count FROM ai_usage_daily WHERE usage_date=?", (sana,)).fetchone()
-            if row and row[0] >= AI_DAILY_REQUEST_LIMIT:
-                conn.commit()
-                logging.warning("AI kunlik so'rov limiti tugadi | sana=%s | ishlatilgan=%s | limit=%s", sana, row[0], AI_DAILY_REQUEST_LIMIT)
-                return False
-            conn.execute("UPDATE ai_usage_daily SET request_count=request_count+1 WHERE usage_date=?", (sana,))
-            conn.commit()
-        return True
-    except Exception as e:
-        logging.error("AI kunlik limitini tekshirishda xato: %s", e)
-        return False
-
-
-def _record_ai_token_usage(input_tokens, output_tokens):
-    sana = _uzbekistan_date()
-    kirish = max(0, int(input_tokens or 0))
-    chiqish = max(0, int(output_tokens or 0))
-    jami = kirish + chiqish
-    narx_sozlangan = GEMINI_INPUT_USD_PER_1M_TOKENS > 0 or GEMINI_OUTPUT_USD_PER_1M_TOKENS > 0
-    xarajat = (kirish * GEMINI_INPUT_USD_PER_1M_TOKENS + chiqish * GEMINI_OUTPUT_USD_PER_1M_TOKENS) / 1_000_000
-    try:
-        with sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False) as conn:
-            conn.execute("PRAGMA busy_timeout=30000")
-            conn.execute("INSERT OR IGNORE INTO ai_usage_daily (usage_date) VALUES (?)", (sana,))
-            conn.execute("""UPDATE ai_usage_daily SET input_tokens=input_tokens+?,
-                output_tokens=output_tokens+?, total_tokens=total_tokens+?,
-                estimated_cost_usd=estimated_cost_usd+? WHERE usage_date=?""",
-                (kirish, chiqish, jami, xarajat, sana))
-            row = conn.execute("""SELECT request_count,input_tokens,output_tokens,total_tokens,estimated_cost_usd
-                FROM ai_usage_daily WHERE usage_date=?""", (sana,)).fetchone()
-        logging.info(
-            "AI SARFI HISOBI | sana=%s | kunlik_so'rovlar=%s/%s | kirish_tokenlari=%s | chiqish_tokenlari=%s | jami_tokenlar=%s | taxminiy_xarajat_USD=%s | narx_sozlangan=%s",
-            sana, row[0], AI_DAILY_REQUEST_LIMIT, row[1], row[2], row[3],
-            f"{row[4]:.6f}" if narx_sozlangan else "hisoblanmadi",
-            "ha" if narx_sozlangan else "yo'q"
-        )
-    except Exception as e:
-        logging.error("AI token sarfini saqlashda xato: %s", e)
-
-
-def _acquire_user_ai_slot(user_id):
-    kalit = str(user_id if user_id is not None else "noma'lum")
-    with _ai_cost_lock:
-        faol = _ai_user_active.get(kalit, 0)
-        if faol >= AI_USER_MAX_ACTIVE_REQUESTS:
-            logging.warning("AI foydalanuvchi limiti | foydalanuvchi=%s | faol_so'rovlar=%s | limit=%s", kalit, faol, AI_USER_MAX_ACTIVE_REQUESTS)
-            return None
-        _ai_user_active[kalit] = faol + 1
-    return kalit
-
-
-def _release_user_ai_slot(kalit):
-    if kalit is None:
-        return
-    with _ai_cost_lock:
-        faol = _ai_user_active.get(kalit, 0)
-        if faol <= 1:
-            _ai_user_active.pop(kalit, None)
-        else:
-            _ai_user_active[kalit] = faol - 1
-
-
-_init_ai_cost_table()
 
 # --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
 TARIFFS = {
@@ -1970,18 +1860,11 @@ async def get_upload_limits():
         "max_upload_file_mb": MAX_UPLOAD_FILE_MB,
         "max_text_input_chars": MAX_TEXT_INPUT_CHARS,
         "max_extracted_text_chars": MAX_EXTRACTED_TEXT_CHARS,
-        "max_questions_per_file": MAX_QUESTIONS_PER_FILE,
-        "max_questions_per_request": MAX_QUESTIONS_PER_REQUEST,
-        "max_source_chars_per_batch": MAX_SOURCE_CHARS_PER_BATCH,
     }
 
 logging.info(
     "Yuklash limitlari | fayl_hajmi=%s MB | PDF_sahifalari=%s ta | kiritilgan_matn=%s belgi | fayldan_ajratilgan_matn=%s belgi",
     MAX_UPLOAD_FILE_MB, MAX_PDF_PAGES, MAX_TEXT_INPUT_CHARS, MAX_EXTRACTED_TEXT_CHARS
-)
-logging.info(
-    "Test yaratish hajmi sozlamalari | bitta_fayl_savol_limiti=%s | bitta_AI_so'rovi_savol_limiti=%s | har_bir_bolak_matni=%s belgi",
-    MAX_QUESTIONS_PER_FILE, MAX_QUESTIONS_PER_REQUEST, MAX_SOURCE_CHARS_PER_BATCH
 )
 
 @app.post("/api/create-quiz-web")
@@ -2224,7 +2107,7 @@ async def create_quiz_web(
         "TEST YARATISH | Gemini so'roviga yuborish boshlandi | matn_belgilari=%s",
         len(raw_text)
     )
-    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text, user_id)
+    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
@@ -2414,137 +2297,7 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def _split_source_into_batches(source_text, max_chars):
-    """Matnni savol chegaralari yoki paragraf chegaralarida sozlanadigan bo'laklarga ajratadi."""
-    source_text = (source_text or "").strip()
-    if not source_text:
-        return []
-
-    # Tayyor raqamlangan savollar ro'yxati bo'lsa, 50+ savol bitta AI
-    # so'roviga tushib qolmasligi uchun savol boshlanishlarini aniqlaymiz.
-    # Raqamlangan savollar aniqlanmasa, avvalgi paragraf/harf chegarasi usuli ishlaydi.
-    question_start = re.compile(
-        r"(?m)^\s*(?:(?:Savol|Question|Вопрос)\s*)?\d{1,4}\s*[.)]\s+"
-    )
-    starts = list(question_start.finditer(source_text))
-    if len(starts) >= 2:
-        prefix = source_text[:starts[0].start()].strip()
-        question_blocks = []
-        for idx, match in enumerate(starts):
-            block_end = starts[idx + 1].start() if idx + 1 < len(starts) else len(source_text)
-            block = source_text[match.start():block_end].strip()
-            if block:
-                question_blocks.append(block)
-
-        # Savol bloklarini ham savol soni, ham matn uzunligi bo'yicha yig'amiz.
-        batches = []
-        current_blocks = []
-        current_chars = len(prefix)
-        for block in question_blocks:
-            candidate_chars = current_chars + len(block) + (2 if current_blocks or prefix else 0)
-            if current_blocks and (
-                len(current_blocks) >= MAX_QUESTIONS_PER_REQUEST
-                or candidate_chars > max_chars
-            ):
-                batches.append("\n\n".join(([prefix] if prefix and not batches else []) + current_blocks))
-                current_blocks = []
-                current_chars = 0
-            current_blocks.append(block)
-            current_chars += len(block) + 2
-
-        if current_blocks:
-            batches.append("\n\n".join(([prefix] if prefix and not batches else []) + current_blocks))
-        if batches:
-            logging.info(
-                "SAVOL RO'YXATI BO'LAKLANDI | aniqlangan_savollar=%s | bo'laklar_soni=%s | bitta_bolak_savol_limiti=%s",
-                len(question_blocks), len(batches), MAX_QUESTIONS_PER_REQUEST
-            )
-            return batches
-
-    # Raqamlangan savollar ro'yxati topilmasa, avvalgi usul saqlanadi.
-    batches = []
-    current = ""
-    for paragraph in re.split(r"\n\s*\n", source_text):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        while len(paragraph) > max_chars:
-            if current:
-                batches.append(current)
-                current = ""
-            batches.append(paragraph[:max_chars])
-            paragraph = paragraph[max_chars:]
-        candidate = (current + "\n\n" + paragraph).strip() if current else paragraph
-        if len(candidate) > max_chars:
-            if current:
-                batches.append(current)
-            current = paragraph
-        else:
-            current = candidate
-    if current:
-        batches.append(current)
-    return batches
-
-
-def generate_quiz_from_gemini(extracted_text, user_id=None):
-    """Manbani sozlanadigan hajmdagi bo'laklarda ishlab, natijalarni birlashtiradi."""
-    source_batches = _split_source_into_batches(extracted_text, MAX_SOURCE_CHARS_PER_BATCH)
-    if not source_batches:
-        logging.warning("Test yaratish bekor qilindi | sabab=manba_matni_bo'sh")
-        return None
-
-    logging.info(
-        "TEST BO'LAKLASH | manba_belgilari=%s | bo'laklar_soni=%s | bo'lak_limit_belgi=%s | so'rov_savol_limiti=%s | fayl_savol_limiti=%s",
-        len(extracted_text), len(source_batches), MAX_SOURCE_CHARS_PER_BATCH,
-        MAX_QUESTIONS_PER_REQUEST, MAX_QUESTIONS_PER_FILE
-    )
-    combined_items = []
-    for batch_index, batch_text in enumerate(source_batches, start=1):
-        if len(combined_items) >= MAX_QUESTIONS_PER_FILE:
-            logging.info("TEST BO'LAKLASH | fayl_savol_limiti_toldi=%s | qolgan_bolaklar_tekshirilmaydi", MAX_QUESTIONS_PER_FILE)
-            break
-        logging.info(
-            "TEST BO'LAK ISHLANMOQDA | bo'lak=%s/%s | matn_belgilari=%s | yig'ilgan_savollar=%s",
-            batch_index, len(source_batches), len(batch_text), len(combined_items)
-        )
-        response_text = _generate_quiz_batch_from_gemini(batch_text, user_id)
-        if not response_text:
-            logging.error("TEST BO'LAK MUVAFFAQIYATSIZ | bo'lak=%s/%s | sabab=AI_javobi_olinmadi", batch_index, len(source_batches))
-            return None
-        try:
-            payload = json.loads(response_text)
-            batch_items = payload.get("quizzes", [])
-            if not isinstance(batch_items, list):
-                raise ValueError("Savollar ro'yxati noto'g'ri formatda")
-        except Exception as e:
-            logging.error("TEST BO'LAK JSON XATOSI | bo'lak=%s/%s | tafsilot=%s", batch_index, len(source_batches), e)
-            return None
-        remaining_file_slots = MAX_QUESTIONS_PER_FILE - len(combined_items)
-        # Har bir AI javobi 50 ta (yoki sozlangan limit) bilan cheklanadi;
-        # fayl limiti esa barcha bo'laklar bo'yicha alohida saqlanadi.
-        allowed_count = min(MAX_QUESTIONS_PER_REQUEST, remaining_file_slots)
-        if len(batch_items) > allowed_count:
-            logging.warning(
-                "TEST SAVOLLARI CHEGARALANDI | bo'lak=%s/%s | olingan=%s | faylda_qabul_qilingan=%s | fayl_limiti=%s",
-                batch_index, len(source_batches), len(batch_items), allowed_count, MAX_QUESTIONS_PER_FILE
-            )
-            batch_items = batch_items[:allowed_count]
-        combined_items.extend(batch_items)
-        logging.info(
-            "TEST BO'LAK TAYYOR | bo'lak=%s/%s | bo'lak_savollari=%s | jami_savollar=%s",
-            batch_index, len(source_batches), len(batch_items), len(combined_items)
-        )
-    if not combined_items:
-        logging.error("TEST YARATILMADI | sabab=birorta_savol_yaratilmadi")
-        return None
-    logging.info(
-        "TEST YARATISH YAKUNLANDI | jami_savollar=%s | ishlangan_bo'laklar=%s | fayl_savol_limiti=%s",
-        len(combined_items), len(source_batches), MAX_QUESTIONS_PER_FILE
-    )
-    return json.dumps({"quizzes": combined_items}, ensure_ascii=False)
-
-
-def _generate_quiz_batch_from_gemini(extracted_text, user_id=None):
+def generate_quiz_from_gemini(extracted_text):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
     Timeout + Concurrency Protection.
@@ -2557,10 +2310,6 @@ def _generate_quiz_batch_from_gemini(extracted_text, user_id=None):
 
     if not GOOGLE_API_KEYS:
         logging.error("AI test API kalitlari topilmadi. GOOGLE_API_KEYS yoki GOOGLE_API_KEY_001... kabi raqamlangan Railway Variables sozlang.")
-        return None
-
-    user_slot_key = _acquire_user_ai_slot(user_id)
-    if user_slot_key is None:
         return None
 
     if GEMINI_INCLUDE_EXPLANATIONS:
@@ -2576,16 +2325,14 @@ def _generate_quiz_batch_from_gemini(extracted_text, user_id=None):
 MUHIM QOIDALAR:
 1. TIL QOIDASI: {language_rule}
 2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
-   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Faqat JORIY BO'LAK ichidagi savollarni qaytaring; boshqa bo'lakdagi savollarni qo'shmang.
-   B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta yangi savol yarating.
-   C) Har qanday holatda bitta javobdagi savollar soni {MAX_QUESTIONS_PER_REQUEST} tadan OSHMASIN. Agar joriy bo'lakda bundan ko'p savol bo'lsa, tartib bo'yicha faqat birinchi {MAX_QUESTIONS_PER_REQUEST} tasini qaytaring.
-   D) Nazariy matndan ushbu so'rovda ko'pi bilan {MAX_QUESTIONS_PER_REQUEST} ta savol yarating.
+   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi savollar soniga teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
+   B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
+   C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Savollar sonini o'zingizcha kamaytirmang.
 {explanation_rule}"""
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        _release_user_ai_slot(user_slot_key)
         logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
@@ -2635,9 +2382,6 @@ MUHIM QOIDALAR:
 
                     started = time.monotonic()
                     try:
-                        if not _reserve_ai_daily_request():
-                            last_error = "AI kunlik so'rov limiti tugadi"
-                            return None
                         client = genai.Client(api_key=api_key)
                         response = client.models.generate_content(
                             model=model_name,
@@ -2665,7 +2409,6 @@ MUHIM QOIDALAR:
                             # alohida yoziladi: ular model hisobiga ko'ra farq qilishi mumkin.
                             total_tokens = getattr(usage, "total_token_count", None) or 0
                             input_output_tokens = prompt_tokens + output_tokens
-                            _record_ai_token_usage(prompt_tokens, output_tokens)
 
                             # Savollar soni va JSON holati faqat log uchun tekshiriladi.
                             try:
@@ -2717,7 +2460,6 @@ MUHIM QOIDALAR:
         return None
     finally:
         ai_queue_slots.release()
-        _release_user_ai_slot(user_slot_key)
 
 
 @app.post("/api/contact-admin")
