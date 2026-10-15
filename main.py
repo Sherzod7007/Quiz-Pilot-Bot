@@ -117,6 +117,14 @@ AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
+# --- AI XARAJATLARINI BOSHQARISH (Railway Variables orqali) ---
+AI_DAILY_REQUEST_LIMIT = max(1, int(os.getenv("AI_DAILY_REQUEST_LIMIT", "1000")))
+AI_USER_MAX_ACTIVE_REQUESTS = max(1, int(os.getenv("AI_USER_MAX_ACTIVE_REQUESTS", "1")))
+GEMINI_INPUT_USD_PER_1M_TOKENS = max(0.0, float(os.getenv("GEMINI_INPUT_USD_PER_1M_TOKENS", "0")))
+GEMINI_OUTPUT_USD_PER_1M_TOKENS = max(0.0, float(os.getenv("GEMINI_OUTPUT_USD_PER_1M_TOKENS", "0")))
+_ai_cost_lock = threading.Lock()
+_ai_user_active = {}
+
 # Explanation generation is configurable. When disabled, the schema still stays
 # compatible, but Gemini returns an empty explanation string instead of spending
 # output tokens on explanations. Default remains ON for the educational value.
@@ -141,6 +149,11 @@ logging.info(
 logging.info(
     "IZOH SOZLAMASI | Gemini izoh yaratishi: %s",
     "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN"
+)
+logging.info(
+    "AI XARAJAT SOZLAMALARI | kunlik_so'rov_limiti=%s | bir_foydalanuvchining_faol_so'rovlari=%s | kirish_token_narxi_USD_1M=%s | chiqish_token_narxi_USD_1M=%s",
+    AI_DAILY_REQUEST_LIMIT, AI_USER_MAX_ACTIVE_REQUESTS,
+    GEMINI_INPUT_USD_PER_1M_TOKENS, GEMINI_OUTPUT_USD_PER_1M_TOKENS
 )
 
 # --- PROFESSIONAL FILE PROTECTION LAYER ---
@@ -189,6 +202,98 @@ DOWNLOADS_DIR = "downloads"
 DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
+
+
+def _init_ai_cost_table():
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("""CREATE TABLE IF NOT EXISTS ai_usage_daily (
+                usage_date TEXT PRIMARY KEY,
+                request_count INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_cost_usd REAL NOT NULL DEFAULT 0
+            )""")
+    except Exception as e:
+        logging.error("AI xarajatlari jadvalini tayyorlashda xato: %s", e)
+
+
+def _uzbekistan_date():
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600))
+
+
+def _reserve_ai_daily_request():
+    sana = _uzbekistan_date()
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("INSERT OR IGNORE INTO ai_usage_daily (usage_date) VALUES (?)", (sana,))
+            row = conn.execute("SELECT request_count FROM ai_usage_daily WHERE usage_date=?", (sana,)).fetchone()
+            if row and row[0] >= AI_DAILY_REQUEST_LIMIT:
+                conn.commit()
+                logging.warning("AI kunlik so'rov limiti tugadi | sana=%s | ishlatilgan=%s | limit=%s", sana, row[0], AI_DAILY_REQUEST_LIMIT)
+                return False
+            conn.execute("UPDATE ai_usage_daily SET request_count=request_count+1 WHERE usage_date=?", (sana,))
+            conn.commit()
+        return True
+    except Exception as e:
+        logging.error("AI kunlik limitini tekshirishda xato: %s", e)
+        return False
+
+
+def _record_ai_token_usage(input_tokens, output_tokens):
+    sana = _uzbekistan_date()
+    kirish = max(0, int(input_tokens or 0))
+    chiqish = max(0, int(output_tokens or 0))
+    jami = kirish + chiqish
+    narx_sozlangan = GEMINI_INPUT_USD_PER_1M_TOKENS > 0 or GEMINI_OUTPUT_USD_PER_1M_TOKENS > 0
+    xarajat = (kirish * GEMINI_INPUT_USD_PER_1M_TOKENS + chiqish * GEMINI_OUTPUT_USD_PER_1M_TOKENS) / 1_000_000
+    try:
+        with sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False) as conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("INSERT OR IGNORE INTO ai_usage_daily (usage_date) VALUES (?)", (sana,))
+            conn.execute("""UPDATE ai_usage_daily SET input_tokens=input_tokens+?,
+                output_tokens=output_tokens+?, total_tokens=total_tokens+?,
+                estimated_cost_usd=estimated_cost_usd+? WHERE usage_date=?""",
+                (kirish, chiqish, jami, xarajat, sana))
+            row = conn.execute("""SELECT request_count,input_tokens,output_tokens,total_tokens,estimated_cost_usd
+                FROM ai_usage_daily WHERE usage_date=?""", (sana,)).fetchone()
+        logging.info(
+            "AI SARFI HISOBI | sana=%s | kunlik_so'rovlar=%s/%s | kirish_tokenlari=%s | chiqish_tokenlari=%s | jami_tokenlar=%s | taxminiy_xarajat_USD=%s | narx_sozlangan=%s",
+            sana, row[0], AI_DAILY_REQUEST_LIMIT, row[1], row[2], row[3],
+            f"{row[4]:.6f}" if narx_sozlangan else "hisoblanmadi",
+            "ha" if narx_sozlangan else "yo'q"
+        )
+    except Exception as e:
+        logging.error("AI token sarfini saqlashda xato: %s", e)
+
+
+def _acquire_user_ai_slot(user_id):
+    kalit = str(user_id if user_id is not None else "noma'lum")
+    with _ai_cost_lock:
+        faol = _ai_user_active.get(kalit, 0)
+        if faol >= AI_USER_MAX_ACTIVE_REQUESTS:
+            logging.warning("AI foydalanuvchi limiti | foydalanuvchi=%s | faol_so'rovlar=%s | limit=%s", kalit, faol, AI_USER_MAX_ACTIVE_REQUESTS)
+            return None
+        _ai_user_active[kalit] = faol + 1
+    return kalit
+
+
+def _release_user_ai_slot(kalit):
+    if kalit is None:
+        return
+    with _ai_cost_lock:
+        faol = _ai_user_active.get(kalit, 0)
+        if faol <= 1:
+            _ai_user_active.pop(kalit, None)
+        else:
+            _ai_user_active[kalit] = faol - 1
+
+
+_init_ai_cost_table()
 
 # --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
 TARIFFS = {
@@ -2119,7 +2224,7 @@ async def create_quiz_web(
         "TEST YARATISH | Gemini so'roviga yuborish boshlandi | matn_belgilari=%s",
         len(raw_text)
     )
-    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
+    quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text, user_id)
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
@@ -2338,7 +2443,7 @@ def _split_source_into_batches(source_text, max_chars):
     return batches
 
 
-def generate_quiz_from_gemini(extracted_text):
+def generate_quiz_from_gemini(extracted_text, user_id=None):
     """Manbani sozlanadigan hajmdagi bo'laklarda ishlab, natijalarni birlashtiradi."""
     source_batches = _split_source_into_batches(extracted_text, MAX_SOURCE_CHARS_PER_BATCH)
     if not source_batches:
@@ -2359,7 +2464,7 @@ def generate_quiz_from_gemini(extracted_text):
             "TEST BO'LAK ISHLANMOQDA | bo'lak=%s/%s | matn_belgilari=%s | yig'ilgan_savollar=%s",
             batch_index, len(source_batches), len(batch_text), len(combined_items)
         )
-        response_text = _generate_quiz_batch_from_gemini(batch_text)
+        response_text = _generate_quiz_batch_from_gemini(batch_text, user_id)
         if not response_text:
             logging.error("TEST BO'LAK MUVAFFAQIYATSIZ | bo'lak=%s/%s | sabab=AI_javobi_olinmadi", batch_index, len(source_batches))
             return None
@@ -2394,7 +2499,7 @@ def generate_quiz_from_gemini(extracted_text):
     return json.dumps({"quizzes": combined_items}, ensure_ascii=False)
 
 
-def _generate_quiz_batch_from_gemini(extracted_text):
+def _generate_quiz_batch_from_gemini(extracted_text, user_id=None):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
     Timeout + Concurrency Protection.
@@ -2407,6 +2512,10 @@ def _generate_quiz_batch_from_gemini(extracted_text):
 
     if not GOOGLE_API_KEYS:
         logging.error("AI test API kalitlari topilmadi. GOOGLE_API_KEYS yoki GOOGLE_API_KEY_001... kabi raqamlangan Railway Variables sozlang.")
+        return None
+
+    user_slot_key = _acquire_user_ai_slot(user_id)
+    if user_slot_key is None:
         return None
 
     if GEMINI_INCLUDE_EXPLANATIONS:
@@ -2431,6 +2540,7 @@ MUHIM QOIDALAR:
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
+        _release_user_ai_slot(user_slot_key)
         logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
@@ -2480,6 +2590,9 @@ MUHIM QOIDALAR:
 
                     started = time.monotonic()
                     try:
+                        if not _reserve_ai_daily_request():
+                            last_error = "AI kunlik so'rov limiti tugadi"
+                            return None
                         client = genai.Client(api_key=api_key)
                         response = client.models.generate_content(
                             model=model_name,
@@ -2507,6 +2620,7 @@ MUHIM QOIDALAR:
                             # alohida yoziladi: ular model hisobiga ko'ra farq qilishi mumkin.
                             total_tokens = getattr(usage, "total_token_count", None) or 0
                             input_output_tokens = prompt_tokens + output_tokens
+                            _record_ai_token_usage(prompt_tokens, output_tokens)
 
                             # Savollar soni va JSON holati faqat log uchun tekshiriladi.
                             try:
@@ -2558,6 +2672,7 @@ MUHIM QOIDALAR:
         return None
     finally:
         ai_queue_slots.release()
+        _release_user_ai_slot(user_slot_key)
 
 
 @app.post("/api/contact-admin")
