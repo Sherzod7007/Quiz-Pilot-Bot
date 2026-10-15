@@ -13536,8 +13536,36 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
         const SHOW_QUIZ_EXPLANATIONS = {{ show_quiz_explanations | tojson }};
 
         const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
+        tg.ready();
+        tg.expand();
+
+        // Telegram tashqi panellari ilovaning tanlangan foniga moslashadi.
+        // Fon rangi qotirib qo'yilmaydi: foydalanuvchi oboyni almashtirsa, yuqori/pastki panellar ham yangilanadi.
+        function syncTelegramChromeColor() {
+            try {
+                const rootStyle = getComputedStyle(document.documentElement);
+                const wallpaper = rootStyle.getPropertyValue('--quizpilot-wallpaper').trim();
+                const aeroBg = rootStyle.getPropertyValue('--aero-bg').trim();
+                const backgroundValue = wallpaper || aeroBg;
+                const gradientMatch = backgroundValue.match(/linear-gradient\([^,]+,\s*(#[0-9a-fA-F]{3,8})/);
+                const colorMatch = backgroundValue.match(/#[0-9a-fA-F]{6}\b/);
+                const chromeColor = (gradientMatch && gradientMatch[1]) || (colorMatch && colorMatch[0]) || '#1c2b3a';
+
+                if (typeof tg.setHeaderColor === 'function') tg.setHeaderColor(chromeColor);
+                if (typeof tg.setBackgroundColor === 'function') tg.setBackgroundColor(chromeColor);
+                if (typeof tg.setBottomBarColor === 'function') tg.setBottomBarColor(chromeColor);
+            } catch (e) {
+                console.warn('Telegram tashqi panellari rangini moslashda xatolik:', e);
+            }
+        }
+
+        syncTelegramChromeColor();
+        const telegramChromeObserver = new MutationObserver(syncTelegramChromeColor);
+        telegramChromeObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['style', 'data-quiz-theme']
+        });
+        document.addEventListener('DOMContentLoaded', syncTelegramChromeColor);
 
         const BASE_URL = window.location.origin;
         let userId = 99999; 
