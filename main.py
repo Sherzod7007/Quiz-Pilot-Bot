@@ -127,6 +127,9 @@ AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
+# Katta testlar uchun chiqish tokenlari limitini Railway Variables orqali boshqarish.
+GEMINI_MAX_OUTPUT_TOKENS = max(1024, int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "65536")))
+
 # Explanation generation is configurable. When disabled, the schema still stays
 # compatible, but Gemini returns an empty explanation string instead of spending
 # output tokens on explanations. Default remains ON for the educational value.
@@ -2418,7 +2421,7 @@ def generate_quiz_from_gemini(extracted_text):
         # Ixcham prompt: savol soni, til, variant sifati va izoh qoidalari saqlanadi.
         system_instruction = f"""Siz test yaratadigan AI yordamchisiz. Qoidalarga qat'iy amal qiling:
 1. {language_rule}
-2. Tayyor test savollari bo'lsa, barchasini saqlang; tashlab ketmang, birlashtirmang yoki qisqartirmang. Natija soni manbadagi songa teng bo'lsin. Tayyor savollarga 40-50 cheklovi qo'llanmaydi.
+2. Tayyor test savollari bo'lsa, barchasini saqlang; tashlab ketmang, birlashtirmang yoki qisqartirmang. Natija soni manbadagi songa teng bo'lsin. 200, 300, 400 yoki undan ko'p savol bo'lsa ham, sonini kamaytirmang. Tayyor savollarga 40-50 cheklovi qo'llanmaydi.
 3. Tayyor savollar bo'lmasa va matn nazariy material bo'lsa, undan ko'pi bilan 50 ta yangi savol tuzing.
 4. {explanation_rule}
 5. {option_rule}
@@ -2495,10 +2498,23 @@ MUHIM QOIDALAR:
                                 system_instruction=system_instruction,
                                 response_mime_type="application/json",
                                 response_schema=response_schema,
+                                max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
                                 temperature=0.2,
                             ),
                         )
                         elapsed = time.monotonic() - started
+                        finish_reason = "NOMA'LUM"
+                        try:
+                            candidates = getattr(response, "candidates", None) or []
+                            if candidates:
+                                finish_reason = str(getattr(candidates[0], "finish_reason", "NOMA'LUM"))
+                            if "MAX_TOKENS" in finish_reason.upper():
+                                logging.warning(
+                                    "GEMINI JAVOBI TOKEN LIMITIGA YETDI | model=%s | limit=%s | sabab=%s. Savollar to'liq bo'lmasligi mumkin.",
+                                    model_name, GEMINI_MAX_OUTPUT_TOKENS, finish_reason
+                                )
+                        except Exception:
+                            pass
                         if elapsed > AI_REQUEST_TIMEOUT:
                             logging.warning(
                                 "Gemini so'rovi odatdagidan uzoq davom etdi (%.1f soniya; ogohlantirish chegarasi %s soniya), lekin muvaffaqiyatli yakunlandi",
