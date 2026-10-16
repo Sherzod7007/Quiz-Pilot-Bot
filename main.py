@@ -2,7 +2,10 @@
 import docx
 import asyncio
 import re
+from io import BytesIO
 from docx import Document
+from docx.table import Table as DocxTable
+from docx.text.paragraph import Paragraph as DocxParagraph
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -14,6 +17,13 @@ import logging
 import os
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+
+# PyMuPDF tez PDF matn ajratish uchun ixtiyoriy ishlatiladi.
+# Kutubxona o'rnatilmagan muhitda mavjud pypdf usuli saqlanadi.
+try:
+    import fitz
+except ImportError:
+    fitz = None
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -1978,75 +1988,123 @@ async def create_quiz_web(
                 return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
 
             if contents:
-                os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-                # Bir xil nomdagi fayllar foydalanuvchilar orasida ustma-ust yozilmasligi uchun unique nom.
-                file_path = os.path.join(DOWNLOADS_DIR, f"upload_{uuid.uuid4().hex}{extension}")
-                with open(file_path, "wb") as f:
-                    f.write(contents)
-
+                # Yuklangan faylni vaqtinchalik diskka yozmasdan RAM ichida o'qiymiz.
+                # Bu bir xil nomli fayllar to'qnashuvi va keraksiz disk amallarini yo'q qiladi.
                 matn_ajratish_boshlanishi = time.perf_counter()
                 pdf_sahifalar_soni = 0
                 word_paragraflar_soni = 0
+                text_parts = []
+                text_len = 0
 
                 if extension == ".pdf":
-                    reader = PdfReader(file_path)
-                    page_count = len(reader.pages)
-                    pdf_sahifalar_soni = page_count
-                    if page_count > MAX_PDF_PAGES:
-                        try: os.remove(file_path)
-                        except Exception: pass
-                        if free_slot_reserved:
-                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
-                            cur_restore = conn_restore.cursor()
-                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
-                            conn_restore.commit(); conn_restore.close()
-                        return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
-                    text_parts = []
-                    text_len = 0
-                    for page in reader.pages:
-                        page_text = page.extract_text() or ""
-                        if page_text:
-                            text_len += len(page_text)
-                            if text_len > MAX_EXTRACTED_TEXT_CHARS:
-                                logging.warning(
-                                    "PDF fayli rad etildi: ajratilgan matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
-                                    user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
-                                )
-                                try: os.remove(file_path)
-                                except Exception: pass
+                    if fitz is not None:
+                        # PyMuPDF: PDF matnini odatda tezroq ajratadi.
+                        with fitz.open(stream=contents, filetype="pdf") as pdf_doc:
+                            page_count = pdf_doc.page_count
+                            pdf_sahifalar_soni = page_count
+                            if page_count > MAX_PDF_PAGES:
                                 if free_slot_reserved:
                                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                     cur_restore = conn_restore.cursor()
                                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                     conn_restore.commit(); conn_restore.close()
-                                return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
-                            text_parts.append(page_text)
-                    raw_text = "\n".join(text_parts)
-                    auto_title = Path(original_name).stem
-                elif extension == ".docx":
-                    doc = docx.Document(file_path)
-                    word_paragraflar_soni = len(doc.paragraphs)
-                    text_parts = []
-                    text_len = 0
-                    for paragraph in doc.paragraphs:
-                        part = paragraph.text or ""
-                        text_len += len(part)
-                        if text_len > MAX_EXTRACTED_TEXT_CHARS:
-                            logging.warning(
-                                "DOCX fayli rad etildi: ajratilgan matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
-                                user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
-                            )
-                            try: os.remove(file_path)
-                            except Exception: pass
+                                return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+
+                            for page in pdf_doc:
+                                page_text = page.get_text("text") or ""
+                                if page_text:
+                                    text_len += len(page_text)
+                                    if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                        logging.warning(
+                                            "PDF fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                            user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                        )
+                                        if free_slot_reserved:
+                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            cur_restore = conn_restore.cursor()
+                                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                            conn_restore.commit(); conn_restore.close()
+                                        return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                    text_parts.append(page_text)
+                    else:
+                        # PyMuPDF mavjud bo'lmasa, eski pypdf usuli bilan davom etamiz.
+                        reader = PdfReader(BytesIO(contents))
+                        page_count = len(reader.pages)
+                        pdf_sahifalar_soni = page_count
+                        if page_count > MAX_PDF_PAGES:
                             if free_slot_reserved:
                                 conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                 cur_restore = conn_restore.cursor()
                                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                 conn_restore.commit(); conn_restore.close()
-                            return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
-                        text_parts.append(part)
+                            return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+                        for page in reader.pages:
+                            page_text = page.extract_text() or ""
+                            if page_text:
+                                text_len += len(page_text)
+                                if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                    logging.warning(
+                                        "PDF fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                        user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                    )
+                                    if free_slot_reserved:
+                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        cur_restore = conn_restore.cursor()
+                                        cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                        conn_restore.commit(); conn_restore.close()
+                                    return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                text_parts.append(page_text)
                     raw_text = "\n".join(text_parts)
                     auto_title = Path(original_name).stem
+
+                elif extension == ".docx":
+                    # Word fayli ham RAM ichida ochiladi. Paragraflar va jadvallar
+                    # hujjatdagi asl ketma-ketlikda o'qiladi.
+                    doc = docx.Document(BytesIO(contents))
+                    word_paragraflar_soni = len(doc.paragraphs)
+                    for block in doc.element.body.iterchildren():
+                        if block.tag.endswith("}p"):
+                            part = DocxParagraph(block, doc).text or ""
+                            if part:
+                                text_len += len(part)
+                                if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                    logging.warning(
+                                        "Word fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                        user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                    )
+                                    if free_slot_reserved:
+                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        cur_restore = conn_restore.cursor()
+                                        cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                        conn_restore.commit(); conn_restore.close()
+                                    return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                text_parts.append(part)
+                        elif block.tag.endswith("}tbl"):
+                            table = DocxTable(block, doc)
+                            for row in table.rows:
+                                # Jadval ustunlari orasiga ajratuvchi qo'yiladi,
+                                # shunda savol va javoblar bir-biriga qo'shilib ketmaydi.
+                                part = " | ".join((cell.text or "").strip() for cell in row.cells)
+                                if part.strip(" |\t\r\n"):
+                                    text_len += len(part)
+                                    if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                        logging.warning(
+                                            "Word fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                            user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                        )
+                                        if free_slot_reserved:
+                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            cur_restore = conn_restore.cursor()
+                                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                            conn_restore.commit(); conn_restore.close()
+                                        return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                    text_parts.append(part)
+                    raw_text = "\n".join(text_parts)
+                    auto_title = Path(original_name).stem
+
+                # Faqat matnni tartibga keltiramiz; savollar, variantlar va formulalarni
+                # o'chirmaslik uchun mazmunli qatorlar ichidagi belgilar o'zgartirilmaydi.
+                raw_text = "\n".join(line.strip() for line in raw_text.splitlines() if line.strip())
 
                 matn_ajratish_vaqti = time.perf_counter() - matn_ajratish_boshlanishi
                 logging.info(
@@ -2054,7 +2112,7 @@ async def create_quiz_web(
                     extension, pdf_sahifalar_soni, word_paragraflar_soni, len(raw_text), matn_ajratish_vaqti
                 )
         except Exception as e:
-            logging.error(f"Faylni o'qish yoki matnni ajratishda xatolik: {e}")
+            logging.error("Faylni o'qish yoki matnni ajratishda xatolik yuz berdi: %s", e)
             if free_slot_reserved:
                 try:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
