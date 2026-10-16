@@ -142,6 +142,18 @@ logging.info(
     "AI prompt optimallashtirish sozlamasi | holat=%s",
     "YOQILGAN" if AI_PROMPT_OPTIMIZATION else "O'CHIRILGAN"
 )
+# Savol variantlari uzunligini muvozanatlash va izohlarni ixcham yozish Railway Variables orqali boshqariladi.
+GEMINI_BALANCE_OPTIONS = os.getenv("GEMINI_BALANCE_OPTIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+GEMINI_CONCISE_EXPLANATIONS = os.getenv("GEMINI_CONCISE_EXPLANATIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+logging.info(
+    "AI javob uslubi | variantlar_muvozanati=%s | ixcham_izohlar=%s",
+    "YOQILGAN" if GEMINI_BALANCE_OPTIONS else "O'CHIRILGAN",
+    "YOQILGAN" if GEMINI_CONCISE_EXPLANATIONS else "O'CHIRILGAN"
+)
 
 # Input protection: pasted text gets a visible hard limit; extracted files are
 # protected separately below. This prevents unexpectedly large requests entering
@@ -2380,21 +2392,36 @@ def generate_quiz_from_gemini(extracted_text):
         return None
 
     if GEMINI_INCLUDE_EXPLANATIONS:
-        explanation_rule = "3. IZOH QOIDASI: Har bir savol uchun qisqa izoh yozing."
+        if GEMINI_CONCISE_EXPLANATIONS:
+            explanation_rule = "3. IZOH: Kirish tiliga mos, mazmunni saqlagan 1-2 qisqa gap yozing; takror va uzun kirishlardan qoching."
+        else:
+            explanation_rule = "3. IZOH: Har bir savol uchun qisqa izoh yozing."
         response_schema = QuizResponse
         language_rule = "Savollar, javob variantlari va izohlarni kirish matni bilan AYNAN BIR TILDA yarating."
     else:
-        explanation_rule = "3. IZOH QOIDASI: IZOH YARATMANG. Javobda izoh maydoni umuman bo'lmasin."
+        explanation_rule = "3. IZOH: IZOH YARATMANG. Javobda izoh maydoni umuman bo'lmasin."
         response_schema = QuizResponseWithoutExplanation
         language_rule = "Savollar va javob variantlarini kirish matni bilan AYNAN BIR TILDA yarating."
 
+    if GEMINI_BALANCE_OPTIONS:
+        option_rule = (
+            "Variantlar qoidasi: to'g'ri javobni keraksiz tafsilot bilan uzaytirmang. "
+            "4 variantning uzunligi va grammatik tuzilishi imkon qadar o'xshash bo'lsin; "
+            "noto'g'ri variantlar ham ishonarli, mavzuga mos bo'lsin. "
+            "To'g'ri javob faqat eng uzun yoki eng batafsil variant bo'lib qolmasin. "
+            "Barcha variantlarni mazmunan aniq, ixcham va bir-biridan farqli yozing."
+        )
+    else:
+        option_rule = ""
+
     if AI_PROMPT_OPTIMIZATION:
-        # Ixcham prompt: muhim qoidalar saqlanadi, takroriy jumlalar qisqartiriladi.
-        system_instruction = f"""Siz test yaratadigan AI yordamchisiz. Quyidagi qoidalarga qat'iy amal qiling:
+        # Ixcham prompt: savol soni, til, variant sifati va izoh qoidalari saqlanadi.
+        system_instruction = f"""Siz test yaratadigan AI yordamchisiz. Qoidalarga qat'iy amal qiling:
 1. {language_rule}
-2. Kirish matnida tayyor test savollari yoki savol-javoblar bo'lsa, ularning barchasini birma-bir saqlang va faqat test formatiga o'tkazing. Savollarni tashlab ketmang, birlashtirmang yoki qisqartirmang; natijadagi son manbadagi songa teng bo'lsin. Tayyor savollar uchun 40-50 savollik cheklov qo'llanmaydi.
-3. Tayyor savollar ro'yxati bo'lmasa va matn nazariy/darslik materiali bo'lsa, undan ko'pi bilan 50 ta yangi savol tuzing.
+2. Tayyor test savollari bo'lsa, barchasini saqlang; tashlab ketmang, birlashtirmang yoki qisqartirmang. Natija soni manbadagi songa teng bo'lsin. Tayyor savollarga 40-50 cheklovi qo'llanmaydi.
+3. Tayyor savollar bo'lmasa va matn nazariy material bo'lsa, undan ko'pi bilan 50 ta yangi savol tuzing.
 4. {explanation_rule}
+5. {option_rule}
 Faqat berilgan materialga tayaning. Javobni belgilangan JSON sxemasiga mos qaytaring."""
     else:
         # Zarur bo'lsa, Railway Variables orqali avvalgi batafsil promptga qaytish mumkin.
@@ -2402,10 +2429,11 @@ Faqat berilgan materialga tayaning. Javobni belgilangan JSON sxemasiga mos qayta
 MUHIM QOIDALAR:
 1. TIL QOIDASI: {language_rule}
 2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
-   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi savollar soniga teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
+   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi songa teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
    B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
    C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Savollar sonini o'zingizcha kamaytirmang.
-{explanation_rule}"""
+3. {explanation_rule}
+4. {option_rule}"""
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
