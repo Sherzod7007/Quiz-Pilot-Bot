@@ -21,9 +21,9 @@ from pypdf import PdfReader
 # PyMuPDF tez PDF matn ajratish uchun ixtiyoriy ishlatiladi.
 # Kutubxona o'rnatilmagan muhitda mavjud pypdf usuli saqlanadi.
 try:
-    import fitz
+    import pymupdf
 except ImportError:
-    fitz = None
+    pymupdf = None
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -1997,9 +1997,9 @@ async def create_quiz_web(
                 text_len = 0
 
                 if extension == ".pdf":
-                    if fitz is not None:
+                    if pymupdf is not None:
                         # PyMuPDF: PDF matnini odatda tezroq ajratadi.
-                        with fitz.open(stream=contents, filetype="pdf") as pdf_doc:
+                        with pymupdf.open(stream=contents, filetype="pdf") as pdf_doc:
                             page_count = pdf_doc.page_count
                             pdf_sahifalar_soni = page_count
                             if page_count > MAX_PDF_PAGES:
