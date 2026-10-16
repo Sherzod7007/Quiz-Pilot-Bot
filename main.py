@@ -133,6 +133,15 @@ AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").strip().lower() in {
     "1", "true", "yes", "on"
 }
+# Promptni ixchamlashtirish Railway Variables orqali boshqariladi.
+# AI_PROMPT_OPTIMIZATION=false bo'lsa, avvalgi batafsil prompt ishlatiladi.
+AI_PROMPT_OPTIMIZATION = os.getenv("AI_PROMPT_OPTIMIZATION", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+logging.info(
+    "AI prompt optimallashtirish sozlamasi | holat=%s",
+    "YOQILGAN" if AI_PROMPT_OPTIMIZATION else "O'CHIRILGAN"
+)
 
 # Input protection: pasted text gets a visible hard limit; extracted files are
 # protected separately below. This prevents unexpectedly large requests entering
@@ -2379,7 +2388,17 @@ def generate_quiz_from_gemini(extracted_text):
         response_schema = QuizResponseWithoutExplanation
         language_rule = "Savollar va javob variantlarini kirish matni bilan AYNAN BIR TILDA yarating."
 
-    system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
+    if AI_PROMPT_OPTIMIZATION:
+        # Ixcham prompt: muhim qoidalar saqlanadi, takroriy jumlalar qisqartiriladi.
+        system_instruction = f"""Siz test yaratadigan AI yordamchisiz. Quyidagi qoidalarga qat'iy amal qiling:
+1. {language_rule}
+2. Kirish matnida tayyor test savollari yoki savol-javoblar bo'lsa, ularning barchasini birma-bir saqlang va faqat test formatiga o'tkazing. Savollarni tashlab ketmang, birlashtirmang yoki qisqartirmang; natijadagi son manbadagi songa teng bo'lsin. Tayyor savollar uchun 40-50 savollik cheklov qo'llanmaydi.
+3. Tayyor savollar ro'yxati bo'lmasa va matn nazariy/darslik materiali bo'lsa, undan ko'pi bilan 50 ta yangi savol tuzing.
+4. {explanation_rule}
+Faqat berilgan materialga tayaning. Javobni belgilangan JSON sxemasiga mos qaytaring."""
+    else:
+        # Zarur bo'lsa, Railway Variables orqali avvalgi batafsil promptga qaytish mumkin.
+        system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
 MUHIM QOIDALAR:
 1. TIL QOIDASI: {language_rule}
 2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
