@@ -2,7 +2,10 @@
 import docx
 import asyncio
 import re
+from io import BytesIO
 from docx import Document
+from docx.table import Table as DocxTable
+from docx.text.paragraph import Paragraph as DocxParagraph
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -14,6 +17,13 @@ import logging
 import os
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+
+# PyMuPDF tez PDF matn ajratish uchun ixtiyoriy ishlatiladi.
+# Kutubxona o'rnatilmagan muhitda mavjud pypdf usuli saqlanadi.
+try:
+    import pymupdf
+except ImportError:
+    pymupdf = None
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -117,12 +127,36 @@ AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
+# Katta testlar uchun chiqish tokenlari limitini Railway Variables orqali boshqarish.
+GEMINI_MAX_OUTPUT_TOKENS = max(1024, int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "65536")))
+
 # Explanation generation is configurable. When disabled, the schema still stays
 # compatible, but Gemini returns an empty explanation string instead of spending
 # output tokens on explanations. Default remains ON for the educational value.
 GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").strip().lower() in {
     "1", "true", "yes", "on"
 }
+# Promptni ixchamlashtirish Railway Variables orqali boshqariladi.
+# AI_PROMPT_OPTIMIZATION=false bo'lsa, avvalgi batafsil prompt ishlatiladi.
+AI_PROMPT_OPTIMIZATION = os.getenv("AI_PROMPT_OPTIMIZATION", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+logging.info(
+    "AI prompt optimallashtirish sozlamasi | holat=%s",
+    "YOQILGAN" if AI_PROMPT_OPTIMIZATION else "O'CHIRILGAN"
+)
+# Savol variantlari uzunligini muvozanatlash va izohlarni ixcham yozish Railway Variables orqali boshqariladi.
+GEMINI_BALANCE_OPTIONS = os.getenv("GEMINI_BALANCE_OPTIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+GEMINI_CONCISE_EXPLANATIONS = os.getenv("GEMINI_CONCISE_EXPLANATIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+logging.info(
+    "AI javob uslubi | variantlar_muvozanati=%s | ixcham_izohlar=%s",
+    "YOQILGAN" if GEMINI_BALANCE_OPTIONS else "O'CHIRILGAN",
+    "YOQILGAN" if GEMINI_CONCISE_EXPLANATIONS else "O'CHIRILGAN"
+)
 
 # Input protection: pasted text gets a visible hard limit; extracted files are
 # protected separately below. This prevents unexpectedly large requests entering
@@ -1978,75 +2012,123 @@ async def create_quiz_web(
                 return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
 
             if contents:
-                os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-                # Bir xil nomdagi fayllar foydalanuvchilar orasida ustma-ust yozilmasligi uchun unique nom.
-                file_path = os.path.join(DOWNLOADS_DIR, f"upload_{uuid.uuid4().hex}{extension}")
-                with open(file_path, "wb") as f:
-                    f.write(contents)
-
+                # Yuklangan faylni vaqtinchalik diskka yozmasdan RAM ichida o'qiymiz.
+                # Bu bir xil nomli fayllar to'qnashuvi va keraksiz disk amallarini yo'q qiladi.
                 matn_ajratish_boshlanishi = time.perf_counter()
                 pdf_sahifalar_soni = 0
                 word_paragraflar_soni = 0
+                text_parts = []
+                text_len = 0
 
                 if extension == ".pdf":
-                    reader = PdfReader(file_path)
-                    page_count = len(reader.pages)
-                    pdf_sahifalar_soni = page_count
-                    if page_count > MAX_PDF_PAGES:
-                        try: os.remove(file_path)
-                        except Exception: pass
-                        if free_slot_reserved:
-                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
-                            cur_restore = conn_restore.cursor()
-                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
-                            conn_restore.commit(); conn_restore.close()
-                        return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
-                    text_parts = []
-                    text_len = 0
-                    for page in reader.pages:
-                        page_text = page.extract_text() or ""
-                        if page_text:
-                            text_len += len(page_text)
-                            if text_len > MAX_EXTRACTED_TEXT_CHARS:
-                                logging.warning(
-                                    "PDF fayli rad etildi: ajratilgan matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
-                                    user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
-                                )
-                                try: os.remove(file_path)
-                                except Exception: pass
+                    if pymupdf is not None:
+                        # PyMuPDF: PDF matnini odatda tezroq ajratadi.
+                        with pymupdf.open(stream=contents, filetype="pdf") as pdf_doc:
+                            page_count = pdf_doc.page_count
+                            pdf_sahifalar_soni = page_count
+                            if page_count > MAX_PDF_PAGES:
                                 if free_slot_reserved:
                                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                     cur_restore = conn_restore.cursor()
                                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                     conn_restore.commit(); conn_restore.close()
-                                return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
-                            text_parts.append(page_text)
-                    raw_text = "\n".join(text_parts)
-                    auto_title = Path(original_name).stem
-                elif extension == ".docx":
-                    doc = docx.Document(file_path)
-                    word_paragraflar_soni = len(doc.paragraphs)
-                    text_parts = []
-                    text_len = 0
-                    for paragraph in doc.paragraphs:
-                        part = paragraph.text or ""
-                        text_len += len(part)
-                        if text_len > MAX_EXTRACTED_TEXT_CHARS:
-                            logging.warning(
-                                "DOCX fayli rad etildi: ajratilgan matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
-                                user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
-                            )
-                            try: os.remove(file_path)
-                            except Exception: pass
+                                return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+
+                            for page in pdf_doc:
+                                page_text = page.get_text("text") or ""
+                                if page_text:
+                                    text_len += len(page_text)
+                                    if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                        logging.warning(
+                                            "PDF fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                            user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                        )
+                                        if free_slot_reserved:
+                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            cur_restore = conn_restore.cursor()
+                                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                            conn_restore.commit(); conn_restore.close()
+                                        return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                    text_parts.append(page_text)
+                    else:
+                        # PyMuPDF mavjud bo'lmasa, eski pypdf usuli bilan davom etamiz.
+                        reader = PdfReader(BytesIO(contents))
+                        page_count = len(reader.pages)
+                        pdf_sahifalar_soni = page_count
+                        if page_count > MAX_PDF_PAGES:
                             if free_slot_reserved:
                                 conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                 cur_restore = conn_restore.cursor()
                                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                 conn_restore.commit(); conn_restore.close()
-                            return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
-                        text_parts.append(part)
+                            return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+                        for page in reader.pages:
+                            page_text = page.extract_text() or ""
+                            if page_text:
+                                text_len += len(page_text)
+                                if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                    logging.warning(
+                                        "PDF fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                        user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                    )
+                                    if free_slot_reserved:
+                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        cur_restore = conn_restore.cursor()
+                                        cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                        conn_restore.commit(); conn_restore.close()
+                                    return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                text_parts.append(page_text)
                     raw_text = "\n".join(text_parts)
                     auto_title = Path(original_name).stem
+
+                elif extension == ".docx":
+                    # Word fayli ham RAM ichida ochiladi. Paragraflar va jadvallar
+                    # hujjatdagi asl ketma-ketlikda o'qiladi.
+                    doc = docx.Document(BytesIO(contents))
+                    word_paragraflar_soni = len(doc.paragraphs)
+                    for block in doc.element.body.iterchildren():
+                        if block.tag.endswith("}p"):
+                            part = DocxParagraph(block, doc).text or ""
+                            if part:
+                                text_len += len(part)
+                                if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                    logging.warning(
+                                        "Word fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                        user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                    )
+                                    if free_slot_reserved:
+                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        cur_restore = conn_restore.cursor()
+                                        cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                        conn_restore.commit(); conn_restore.close()
+                                    return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                text_parts.append(part)
+                        elif block.tag.endswith("}tbl"):
+                            table = DocxTable(block, doc)
+                            for row in table.rows:
+                                # Jadval ustunlari orasiga ajratuvchi qo'yiladi,
+                                # shunda savol va javoblar bir-biriga qo'shilib ketmaydi.
+                                part = " | ".join((cell.text or "").strip() for cell in row.cells)
+                                if part.strip(" |\t\r\n"):
+                                    text_len += len(part)
+                                    if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                        logging.warning(
+                                            "Word fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                            user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                        )
+                                        if free_slot_reserved:
+                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            cur_restore = conn_restore.cursor()
+                                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                            conn_restore.commit(); conn_restore.close()
+                                        return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                    text_parts.append(part)
+                    raw_text = "\n".join(text_parts)
+                    auto_title = Path(original_name).stem
+
+                # Faqat matnni tartibga keltiramiz; savollar, variantlar va formulalarni
+                # o'chirmaslik uchun mazmunli qatorlar ichidagi belgilar o'zgartirilmaydi.
+                raw_text = "\n".join(line.strip() for line in raw_text.splitlines() if line.strip())
 
                 matn_ajratish_vaqti = time.perf_counter() - matn_ajratish_boshlanishi
                 logging.info(
@@ -2054,7 +2136,7 @@ async def create_quiz_web(
                     extension, pdf_sahifalar_soni, word_paragraflar_soni, len(raw_text), matn_ajratish_vaqti
                 )
         except Exception as e:
-            logging.error(f"Faylni o'qish yoki matnni ajratishda xatolik: {e}")
+            logging.error("Faylni o'qish yoki matnni ajratishda xatolik yuz berdi: %s", e)
             if free_slot_reserved:
                 try:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -2313,22 +2395,48 @@ def generate_quiz_from_gemini(extracted_text):
         return None
 
     if GEMINI_INCLUDE_EXPLANATIONS:
-        explanation_rule = "3. IZOH QOIDASI: Har bir savol uchun qisqa izoh yozing."
+        if GEMINI_CONCISE_EXPLANATIONS:
+            explanation_rule = "3. IZOH: Kirish tiliga mos, mazmunni saqlagan 1-2 qisqa gap yozing; takror va uzun kirishlardan qoching."
+        else:
+            explanation_rule = "3. IZOH: Har bir savol uchun qisqa izoh yozing."
         response_schema = QuizResponse
         language_rule = "Savollar, javob variantlari va izohlarni kirish matni bilan AYNAN BIR TILDA yarating."
     else:
-        explanation_rule = "3. IZOH QOIDASI: IZOH YARATMANG. Javobda izoh maydoni umuman bo'lmasin."
+        explanation_rule = "3. IZOH: IZOH YARATMANG. Javobda izoh maydoni umuman bo'lmasin."
         response_schema = QuizResponseWithoutExplanation
         language_rule = "Savollar va javob variantlarini kirish matni bilan AYNAN BIR TILDA yarating."
 
-    system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
+    if GEMINI_BALANCE_OPTIONS:
+        option_rule = (
+            "Variantlar qoidasi: to'g'ri javobni keraksiz tafsilot bilan uzaytirmang. "
+            "4 variantning uzunligi va grammatik tuzilishi imkon qadar o'xshash bo'lsin; "
+            "noto'g'ri variantlar ham ishonarli, mavzuga mos bo'lsin. "
+            "To'g'ri javob faqat eng uzun yoki eng batafsil variant bo'lib qolmasin. "
+            "Barcha variantlarni mazmunan aniq, ixcham va bir-biridan farqli yozing."
+        )
+    else:
+        option_rule = ""
+
+    if AI_PROMPT_OPTIMIZATION:
+        # Ixcham prompt: savol soni, til, variant sifati va izoh qoidalari saqlanadi.
+        system_instruction = f"""Siz test yaratadigan AI yordamchisiz. Qoidalarga qat'iy amal qiling:
+1. {language_rule}
+2. Tayyor test savollari bo'lsa, barchasini saqlang; tashlab ketmang, birlashtirmang yoki qisqartirmang. Natija soni manbadagi songa teng bo'lsin. 200, 300, 400 yoki undan ko'p savol bo'lsa ham, sonini kamaytirmang. Tayyor savollarga 40-50 cheklovi qo'llanmaydi.
+3. Tayyor savollar bo'lmasa va matn nazariy material bo'lsa, undan ko'pi bilan 50 ta yangi savol tuzing.
+4. {explanation_rule}
+5. {option_rule}
+Faqat berilgan materialga tayaning. Javobni belgilangan JSON sxemasiga mos qaytaring."""
+    else:
+        # Zarur bo'lsa, Railway Variables orqali avvalgi batafsil promptga qaytish mumkin.
+        system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
 MUHIM QOIDALAR:
 1. TIL QOIDASI: {language_rule}
 2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
-   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi savollar soniga teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
+   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi songa teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
    B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
    C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Savollar sonini o'zingizcha kamaytirmang.
-{explanation_rule}"""
+3. {explanation_rule}
+4. {option_rule}"""
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
@@ -2390,10 +2498,23 @@ MUHIM QOIDALAR:
                                 system_instruction=system_instruction,
                                 response_mime_type="application/json",
                                 response_schema=response_schema,
+                                max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
                                 temperature=0.2,
                             ),
                         )
                         elapsed = time.monotonic() - started
+                        finish_reason = "NOMA'LUM"
+                        try:
+                            candidates = getattr(response, "candidates", None) or []
+                            if candidates:
+                                finish_reason = str(getattr(candidates[0], "finish_reason", "NOMA'LUM"))
+                            if "MAX_TOKENS" in finish_reason.upper():
+                                logging.warning(
+                                    "GEMINI JAVOBI TOKEN LIMITIGA YETDI | model=%s | limit=%s | sabab=%s. Savollar to'liq bo'lmasligi mumkin.",
+                                    model_name, GEMINI_MAX_OUTPUT_TOKENS, finish_reason
+                                )
+                        except Exception:
+                            pass
                         if elapsed > AI_REQUEST_TIMEOUT:
                             logging.warning(
                                 "Gemini so'rovi odatdagidan uzoq davom etdi (%.1f soniya; ogohlantirish chegarasi %s soniya), lekin muvaffaqiyatli yakunlandi",
