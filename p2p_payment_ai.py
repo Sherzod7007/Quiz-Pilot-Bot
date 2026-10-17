@@ -48,6 +48,12 @@ def _load_payment_gemini_api_keys():
 
 
 PAYMENT_GEMINI_API_KEYS = _load_payment_gemini_api_keys()
+# Maximum keys attempted per configured model for one receipt. Defaults to all loaded keys.
+# Set PAYMENT_OCR_KEY_ATTEMPTS lower if provider quotas/costs require a tighter cap.
+PAYMENT_OCR_KEY_ATTEMPTS = max(1, min(
+    len(PAYMENT_GEMINI_API_KEYS) or 1,
+    int(os.getenv("PAYMENT_OCR_KEY_ATTEMPTS", str(len(PAYMENT_GEMINI_API_KEYS) or 1)))
+))
 PAYMENT_GEMINI_MODEL = os.getenv("PAYMENT_GEMINI_MODEL", "gemini-3.6-flash").strip()
 _fallback_env = os.getenv("PAYMENT_GEMINI_FALLBACK_MODELS", "")
 PAYMENT_GEMINI_FALLBACK_MODELS = [
@@ -320,13 +326,25 @@ def enqueue_receipt(tx_id, user_id, file_id):
 
 
 def _next_key():
+    """Return the next key in a thread-safe round-robin rotation."""
     global _key_index
     if not PAYMENT_GEMINI_API_KEYS:
         return -1, None
     with _key_lock:
         idx = _key_index % len(PAYMENT_GEMINI_API_KEYS)
-        _key_index = (_key_index + 1) % len(PAYMENT_GEMINI_API_KEYS)
+        _key_index = (idx + 1) % len(PAYMENT_GEMINI_API_KEYS)
     return idx, PAYMENT_GEMINI_API_KEYS[idx]
+
+
+def _next_key_rotation():
+    """Reserve a rotated, unique key order for one receipt/model attempt."""
+    if not PAYMENT_GEMINI_API_KEYS:
+        return []
+    start_idx, _ = _next_key()
+    count = min(len(PAYMENT_GEMINI_API_KEYS), PAYMENT_OCR_KEY_ATTEMPTS)
+    return [((start_idx + offset) % len(PAYMENT_GEMINI_API_KEYS),
+             PAYMENT_GEMINI_API_KEYS[(start_idx + offset) % len(PAYMENT_GEMINI_API_KEYS)])
+            for offset in range(count)]
 
 
 def _extract_usage(response):
@@ -428,49 +446,62 @@ def _vision(file_bytes, mime_type, attempt_number):
 
     last_error = None
     best_incomplete = None
+    attempted_calls = 0
     for model in models:
-        key_idx, api_key = _next_key()
-        if not api_key:
-            continue
-
-        # Reserve one budget unit for each real provider call. This makes the
-        # budget protect against retries/fallbacks as well as normal traffic.
-        allowed, budget_reason = _budget_reserve()
-        if not allowed:
-            raise BudgetBlockedError(budget_reason)
-
-        acquired = _semaphore.acquire(timeout=120)
-        if not acquired:
-            last_error = TemporaryAIError("OCR concurrency limit")
-            continue
-        try:
-            response = _vision_once(file_bytes, mime_type, model, api_key)
-            result = _parse_response(response.text)
-            inp, out = _extract_usage(response)
-            if _needs_payment_fallback(result):
-                if best_incomplete is None or result.confidence > best_incomplete[0].confidence:
-                    best_incomplete = (result, key_idx, inp, out, model)
+        # Rotate the first key between receipts; on a failure/incomplete OCR,
+        # try the next configured key for this model, up to the configured cap.
+        for key_idx, api_key in _next_key_rotation():
+            # Reserve one budget unit for each real provider call, including key/model fallbacks.
+            allowed, budget_reason = _budget_reserve()
+            if not allowed:
                 logging.warning(
-                    "P2P Gemini Vision natijasi to‘liq emas | model=%s | kalit=%s | chek_urinish=%s | ishonchlilik=%.2f",
-                    model, key_idx, attempt_number, result.confidence
+                    "P2P API kalit aylanishi budjet limiti sabab to‘xtadi | urinishlar=%s | sabab=%s",
+                    attempted_calls, budget_reason
+                )
+                raise BudgetBlockedError(budget_reason)
+
+            acquired = _semaphore.acquire(timeout=120)
+            if not acquired:
+                last_error = TemporaryAIError("OCR concurrency limit")
+                logging.warning(
+                    "P2P Gemini navbatida parallel slot olinmadi | model=%s | kalit=%s",
+                    model, key_idx
                 )
                 continue
-            return result, key_idx, inp, out, model
-        except Exception as exc:
-            last_error = exc
-            logging.warning(
-                "P2P Gemini Vision xatosi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
-                model, key_idx, attempt_number, exc
-            )
-            # A provider outage/rate limit or malformed structured output can
-            # safely move to the next model. Non-transient HTTP/auth failures
-            # are retained as the final error if every fallback also fails.
-            if not _is_transient_error(exc) and not isinstance(exc, (ValueError, json.JSONDecodeError)):
-                continue
-        finally:
-            _semaphore.release()
+            try:
+                attempted_calls += 1
+                response = _vision_once(file_bytes, mime_type, model, api_key)
+                result = _parse_response(response.text)
+                inp, out = _extract_usage(response)
+                if _needs_payment_fallback(result):
+                    if best_incomplete is None or result.confidence > best_incomplete[0].confidence:
+                        best_incomplete = (result, key_idx, inp, out, model)
+                    logging.warning(
+                        "P2P Gemini natijasi to‘liq emas; keyingi kalit sinab ko‘riladi | model=%s | kalit=%s | chek_urinish=%s | ishonchlilik=%.2f",
+                        model, key_idx, attempt_number, result.confidence
+                    )
+                    continue
+                logging.info(
+                    "P2P Gemini Rotation muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
+                    model, key_idx, attempted_calls, attempt_number
+                )
+                return result, key_idx, inp, out, model
+            except Exception as exc:
+                last_error = exc
+                logging.warning(
+                    "P2P Gemini xatosi; keyingi kalit/model sinab ko‘riladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
+                    model, key_idx, attempt_number, exc
+                )
+                # A key may be invalid or rate-limited; continue the controlled
+                # rotation. BudgetBlockedError is raised before the provider call.
+            finally:
+                _semaphore.release()
 
     if best_incomplete is not None:
+        logging.warning(
+            "P2P Gemini barcha sozlangan urinishlardan so‘ng eng yaxshi to‘liq bo‘lmagan OCR natijasini qaytarmoqda | API_urinishlari=%s",
+            attempted_calls
+        )
         return best_incomplete
     if last_error is None:
         raise RuntimeError("Gemini Vision uchun ishlaydigan API key/model topilmadi")
