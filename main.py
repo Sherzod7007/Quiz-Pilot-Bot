@@ -101,6 +101,18 @@ def _load_generation_api_keys():
 GOOGLE_API_KEYS = _load_generation_api_keys()
 current_key_index = 0
 key_lock = threading.Lock()
+
+def _next_generation_key_start(total_keys=None):
+    """Atomically reserve a round-robin starting point for one quiz request."""
+    global current_key_index
+    count = len(GOOGLE_API_KEYS) if total_keys is None else int(total_keys)
+    if count <= 0:
+        return 0
+    with key_lock:
+        start = current_key_index % count
+        current_key_index = (start + 1) % count
+    return start
+
 logging.info(
     "AI test kalitlari sozlamasi | topilgan_kalitlar_soni=%s | manba=GOOGLE_API_KEYS va raqamlangan Railway Variables",
     len(GOOGLE_API_KEYS),
@@ -2388,8 +2400,6 @@ def generate_quiz_from_gemini(extracted_text):
     Fallback model: GEMINI_FALLBACK_MODEL.
     API key rotation and concurrency control remain independent.
     """
-    global current_key_index
-
     if not GOOGLE_API_KEYS:
         logging.error("AI test API kalitlari topilmadi. GOOGLE_API_KEYS yoki GOOGLE_API_KEY_001... kabi raqamlangan Railway Variables sozlang.")
         return None
@@ -2449,9 +2459,7 @@ MUHIM QOIDALAR:
 
     try:
         total_keys = len(GOOGLE_API_KEYS)
-        with key_lock:
-            start_index = current_key_index
-            current_key_index = (current_key_index + 1) % total_keys
+        start_index = _next_generation_key_start(total_keys)
 
         models = []
         for model_name in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
