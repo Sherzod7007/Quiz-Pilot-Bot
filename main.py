@@ -2,7 +2,10 @@
 import docx
 import asyncio
 import re
+from io import BytesIO
 from docx import Document
+from docx.table import Table as DocxTable
+from docx.text.paragraph import Paragraph as DocxParagraph
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -14,6 +17,13 @@ import logging
 import os
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+
+# PyMuPDF tez PDF matn ajratish uchun ixtiyoriy ishlatiladi.
+# Kutubxona o'rnatilmagan muhitda mavjud pypdf usuli saqlanadi.
+try:
+    import pymupdf
+except ImportError:
+    pymupdf = None
 from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -62,12 +72,51 @@ except Exception as e:
 support_waiting_users = set()
 support_reply_targets = {}
 
-raw_keys = os.getenv("GOOGLE_API_KEYS", "")
-GOOGLE_API_KEYS = (
-    [k.strip() for k in raw_keys.split(",") if k.strip()] if raw_keys else []
-)
+# Test yaratish API kalitlari:
+# 1) Eski usul saqlanadi: GOOGLE_API_KEYS=key1,key2,key3
+# 2) Railway Variables'da alohida o'zgaruvchilar: GOOGLE_API_KEY_001 ... GOOGLE_API_KEY_110
+# 3) Muqobil nomlash ham qo'llab-quvvatlanadi: GEMINI_API_KEY_001 ... GEMINI_API_KEY_110
+# Kalit qiymatlari hech qachon logga chiqarilmaydi.
+def _load_generation_api_keys():
+    collected = []
+    raw_keys = os.getenv("GOOGLE_API_KEYS", "")
+    if raw_keys:
+        collected.extend(k.strip() for k in raw_keys.split(",") if k.strip())
+
+    for prefix in ("GOOGLE_API_KEY_", "GEMINI_API_KEY_"):
+        indexed = []
+        for env_name, env_value in os.environ.items():
+            if not env_name.startswith(prefix) or not env_value or not env_value.strip():
+                continue
+            suffix = env_name[len(prefix):]
+            if suffix.isdigit():
+                indexed.append((int(suffix), env_value.strip()))
+        indexed.sort(key=lambda item: item[0])
+        collected.extend(value for _, value in indexed)
+
+    # Bir xil kalit ikki marta kiritilgan bo'lsa, takrorini olib tashlaymiz.
+    return list(dict.fromkeys(collected))
+
+
+GOOGLE_API_KEYS = _load_generation_api_keys()
 current_key_index = 0
 key_lock = threading.Lock()
+
+def _next_generation_key_start(total_keys=None):
+    """Atomically reserve a round-robin starting point for one quiz request."""
+    global current_key_index
+    count = len(GOOGLE_API_KEYS) if total_keys is None else int(total_keys)
+    if count <= 0:
+        return 0
+    with key_lock:
+        start = current_key_index % count
+        current_key_index = (start + 1) % count
+    return start
+
+logging.info(
+    "AI test kalitlari sozlamasi | topilgan_kalitlar_soni=%s | manba=GOOGLE_API_KEYS va raqamlangan Railway Variables",
+    len(GOOGLE_API_KEYS),
+)
 
 # --- PROFESSIONAL AI MANAGER: KEY ROTATION != CONCURRENCY CONTROL ---
 # API key rotation must never determine the number of simultaneous Gemini requests.
@@ -90,26 +139,54 @@ AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
+# Katta testlar uchun chiqish tokenlari limitini Railway Variables orqali boshqarish.
+GEMINI_MAX_OUTPUT_TOKENS = max(1024, int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "65536")))
+
 # Explanation generation is configurable. When disabled, the schema still stays
 # compatible, but Gemini returns an empty explanation string instead of spending
 # output tokens on explanations. Default remains ON for the educational value.
 GEMINI_INCLUDE_EXPLANATIONS = os.getenv("GEMINI_INCLUDE_EXPLANATIONS", "true").strip().lower() in {
     "1", "true", "yes", "on"
 }
+# Promptni ixchamlashtirish Railway Variables orqali boshqariladi.
+# AI_PROMPT_OPTIMIZATION=false bo'lsa, avvalgi batafsil prompt ishlatiladi.
+AI_PROMPT_OPTIMIZATION = os.getenv("AI_PROMPT_OPTIMIZATION", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+logging.info(
+    "AI prompt optimallashtirish sozlamasi | holat=%s",
+    "YOQILGAN" if AI_PROMPT_OPTIMIZATION else "O'CHIRILGAN"
+)
+# Savol variantlari uzunligini muvozanatlash va izohlarni ixcham yozish Railway Variables orqali boshqariladi.
+GEMINI_BALANCE_OPTIONS = os.getenv("GEMINI_BALANCE_OPTIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+GEMINI_CONCISE_EXPLANATIONS = os.getenv("GEMINI_CONCISE_EXPLANATIONS", "true").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+logging.info(
+    "AI javob uslubi | variantlar_muvozanati=%s | ixcham_izohlar=%s",
+    "YOQILGAN" if GEMINI_BALANCE_OPTIONS else "O'CHIRILGAN",
+    "YOQILGAN" if GEMINI_CONCISE_EXPLANATIONS else "O'CHIRILGAN"
+)
 
 # Input protection: pasted text gets a visible hard limit; extracted files are
 # protected separately below. This prevents unexpectedly large requests entering
 # the AI queue. Large books should be split/batched rather than silently truncated.
-MAX_TEXT_INPUT_CHARS = max(10000, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
+MAX_TEXT_INPUT_CHARS = max(1, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 
 # Queue slot so'rovni boshqaradi, Gemini semaphore esa haqiqiy parallel
 # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
 logging.info(
-    "AI Manager initialized | model=%s | fallback=%s | concurrent=%s | queue=%s | explanations=%s | request_timeout=%ss | total_timeout=%ss",
+    "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
     GEMINI_INCLUDE_EXPLANATIONS, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
+)
+logging.info(
+    "IZOH SOZLAMASI | Gemini izoh yaratishi: %s",
+    "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN"
 )
 
 # --- PROFESSIONAL FILE PROTECTION LAYER ---
@@ -118,7 +195,7 @@ logging.info(
 MAX_UPLOAD_FILE_MB = max(1, int(os.getenv("MAX_UPLOAD_FILE_MB", "10")))
 MAX_UPLOAD_FILE_BYTES = MAX_UPLOAD_FILE_MB * 1024 * 1024
 MAX_PDF_PAGES = max(1, int(os.getenv("MAX_PDF_PAGES", "150")))
-MAX_EXTRACTED_TEXT_CHARS = max(10000, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "300000")))
+MAX_EXTRACTED_TEXT_CHARS = max(1, int(os.getenv("MAX_EXTRACTED_TEXT_CHARS", "80000")))
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx"}
 
 FILE_PROTECTION_MESSAGES = {
@@ -177,9 +254,14 @@ TARIFFS = {
         "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
     },
 }
-FREE_QUIZ_LIMIT = 3
-FREE_PUBLIC_LIMIT = 3
-FREE_FLASHCARD_LIMIT = 3
+# Bepul foydalanuvchi limitlari Railway Variables orqali boshqariladi.
+FREE_QUIZ_LIMIT = max(0, int(os.getenv("FREE_QUIZ_LIMIT", "3")))
+FREE_PUBLIC_LIMIT = max(0, int(os.getenv("FREE_PUBLIC_LIMIT", "3")))
+FREE_FLASHCARD_LIMIT = max(0, int(os.getenv("FREE_FLASHCARD_LIMIT", "3")))
+logging.info(
+    "Bepul limitlar sozlamasi | AI_test=%s | ommaviy_test=%s | flash_kartochka=%s",
+    FREE_QUIZ_LIMIT, FREE_PUBLIC_LIMIT, FREE_FLASHCARD_LIMIT
+)
 P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
@@ -213,13 +295,13 @@ MESSAGES = {
             "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish.\n"
             "📚 Testlarni Kutubxona bo'limida saqlash va ishlash.\n"
             "🌐 Ommaviy testlardan foydalanish.\n"
-            "🧠 Flash Kartochkalar orqali takrorlash.\n"
+            "🗂 Flash Kartochkalar orqali takrorlash.\n"
             "👥 Guruhlarga qo'shilish va guruh testlarida qatnashish.\n"
             "👨‍🏫 O'qituvchilar uchun Professional vositalar.\n"
             "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
             "🔊 Ovoz va vibratsiya sozlamalari.\n"
             "🌍 O'zbek, Русский va English tillari.\n"
-            "🆓 *Bepul:* har 30 kunda 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochka.\n"
+            "🆓 *Bepul:* har 30 kunda {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -249,11 +331,11 @@ MESSAGES = {
         "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
-        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan 3 ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
-        "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
-        "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul 3 ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
+        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan {limit} ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
+        "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
+        "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
-        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi yana 3 ta AI test, 3 ta ommaviy test va 3 ta Flash Kartochkadan bepul foydalanishingiz mumkin.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
+        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi yana {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochkadan bepul foydalanishingiz mumkin.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
     },
     "ru": {
         "welcome": (
@@ -263,13 +345,13 @@ MESSAGES = {
             "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX.\n"
             "📚 Сохранение и прохождение тестов в разделе «Библиотека».\n"
             "🌐 Публичные тесты.\n"
-            "🧠 Флеш-карточки для повторения материала.\n"
+            "🗂 Флеш-карточки для повторения материала.\n"
             "👥 Вступление в группы и участие в групповых тестах.\n"
             "👨‍🏫 Профессиональные инструменты для учителей.\n"
             "📊 Удобный просмотр и анализ результатов.\n"
             "🔊 Настройки звука и вибрации.\n"
             "🌍 Узбекский, русский и английский языки.\n"
-            "🆓 *Бесплатно:* 3 AI-теста, 3 публичных теста и 3 флеш-карточки каждые 30 дней.\n"
+            "🆓 *Бесплатно:* {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
@@ -298,11 +380,11 @@ MESSAGES = {
         "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
-        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все 3 бесплатных AI-теста. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
-        "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали 3 бесплатных публичных теста за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
-        "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали 3 бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
+        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все {limit} бесплатных AI-тестов. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
+        "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали {limit} бесплатных публичных тестов за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
+        "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали {limit} бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите новый тариф в разделе Premium.",
-        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Теперь вы снова можете бесплатно использовать 3 AI-теста, 3 публичных теста и 3 флеш-карточки.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
+        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Теперь вы снова можете бесплатно использовать {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
     },
     "en": {
         "welcome": (
@@ -312,13 +394,13 @@ MESSAGES = {
             "🤖 Create quizzes with AI from text, PDF or DOCX.\n"
             "📚 Save and take quizzes in the Library.\n"
             "🌐 Public quizzes.\n"
-            "🧠 Flashcards for revision.\n"
+            "🗂 Flashcards for revision.\n"
             "👥 Join groups and participate in group quizzes.\n"
             "👨‍🏫 Professional tools for teachers.\n"
             "📊 Easy results viewing and analysis.\n"
             "🔊 Sound and vibration settings.\n"
             "🌍 Uzbek, Russian and English languages.\n"
-            "🆓 *Free:* 3 AI quizzes, 3 public quizzes and 3 flashcards every 30 days.\n"
+            "🆓 *Free:* {quiz_limit} AI quizzes, {public_limit} public quizzes and {flashcard_limit} flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -347,11 +429,11 @@ MESSAGES = {
         "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
-        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all 3 free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
-        "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your 3 free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
-        "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your 3 free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
+        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all {limit} free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
+        "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your {limit} free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
+        "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your {limit} free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a new plan in the Premium section.",
-        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. You can now use 3 AI quizzes, 3 public quizzes, and 3 flashcards for free again.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
+        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. You can now use {quiz_limit} AI quizzes, {public_limit} public quizzes, and {flashcard_limit} flashcards for free again.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
     }
 }
 
@@ -886,8 +968,19 @@ class QuizItem(BaseModel):
     explanation: str = Field(description="Ushbu javob nega to'g'riligini tushuntiruvchi qisqa izoh")
 
 
+class QuizItemWithoutExplanation(BaseModel):
+    """Izoh o'chirilganda Gemini javob sxemasida izoh maydoni bo'lmaydi."""
+    question: str = Field(description="Savol matni")
+    options: List[str] = Field(description="Jami 4 ta variant ro'yxati (Variant harflarisiz)")
+    correct_index: int = Field(description="To'g'ri javob indeks (0 dan 3 gacha)")
+
+
 class QuizResponse(BaseModel):
     quizzes: List[QuizItem] = Field(description="Test savollari ro'yxati")
+
+
+class QuizResponseWithoutExplanation(BaseModel):
+    quizzes: List[QuizItemWithoutExplanation] = Field(description="Test savollari ro'yxati")
 
 
 class ProgressUpdateRequest(BaseModel):
@@ -957,7 +1050,7 @@ def notify_free_limit_reached(user_id: int, kind: str):
         conn.commit()
         conn.close()
         if changed:
-            _send_limit_message(user_id, message_key)
+            _send_limit_message(user_id, message_key, limit=limit)
     except Exception as e:
         logging.error(f"Bepul limit notification xatosi ({user_id}, {kind}): {e}")
 
@@ -1001,7 +1094,7 @@ def process_expired_free_limits():
             if cur.rowcount == 1 and had_exhausted_limit and already_notified != old_cycle:
                 try:
                     lang = get_user_lang(user_id)
-                    text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"]
+                    text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"].format(quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
                     bot.send_message(user_id, text, parse_mode="Markdown")
                 except Exception as e:
                     logging.error(f"Bepul limit qaytgani haqida xabar yuborilmadi ({user_id}): {e}")
@@ -1160,7 +1253,7 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name)
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_start = telebot.types.KeyboardButton(text="/start")
@@ -1693,7 +1786,11 @@ app.add_middleware(
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
-    response = templates.TemplateResponse("index.html", {"request": request})
+    show_quiz_explanations = os.getenv("SHOW_QUIZ_EXPLANATIONS", "false").strip().lower() in ("1", "true", "yes", "on")
+    response = templates.TemplateResponse("index.html", {
+        "request": request,
+        "show_quiz_explanations": show_quiz_explanations,
+    })
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
@@ -1801,6 +1898,21 @@ def get_premium_status(user_id: int):
     }
 
 MAX_FILE_SIZE = MAX_UPLOAD_FILE_BYTES  # MAX_UPLOAD_FILE_MB (baytlarda)
+
+@app.get("/api/upload-limits")
+async def get_upload_limits():
+    """Mini App uchun Railway orqali sozlangan yuklash limitlari."""
+    return {
+        "max_upload_file_mb": MAX_UPLOAD_FILE_MB,
+        "max_text_input_chars": MAX_TEXT_INPUT_CHARS,
+        "max_extracted_text_chars": MAX_EXTRACTED_TEXT_CHARS,
+    }
+
+logging.info(
+    "Yuklash limitlari | fayl_hajmi=%s MB | PDF_sahifalari=%s ta | kiritilgan_matn=%s belgi | fayldan_ajratilgan_matn=%s belgi",
+    MAX_UPLOAD_FILE_MB, MAX_PDF_PAGES, MAX_TEXT_INPUT_CHARS, MAX_EXTRACTED_TEXT_CHARS
+)
+
 @app.post("/api/create-quiz-web")
 async def create_quiz_web(
     user_id: int = Form(...),
@@ -1892,8 +2004,18 @@ async def create_quiz_web(
             return {"status": "error", "message": file_protection_message(user_lang, "unsupported")}
 
         try:
+            faylni_oqish_boshlanishi = time.perf_counter()
             contents = await file.read()
+            faylni_oqish_vaqti = time.perf_counter() - faylni_oqish_boshlanishi
+            logging.info(
+                "TEST YARATISH | Fayl xotiraga o'qildi | nomi=%s | turi=%s | hajmi=%.2f MB | faylni_o'qish_vaqti=%.3f soniya",
+                original_name, extension, len(contents) / (1024 * 1024), faylni_oqish_vaqti
+            )
             if len(contents) > MAX_UPLOAD_FILE_BYTES:
+                logging.warning(
+                    "Fayl yuklanmadi: hajm belgilangan limitdan oshdi | foydalanuvchi=%s | fayl=%s | hajm=%.2f MB | limit=%s MB",
+                    user_id, original_name, len(contents) / (1024 * 1024), MAX_UPLOAD_FILE_MB
+                )
                 if free_slot_reserved:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                     cur_restore = conn_restore.cursor()
@@ -1902,63 +2024,131 @@ async def create_quiz_web(
                 return {"status": "error", "message": file_protection_message(user_lang, "too_large")}
 
             if contents:
-                os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-                # Bir xil nomdagi fayllar foydalanuvchilar orasida ustma-ust yozilmasligi uchun unique nom.
-                file_path = os.path.join(DOWNLOADS_DIR, f"upload_{uuid.uuid4().hex}{extension}")
-                with open(file_path, "wb") as f:
-                    f.write(contents)
+                # Yuklangan faylni vaqtinchalik diskka yozmasdan RAM ichida o'qiymiz.
+                # Bu bir xil nomli fayllar to'qnashuvi va keraksiz disk amallarini yo'q qiladi.
+                matn_ajratish_boshlanishi = time.perf_counter()
+                pdf_sahifalar_soni = 0
+                word_paragraflar_soni = 0
+                text_parts = []
+                text_len = 0
 
                 if extension == ".pdf":
-                    reader = PdfReader(file_path)
-                    page_count = len(reader.pages)
-                    if page_count > MAX_PDF_PAGES:
-                        try: os.remove(file_path)
-                        except Exception: pass
-                        if free_slot_reserved:
-                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
-                            cur_restore = conn_restore.cursor()
-                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
-                            conn_restore.commit(); conn_restore.close()
-                        return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
-                    text_parts = []
-                    text_len = 0
-                    for page in reader.pages:
-                        page_text = page.extract_text() or ""
-                        if page_text:
-                            text_len += len(page_text)
-                            if text_len > MAX_EXTRACTED_TEXT_CHARS:
-                                try: os.remove(file_path)
-                                except Exception: pass
+                    if pymupdf is not None:
+                        # PyMuPDF: PDF matnini odatda tezroq ajratadi.
+                        with pymupdf.open(stream=contents, filetype="pdf") as pdf_doc:
+                            page_count = pdf_doc.page_count
+                            pdf_sahifalar_soni = page_count
+                            if page_count > MAX_PDF_PAGES:
                                 if free_slot_reserved:
                                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                     cur_restore = conn_restore.cursor()
                                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                     conn_restore.commit(); conn_restore.close()
-                                return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
-                            text_parts.append(page_text)
-                    raw_text = "\n".join(text_parts)
-                    auto_title = Path(original_name).stem
-                elif extension == ".docx":
-                    doc = docx.Document(file_path)
-                    text_parts = []
-                    text_len = 0
-                    for paragraph in doc.paragraphs:
-                        part = paragraph.text or ""
-                        text_len += len(part)
-                        if text_len > MAX_EXTRACTED_TEXT_CHARS:
-                            try: os.remove(file_path)
-                            except Exception: pass
+                                return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+
+                            for page in pdf_doc:
+                                page_text = page.get_text("text") or ""
+                                if page_text:
+                                    text_len += len(page_text)
+                                    if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                        logging.warning(
+                                            "PDF fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                            user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                        )
+                                        if free_slot_reserved:
+                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            cur_restore = conn_restore.cursor()
+                                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                            conn_restore.commit(); conn_restore.close()
+                                        return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                    text_parts.append(page_text)
+                    else:
+                        # PyMuPDF mavjud bo'lmasa, eski pypdf usuli bilan davom etamiz.
+                        reader = PdfReader(BytesIO(contents))
+                        page_count = len(reader.pages)
+                        pdf_sahifalar_soni = page_count
+                        if page_count > MAX_PDF_PAGES:
                             if free_slot_reserved:
                                 conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
                                 cur_restore = conn_restore.cursor()
                                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                 conn_restore.commit(); conn_restore.close()
-                            return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
-                        text_parts.append(part)
+                            return {"status": "error", "message": file_protection_message(user_lang, "too_many_pages")}
+                        for page in reader.pages:
+                            page_text = page.extract_text() or ""
+                            if page_text:
+                                text_len += len(page_text)
+                                if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                    logging.warning(
+                                        "PDF fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                        user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                    )
+                                    if free_slot_reserved:
+                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        cur_restore = conn_restore.cursor()
+                                        cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                        conn_restore.commit(); conn_restore.close()
+                                    return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                text_parts.append(page_text)
                     raw_text = "\n".join(text_parts)
                     auto_title = Path(original_name).stem
+
+                elif extension == ".docx":
+                    # Word fayli ham RAM ichida ochiladi. Paragraflar va jadvallar
+                    # hujjatdagi asl ketma-ketlikda o'qiladi.
+                    doc = docx.Document(BytesIO(contents))
+                    word_paragraflar_soni = len(doc.paragraphs)
+                    for block in doc.element.body.iterchildren():
+                        if block.tag.endswith("}p"):
+                            part = DocxParagraph(block, doc).text or ""
+                            if part:
+                                text_len += len(part)
+                                if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                    logging.warning(
+                                        "Word fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                        user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                    )
+                                    if free_slot_reserved:
+                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        cur_restore = conn_restore.cursor()
+                                        cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                        conn_restore.commit(); conn_restore.close()
+                                    return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                text_parts.append(part)
+                        elif block.tag.endswith("}tbl"):
+                            table = DocxTable(block, doc)
+                            for row in table.rows:
+                                # Jadval ustunlari orasiga ajratuvchi qo'yiladi,
+                                # shunda savol va javoblar bir-biriga qo'shilib ketmaydi.
+                                part = " | ".join((cell.text or "").strip() for cell in row.cells)
+                                if part.strip(" |\t\r\n"):
+                                    text_len += len(part)
+                                    if text_len > MAX_EXTRACTED_TEXT_CHARS:
+                                        logging.warning(
+                                            "Word fayli rad etildi: matn belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                                            user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
+                                        )
+                                        if free_slot_reserved:
+                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            cur_restore = conn_restore.cursor()
+                                            cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
+                                            conn_restore.commit(); conn_restore.close()
+                                        return {"status": "error", "message": file_protection_message(user_lang, "too_much_text")}
+                                    text_parts.append(part)
+                    raw_text = "\n".join(text_parts)
+                    auto_title = Path(original_name).stem
+
+                # Faqat matnni tartibga keltiramiz; savollar, variantlar va formulalarni
+                # o'chirmaslik uchun mazmunli qatorlar ichidagi belgilar o'zgartirilmaydi.
+                raw_text = "\n".join(line.strip() for line in raw_text.splitlines() if line.strip())
+
+                matn_ajratish_vaqti = time.perf_counter() - matn_ajratish_boshlanishi
+                logging.info(
+                    "TEST YARATISH | Fayldan matn ajratildi | turi=%s | PDF_sahifalari=%s | Word_paragraflari=%s | matn_belgilari=%s | matn_ajratish_vaqti=%.3f soniya",
+                    extension, pdf_sahifalar_soni, word_paragraflar_soni, len(raw_text), matn_ajratish_vaqti
+                )
         except Exception as e:
-            logging.error(f"Professional file protection / parsing error: {e}")
+            logging.error("Faylni o'qish yoki matnni ajratishda xatolik yuz berdi: %s", e)
             if free_slot_reserved:
                 try:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -1970,6 +2160,10 @@ async def create_quiz_web(
 
     if not raw_text.strip() and text:
         if len(text) > MAX_TEXT_INPUT_CHARS:
+            logging.warning(
+                "Matn yuborilmadi: belgilar limiti oshdi | foydalanuvchi=%s | belgilar=%s | limit=%s",
+                user_id, len(text), MAX_TEXT_INPUT_CHARS
+            )
             if free_slot_reserved:
                 try:
                     conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -2003,6 +2197,10 @@ async def create_quiz_web(
 
     # Gemini SDK chaqiruvi sinxron bo'lgani uchun uni alohida threadga chiqaramiz.
     # Shu bilan boshqa foydalanuvchilarning WebApp requestlari event loopni bloklamaydi.
+    logging.info(
+        "TEST YARATISH | Gemini so'roviga yuborish boshlandi | matn_belgilari=%s",
+        len(raw_text)
+    )
     quiz_json_raw = await asyncio.to_thread(generate_quiz_from_gemini, raw_text)
     if not quiz_json_raw:
         if free_slot_reserved:
@@ -2025,6 +2223,12 @@ async def create_quiz_web(
     try:
         quiz_data = json.loads(quiz_json_raw)
         items = quiz_data.get("quizzes", [])
+        if not GEMINI_INCLUDE_EXPLANATIONS:
+            # UI va saqlash formati bilan moslik uchun izoh maydoni bo'sh qoladi.
+            # Gemini sxemasida bu maydon yo'q, shuning uchun undan izoh tokenlari so'ralmaydi.
+            for item in items:
+                if isinstance(item, dict):
+                    item["explanation"] = ""
         # Gemini qanday joylashtirishidan qat'i nazar, javob variantlari shu yerda
         # xavfsiz va muvozanatli random qilinadi.
         items = randomize_quiz_answer_positions(items)
@@ -2072,10 +2276,80 @@ async def create_quiz_web(
             bot.send_message(user_id, q_ready_msg)
         except Exception as e:
             logging.error(f"Telegram xabari yuborilmadi: {e}")
-        return {"status": "ok"}
+        return {"status": "ok", "quiz_id": quiz_id, "title": final_title[:30], "total": len(items)}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+@app.post("/api/split-quiz")
+def split_quiz(quiz_id: str, user_id: int, question_count: int):
+    # Tayyor AI testini tanlangan savol soniga bo'lib, alohida testlar yaratadi.
+    # Bu amal yangi AI test yaratmaydi va bepul/Premium limitiga tegmaydi.
+    if question_count not in (20, 30, 40):
+        raise HTTPException(status_code=400, detail="Noto'g'ri test hajmi")
+
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "SELECT id, user_id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?",
+        (quiz_id, user_id),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Test topilmadi")
+
+    try:
+        quiz_data = json.loads(row["quiz_json"])
+        items = quiz_data.get("quizzes", [])
+        if not isinstance(items, list) or not items:
+            raise ValueError("Savollar topilmadi")
+
+        chunks = [items[i:i + question_count] for i in range(0, len(items), question_count)]
+        if len(chunks) <= 1:
+            conn.close()
+            return {"status": "ok", "created": 0, "total": len(items), "message": "Bo'lish talab qilinmadi."}
+
+        created_ids = []
+        base_title = (row["title"] or "Test").strip() or "Test"
+        created_at = int(time.time())
+
+        try:
+            cursor.execute("BEGIN")
+            for index, chunk in enumerate(chunks, start=1):
+                new_id = f"q_{uuid.uuid4().hex}"
+                chunk_json = json.dumps({"quizzes": chunk}, ensure_ascii=False)
+                chunk_title = f"{base_title[:24]} — {index}/{len(chunks)}"
+                cursor.execute(
+                    """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                    (new_id, user_id, chunk_title[:30], len(chunk), 0, chunk_json, created_at, -1, -1),
+                )
+                created_ids.append(new_id)
+
+            # Faqat barcha qismlar muvaffaqiyatli yaratilgandan keyin asl katta test o'chiriladi.
+            cursor.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        return {
+            "status": "ok",
+            "created": len(created_ids),
+            "total": len(items),
+            "question_count": question_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Testni bo'lishda xatolik: {e}")
+    finally:
+        conn.close()
 
 
 def randomize_quiz_answer_positions(items):
@@ -2126,35 +2400,66 @@ def generate_quiz_from_gemini(extracted_text):
     Fallback model: GEMINI_FALLBACK_MODEL.
     API key rotation and concurrency control remain independent.
     """
-    global current_key_index
-
     if not GOOGLE_API_KEYS:
-        logging.error("GOOGLE_API_KEYS topilmadi yoki bo'sh!")
+        logging.error("AI test API kalitlari topilmadi. GOOGLE_API_KEYS yoki GOOGLE_API_KEY_001... kabi raqamlangan Railway Variables sozlang.")
         return None
 
-    explanation_rule = (
-        "3. EXPLANATION RULE: Generate a short explanation for every question."
-        if GEMINI_INCLUDE_EXPLANATIONS
-        else
-        "3. EXPLANATION RULE: Do NOT spend output tokens on explanations. Return an empty string in the explanation field for every question."
-    )
-    system_instruction = f"""You are an advanced AI quiz generator.
-CRITICAL RULES:
-1. LANGUAGE RULE: Detect the language of the provided text. You MUST generate the questions, choices, and explanations in the EXACT SAME language as the input text.
-2. QUESTION COUNT RULE: Look at the input text. If the user provided a strict list of questions, you MUST ONLY extract and format THOSE EXACT questions into the quiz structure. If it's a huge continuous textbook, you can generate up to 40-50 questions maximum.
-{explanation_rule}"""
+    if GEMINI_INCLUDE_EXPLANATIONS:
+        if GEMINI_CONCISE_EXPLANATIONS:
+            explanation_rule = "3. IZOH: Kirish tiliga mos, mazmunni saqlagan 1-2 qisqa gap yozing; takror va uzun kirishlardan qoching."
+        else:
+            explanation_rule = "3. IZOH: Har bir savol uchun qisqa izoh yozing."
+        response_schema = QuizResponse
+        language_rule = "Savollar, javob variantlari va izohlarni kirish matni bilan AYNAN BIR TILDA yarating."
+    else:
+        explanation_rule = "3. IZOH: IZOH YARATMANG. Javobda izoh maydoni umuman bo'lmasin."
+        response_schema = QuizResponseWithoutExplanation
+        language_rule = "Savollar va javob variantlarini kirish matni bilan AYNAN BIR TILDA yarating."
 
-    # Queue slot so'rovni boshqaradi. Gemini semaphore esa haqiqiy parallel
-    # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
+    if GEMINI_BALANCE_OPTIONS:
+        option_rule = (
+            "Variantlar qoidasi: to'g'ri javobni keraksiz tafsilot bilan uzaytirmang. "
+            "4 variantning uzunligi va grammatik tuzilishi imkon qadar o'xshash bo'lsin; "
+            "noto'g'ri variantlar ham ishonarli, mavzuga mos bo'lsin. "
+            "To'g'ri javob faqat eng uzun yoki eng batafsil variant bo'lib qolmasin. "
+            "Barcha variantlarni mazmunan aniq, ixcham va bir-biridan farqli yozing."
+        )
+    else:
+        option_rule = ""
+
+    if AI_PROMPT_OPTIMIZATION:
+        # Ixcham prompt: savol soni, til, variant sifati va izoh qoidalari saqlanadi.
+        system_instruction = f"""Siz test yaratadigan AI yordamchisiz. Qoidalarga qat'iy amal qiling:
+1. {language_rule}
+2. Tayyor test savollari bo'lsa, barchasini saqlang; tashlab ketmang, birlashtirmang yoki qisqartirmang. Natija soni manbadagi songa teng bo'lsin. 200, 300, 400 yoki undan ko'p savol bo'lsa ham, sonini kamaytirmang. Tayyor savollarga 40-50 cheklovi qo'llanmaydi.
+3. Tayyor savollar bo'lmasa va matn nazariy material bo'lsa, undan ko'pi bilan 50 ta yangi savol tuzing.
+4. {explanation_rule}
+5. {option_rule}
+Faqat berilgan materialga tayaning. Javobni belgilangan JSON sxemasiga mos qaytaring."""
+    else:
+        # Zarur bo'lsa, Railway Variables orqali avvalgi batafsil promptga qaytish mumkin.
+        system_instruction = f"""Siz test yaratishga mo'ljallangan ilg'or AI yordamchisiz.
+MUHIM QOIDALAR:
+1. TIL QOIDASI: {language_rule}
+2. SAVOLLAR SONI QOIDASI — BU QOIDA JUDA MUHIM:
+   A) Agar kirish matnida oldindan mavjud test savollari yoki savol-javoblar ro'yxati bo'lsa, ularni BIRMA-BIR aniqlang va FAQAT formatini o'zgartirib qaytaring. Hech bir savolni tashlab ketmang, birlashtirmang yoki qisqartirmang. Natijadagi savollar soni manbadagi songa teng bo'lishi kerak. Bunday holatda 40-50 ta savol chegarasini QO'LLAMANG — manbada 63 ta yoki undan ko'p savol bo'lsa, barchasini qaytaring.
+   B) Faqat matnda tayyor savollar ro'yxati bo'lmasa va matn uzluksiz darslik/nazariy material bo'lsa, shu material asosida ko'pi bilan 40-50 ta yangi savol yarating.
+   C) Tayyor savollar ro'yxati mavjud bo'lsa, uni uzluksiz darslik deb noto'g'ri talqin qilmang. Savollar sonini o'zingizcha kamaytirmang.
+3. {explanation_rule}
+4. {option_rule}"""
+
+    # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
+    queue_wait_started = time.monotonic()
     if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        logging.error("AI Queue kutish vaqti tugadi")
+        logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
+    queue_wait_seconds = time.monotonic() - queue_wait_started
+    if queue_wait_seconds >= 1.0:
+        logging.info("AI NAVBATI | So'rov navbat joyini kutdi | kutish=%.2f soniya", queue_wait_seconds)
 
     try:
         total_keys = len(GOOGLE_API_KEYS)
-        with key_lock:
-            start_index = current_key_index
-            current_key_index = (current_key_index + 1) % total_keys
+        start_index = _next_generation_key_start(total_keys)
 
         models = []
         for model_name in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
@@ -2171,7 +2476,7 @@ CRITICAL RULES:
             for model_name in models:
                 for offset in range(total_keys):
                     if time.monotonic() >= deadline:
-                        logging.error("AI umumiy timeout (%ss) tugadi", AI_TOTAL_TIMEOUT)
+                        logging.error("AI test yaratish uchun umumiy vaqt chegarasi tugadi (%s soniya)", AI_TOTAL_TIMEOUT)
                         return None
 
                     key_idx = (start_index + offset) % total_keys
@@ -2183,9 +2488,13 @@ CRITICAL RULES:
                     if remaining <= 0:
                         return None
 
+                    semaphore_wait_started = time.monotonic()
                     if not gemini_semaphore.acquire(timeout=remaining):
-                        last_error = "Gemini concurrency kutish vaqti tugadi"
+                        last_error = "Gemini parallel so'rovlar chegarasida kutish muddati tugadi"
                         continue
+                    semaphore_wait_seconds = time.monotonic() - semaphore_wait_started
+                    if semaphore_wait_seconds >= 1.0:
+                        logging.info("GEMINI PARALLELLIGI | Bo'sh so'rov o'rnini kutish yakunlandi | kutish=%.2f soniya", semaphore_wait_seconds)
 
                     started = time.monotonic()
                     try:
@@ -2196,21 +2505,66 @@ CRITICAL RULES:
                             config=genai_types.GenerateContentConfig(
                                 system_instruction=system_instruction,
                                 response_mime_type="application/json",
-                                response_schema=QuizResponse,
+                                response_schema=response_schema,
+                                max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
                                 temperature=0.2,
                             ),
                         )
                         elapsed = time.monotonic() - started
+                        finish_reason = "NOMA'LUM"
+                        try:
+                            candidates = getattr(response, "candidates", None) or []
+                            if candidates:
+                                finish_reason = str(getattr(candidates[0], "finish_reason", "NOMA'LUM"))
+                            if "MAX_TOKENS" in finish_reason.upper():
+                                logging.warning(
+                                    "GEMINI JAVOBI TOKEN LIMITIGA YETDI | model=%s | limit=%s | sabab=%s. Savollar to'liq bo'lmasligi mumkin.",
+                                    model_name, GEMINI_MAX_OUTPUT_TOKENS, finish_reason
+                                )
+                        except Exception:
+                            pass
                         if elapsed > AI_REQUEST_TIMEOUT:
                             logging.warning(
-                                "Katta AI request uzoq davom etdi (%0.1fs > %ss), ammo muvaffaqiyatli yakunlandi",
+                                "Gemini so'rovi odatdagidan uzoq davom etdi (%.1f soniya; ogohlantirish chegarasi %s soniya), lekin muvaffaqiyatli yakunlandi",
                                 elapsed, AI_REQUEST_TIMEOUT
                             )
 
                         if response and response.text:
+                            # Token statistikasi mavjud bo'lsa, ularni xavfsiz o'qiymiz.
+                            usage = getattr(response, "usage_metadata", None)
+                            prompt_tokens = getattr(usage, "prompt_token_count", None) or 0
+                            output_tokens = getattr(usage, "candidates_token_count", None) or 0
+                            # Gemini qaytargan jami tokenlar va kirish/chiqish yig'indisi
+                            # alohida yoziladi: ular model hisobiga ko'ra farq qilishi mumkin.
+                            total_tokens = getattr(usage, "total_token_count", None) or 0
+                            input_output_tokens = prompt_tokens + output_tokens
+
+                            # Savollar soni va JSON holati faqat log uchun tekshiriladi.
+                            try:
+                                parsed_for_log = json.loads(response.text)
+                                questions_for_log = parsed_for_log.get("quizzes", [])
+                                question_count = len(questions_for_log) if isinstance(questions_for_log, list) else 0
+                                json_valid = True
+                            except Exception:
+                                question_count = 0
+                                json_valid = False
+
                             logging.info(
-                                "AI muvaffaqiyatli | model=%s | key=%s | retry=%s | %.1fs",
-                                model_name, key_idx, retry_round + 1, elapsed
+                                "AI TEST MUVAFFAQIYATLI YARATILDI | model=%s | API kalit indeksi=%s | urinish=%s | "
+                                "kiruvchi_matn_belgilari=%s | chiquvchi_matn_belgilari=%s | savollar_soni=%s | "
+                                "kirish_tokenlari=%s | chiqish_tokenlari=%s | "
+                                "kirish_va_chiqish_yig'indisi=%s | Gemini_jami_tokenlari=%s | "
+                                "Gemini_API_vaqti=%.2f soniya | AI_navbatida_kutish=%.2f soniya | "
+                                "parallel_so'rov_chegarasida_kutish=%.2f soniya | JSON_to'g'ri=%s | "
+                                "izoh_rejimi=%s | umumiy_vaqt=%.2f soniya",
+                                model_name, key_idx, retry_round + 1,
+                                len(extracted_text[:MAX_TEXT_INPUT_CHARS]), len(response.text),
+                                question_count, prompt_tokens, output_tokens,
+                                input_output_tokens, total_tokens,
+                                elapsed, queue_wait_seconds, semaphore_wait_seconds,
+                                json_valid,
+                                "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN",
+                                time.monotonic() - queue_wait_started
                             )
                             return response.text
 
@@ -2219,7 +2573,7 @@ CRITICAL RULES:
                     except Exception as e:
                         last_error = str(e)
                         logging.warning(
-                            "AI request muvaffaqiyatsiz | model=%s | key=%s | retry=%s: %s",
+                            "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_tafsiloti=%s",
                             model_name, key_idx, retry_round + 1, e
                         )
                     finally:
@@ -2229,7 +2583,7 @@ CRITICAL RULES:
                         time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
 
         logging.error(
-            "Barcha AI model/key/retry urinishlari muvaffaqiyatsiz. Oxirgi xato: %s",
+            "Barcha AI model, kalit va qayta urinishlar muvaffaqiyatsiz yakunlandi. Oxirgi xato tafsiloti: %s",
             last_error
         )
         return None
@@ -2831,13 +3185,32 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
-        story=[Paragraph(row["title"],title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
+
+        # Faqat Teacher PDF eksporti uchun matnni ReportLab va Helvetica bilan moslaymiz.
+        # Uzbekcha U+02BB/U+02BC belgilarini WinAnsi shriftida mavjud apostroflarga
+        # almashtiramiz; aks holda ular qora kvadrat bo'lib ko'rinishi mumkin.
+        # AI savollaridagi &, <, > belgilarini XML/HTML tegi deb talqin qilmasligi uchun escape qilamiz.
+        def _teacher_pdf_safe(value):
+            text = str(value or "")
+            text = text.replace("\u02bb", "\u2018").replace("\u02bc", "\u2019").replace("`", "\u2018")
+            # Helvetica fallbackida subscript raqamlar (masalan, I₀ va U₀)
+            # ba'zi serverlarda qora kvadrat bo'lib chiqadi. Faqat Teacher PDF
+            # eksportida ularni oddiy raqamlarga aylantiramiz.
+            text = text.translate(str.maketrans({
+                "\u2080": "0", "\u2081": "1", "\u2082": "2",
+                "\u2083": "3", "\u2084": "4", "\u2085": "5",
+                "\u2086": "6", "\u2087": "7", "\u2088": "8",
+                "\u2089": "9",
+            }))
+            return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        story=[Paragraph(_teacher_pdf_safe(row["title"]),title_style),Spacer(1,8),Paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes),q_style),Spacer(1,10)]
         for code,payload in variant_payloads:
             story.append(Paragraph(f"<b>Variant {code}</b>", q_style)); story.append(Spacer(1,5))
             for i,q in enumerate(payload.get("quizzes",[]),1):
-                story.append(Paragraph(f"{i}. {q.get('question','')}",q_style))
+                story.append(Paragraph(f"{i}. {_teacher_pdf_safe(q.get('question',''))}",q_style))
                 opts=(q.get("options") or [])+['','','','']
-                for j in range(4): story.append(Paragraph(f"{chr(65+j)}) {opts[j]}",q_style))
+                for j in range(4): story.append(Paragraph(f"{chr(65+j)}) {_teacher_pdf_safe(opts[j])}",q_style))
                 story.append(Spacer(1,4))
             story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
         doc.build(story)
@@ -3686,21 +4059,115 @@ def teacher_export(session_id: str, user_id: int, format: str):
         doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
         table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
         for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
+        # Faqat MTA Word eksportida ishtirokchi ismi/username ichidagi
+        # Telegram emoji belgilarini olib tashlaymiz: Word'da '?' bo'lib chiqmaydi.
+        # PDF, Excel va ilovaning boshqa qismlariga tegilmaydi.
+        _mta_word_emoji_pattern = re.compile(
+            "["
+            "\\U0001F1E6-\\U0001F1FF"
+            "\\U0001F300-\\U0001FAFF"
+            "\\u2600-\\u27BF"
+            "\\uFE0E\\uFE0F\\u200D\\u20E3"
+            "\\U0001F3FB-\\U0001F3FF"
+            "]"
+        )
+        def _mta_word_without_telegram_emoji(value):
+            return _mta_word_emoji_pattern.sub("", str(value if value is not None else ""))
+
         for i,r in enumerate(rows,1):
             cells=table.add_row().cells
-            vals=[i,r["first_name"],r["username"],r["score"],r["total"],f"{r['percent']}%"]
+            vals=[i,_mta_word_without_telegram_emoji(r["first_name"]),_mta_word_without_telegram_emoji(r["username"]),r["score"],r["total"],f"{r['percent']}%"]
             for j,v in enumerate(vals): cells[j].text=str(v)
         doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     if fmt=="pdf":
         path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
+        # PDF-only fallback fonts and emoji-to-image support; other export formats stay untouched.
+        symbol_font = font
+        for _symbol_path in (
+            str(Path(__file__).resolve().parent / "fonts" / "NotoSansSymbols2-Regular.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            if os.path.exists(_symbol_path):
+                try:
+                    pdfmetrics.registerFont(TTFont("QuizPilotSymbols", _symbol_path))
+                    symbol_font = "QuizPilotSymbols"
+                    break
+                except Exception:
+                    pass
+
+        emoji_font_path = next((p for p in (
+            str(Path(__file__).resolve().parent / "fonts" / "NotoColorEmoji.ttf"),
+            "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+            "/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
+        ) if os.path.exists(p)), None)
+        _emoji_images = []
+        def _pdf_cell_text(value):
+            # Escape user-supplied text so markup characters render literally.
+            text = str(value if value is not None else "")
+            text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            if not emoji_font_path:
+                # Keep the original Unicode text; use a broad symbol font where available.
+                return text.replace("№", f'<font name="{symbol_font}">№</font>')
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+                import unicodedata
+                pieces = []
+                i = 0
+                while i < len(text):
+                    ch = text[i]
+                    cp = ord(ch)
+                    # Emoji/pictograph ranges, including flags and supplementary emoji.
+                    is_emoji = (0x1F000 <= cp <= 0x1FAFF or 0x2600 <= cp <= 0x27BF
+                                or 0x1F1E6 <= cp <= 0x1F1FF)
+                    if not is_emoji:
+                        pieces.append(ch)
+                        i += 1
+                        continue
+                    seq = ch
+                    i += 1
+                    while i < len(text) and (ord(text[i]) in (0xFE0E, 0xFE0F, 0x200D, 0x20E3)
+                                             or 0x1F3FB <= ord(text[i]) <= 0x1F3FF
+                                             or 0x1F1E6 <= ord(text[i]) <= 0x1F1FF):
+                        seq += text[i]
+                        i += 1
+                        if seq.endswith("\u200d") and i < len(text):
+                            seq += text[i]
+                            i += 1
+                    try:
+                        _efont = ImageFont.truetype(emoji_font_path, 109)
+                        _bbox = _efont.getbbox(seq)
+                        _im = Image.new("RGBA", (max(72, _bbox[2]-_bbox[0]+12), max(72, _bbox[3]-_bbox[1]+12)), (255,255,255,0))
+                        ImageDraw.Draw(_im).text((6-_bbox[0], 6-_bbox[1]), seq, font=_efont, embedded_color=True)
+                        _emoji_path = os.path.join(DOWNLOADS_DIR, f"_emoji_{uuid.uuid4().hex}.png")
+                        _im.save(_emoji_path)
+                        _emoji_images.append(_emoji_path)
+                        pieces.append(f'<img src="{_emoji_path}" width="10" height="10" valign="middle"/>')
+                    except Exception:
+                        pieces.append(seq)
+                return "".join(pieces).replace("№", f'<font name="{symbol_font}">№</font>')
+            except Exception:
+                return text.replace("№", f'<font name="{symbol_font}">№</font>')
+
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=28,leftMargin=28,topMargin=28,bottomMargin=28)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("qp_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER)
         body_style=ParagraphStyle("qp_body",parent=styles["BodyText"],fontName=font,fontSize=8)
-        story=[Paragraph(s["title"],title_style),Spacer(1,8),Paragraph(f"Session: {s['code']}",body_style),Spacer(1,8)]
-        data=[["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]]
-        for i,r in enumerate(rows,1): data.append([str(i),str(r["first_name"]),str(r["username"]),str(r["score"]),str(r["total"]),f"{r['percent']}%"] )
-        table=Table(data,repeatRows=1,colWidths=[24,170,100,45,40,45]); table.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("FONTNAME",(0,0),(-1,0),bold),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"MIDDLE")])); story.append(table); doc.build(story)
+        story=[Paragraph(_pdf_cell_text(s["title"]),title_style),Spacer(1,8),Paragraph(_pdf_cell_text(f"Session: {s['code']}"),body_style),Spacer(1,8)]
+        data=[[Paragraph(_pdf_cell_text(v), body_style) for v in ["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]]]
+        for i,r in enumerate(rows,1):
+            data.append([Paragraph(_pdf_cell_text(v), body_style) for v in
+                         [str(i),r["first_name"],r["username"],str(r["score"]),str(r["total"]),f"{r['percent']}%"]])
+        table=Table(data,repeatRows=1,colWidths=[24,170,100,45,40,45])
+        table.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("FONTNAME",(0,0),(-1,0),bold),("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.4,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"MIDDLE")]))
+        story.append(table)
+        try:
+            doc.build(story)
+        finally:
+            for _emoji_path in _emoji_images:
+                try: os.remove(_emoji_path)
+                except OSError: pass
         return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
