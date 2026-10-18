@@ -521,7 +521,50 @@
         @keyframes ai-loader-core-pulse { 0%,100% { transform:scale(.9); opacity:.75; } 50% { transform:scale(1.08); opacity:1; } }
         @keyframes ai-loader-progress { 0% { transform:translateX(-135%); } 100% { transform:translateX(335%); } }
         @keyframes ai-loader-dot { 0%,60%,100% { transform:translateY(0); opacity:.35; } 30% { transform:translateY(-4px); opacity:1; } }
-        
+
+        /* ===== AI Generation Full-Screen Lock =====
+           Faqat AI test yaratish jarayonida ishlaydi. Mavjud AI loaderlar o'zgartirilmaydi. */
+        body.ai-generation-active { overflow: hidden !important; }
+        /* Full-screen AI oynasi faol bo'lganda eski inline loader faqat yashiriladi.
+           Uning HTML/CSS/animatsiyasi o'zgartirilmaydi; ikki loader bir vaqtda animatsiya qilmaydi. */
+        body.ai-generation-active #loading-status { display: none !important; }
+        #ai-generation-overlay {
+            position: fixed; inset: 0; z-index: 18000; display: none;
+            align-items: center; justify-content: center; padding: 22px;
+            box-sizing: border-box; background: rgba(3,10,18,.78);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            overscroll-behavior: none; touch-action: none;
+        }
+        #ai-generation-overlay.active { display: flex; }
+        .ai-generation-card {
+            width: min(390px, 100%); box-sizing: border-box; padding: 24px 20px 20px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, rgba(31,52,75,.97), rgba(8,17,29,.985));
+            border: 1px solid rgba(110,190,240,.42);
+            border-top-color: rgba(255,255,255,.50);
+            box-shadow: 0 22px 55px rgba(0,0,0,.72), 0 0 28px rgba(0,153,255,.14),
+                        inset 0 1px 0 rgba(255,255,255,.18);
+            text-align: center;
+            animation: aiGenerationCardIn .22s ease-out;
+            -webkit-user-select: none; user-select: none;
+        }
+        .ai-generation-card .ai-loader-orbit { margin-top: 0; }
+        .ai-generation-lock-note {
+            margin-top: 10px; font-size: 11.5px; color: rgba(190,214,232,.72); line-height: 1.4;
+        }
+        @keyframes aiGenerationCardIn {
+            from { opacity: 0; transform: translateY(8px) scale(.985); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        html[data-performance-mode="lite"] #ai-generation-overlay {
+            backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+            background: rgba(3,10,18,.92);
+        }
+        html[data-performance-mode="lite"] .ai-generation-card {
+            box-shadow: 0 10px 28px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.12);
+            animation: none;
+        }
+
         .settings-box { 
             background: var(--aero-glass); backdrop-filter: blur(12px); 
             border-radius: 12px; padding: 20px; border: 1px solid var(--aero-border); margin-top: 15px; 
@@ -745,7 +788,77 @@
         .app-dialog-btn { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--aero-border); font-size: 14px; font-weight: 600; cursor: pointer; }
         .app-dialog-btn.primary { background: linear-gradient(180deg, #00a4ef 0%, #005a9e 100%); color: #fff; border-color: #00d2ff; }
         .app-dialog-btn.secondary { background: rgba(255,255,255,0.1); color: var(--text-hint); }
+        /* ===== Premium Aero buttons — ONLY Quiz Result dialog ===== */
+        #app-dialog .app-dialog-footer .quiz-result-btn {
+            width: 100%; min-height: 46px; padding: 11px 14px; box-sizing: border-box;
+            border-radius: 12px; border: 1px solid rgba(170, 210, 240, 0.34);
+            color: #fff; font-size: 14px; font-weight: 700; letter-spacing: .05px;
+            text-shadow: 0 1px 2px rgba(0,0,0,.68); cursor: pointer;
+            transition: transform .16s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+            -webkit-tap-highlight-color: transparent;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.30), 0 4px 12px rgba(0,0,0,.28);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-btn:active { transform: scale(.985); }
+        #app-dialog .app-dialog-footer .quiz-result-primary {
+            background: linear-gradient(180deg, #10b9ff 0%, #087dcc 48%, #005a9e 100%);
+            border-color: #35d9ff;
+            box-shadow: 0 4px 15px rgba(0,164,239,.42), 0 0 10px rgba(0,153,255,.18), inset 0 1px 0 rgba(255,255,255,.46);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-primary:hover {
+            background: linear-gradient(180deg, #26c3ff 0%, #0a8cde 48%, #0067ad 100%);
+            border-color: #68e5ff; box-shadow: 0 0 14px rgba(0,174,255,.58), inset 0 1px 0 rgba(255,255,255,.50);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-danger {
+            background: linear-gradient(180deg, rgba(255,92,108,.96) 0%, rgba(208,45,63,.96) 52%, rgba(143,25,40,.98) 100%);
+            border-color: rgba(255,137,149,.82); color: #fff;
+            box-shadow: 0 4px 14px rgba(220,53,69,.34), 0 0 9px rgba(220,53,69,.14), inset 0 1px 0 rgba(255,255,255,.34);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-danger:hover {
+            background: linear-gradient(180deg, #ff7180 0%, #df344c 52%, #a61d34 100%);
+            border-color: #ffabb5; box-shadow: 0 0 14px rgba(255,59,78,.48), inset 0 1px 0 rgba(255,255,255,.40);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-neutral {
+            background: linear-gradient(180deg, rgba(91,111,133,.92) 0%, rgba(48,64,82,.96) 52%, rgba(27,39,54,.98) 100%);
+            border-color: rgba(184,211,235,.48); color: #f1f7fc;
+            box-shadow: 0 4px 12px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.30);
+        }
+        #app-dialog .app-dialog-footer .quiz-result-neutral:hover {
+            background: linear-gradient(180deg, rgba(108,137,164,.98) 0%, rgba(55,80,105,.98) 52%, rgba(29,48,69,.99) 100%);
+            border-color: rgba(0,210,255,.72); box-shadow: 0 0 12px rgba(0,174,255,.30), inset 0 1px 0 rgba(255,255,255,.38);
+        }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* ===== AI Test Split Window ===== */
+        #quiz-split-modal {
+            position: fixed; inset: 0; z-index: 21000; display: none; align-items: center; justify-content: center;
+            padding: 20px; background: rgba(0,0,0,.62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        }
+        .quiz-split-box {
+            width: min(390px, 100%); box-sizing: border-box; padding: 22px; border-radius: 16px;
+            background: linear-gradient(135deg, rgba(35,52,74,.97), rgba(10,16,25,.98));
+            border: 1px solid rgba(255,255,255,.22); border-top-color: rgba(255,255,255,.48);
+            box-shadow: 0 18px 50px rgba(0,0,0,.72), inset 0 1px 0 rgba(255,255,255,.18);
+        }
+        .quiz-split-title { margin:0; font-size:20px; font-weight:700; text-align:center; text-shadow:0 0 10px rgba(0,162,255,.45); }
+        .quiz-split-subtitle { margin:8px 0 18px; color:var(--text-hint); font-size:13px; line-height:1.45; text-align:center; }
+        .quiz-split-options { display:flex; flex-direction:column; gap:10px; }
+        .quiz-split-option {
+            width:100%; padding:13px 14px; display:flex; align-items:center; justify-content:space-between; gap:12px;
+            border-radius:10px; border:1px solid rgba(255,255,255,.20); color:#fff; cursor:pointer;
+            background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(0,0,0,.28));
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.18); transition:all .18s ease; text-align:left;
+        }
+        .quiz-split-option:hover, .quiz-split-option:active {
+            border-color:#00d2ff; background:linear-gradient(180deg,#0099ff,#005a9e); box-shadow:0 0 12px rgba(0,153,255,.45),inset 0 1px 0 rgba(255,255,255,.4);
+        }
+        .quiz-split-option-main { font-size:15px; font-weight:700; }
+        .quiz-split-option-count { color:#b9d9ef; font-size:12px; white-space:nowrap; }
+        .quiz-split-option:hover .quiz-split-option-count, .quiz-split-option:active .quiz-split-option-count { color:#fff; }
+        .quiz-split-close {
+            width:100%; margin-top:12px; padding:11px; border-radius:9px; border:1px solid rgba(255,255,255,.16);
+            background:rgba(255,255,255,.07); color:var(--text-hint); font-weight:600; cursor:pointer;
+        }
+        .quiz-split-close:hover { background:rgba(255,255,255,.12); color:#fff; }
 
         /* ===== Professional Teacher Center ===== */
         .teacher-screen-wrap{padding-bottom:8px}.teacher-hero{padding:18px;margin-bottom:14px;background:linear-gradient(135deg,rgba(0,153,255,.18),rgba(0,0,0,.28));border:1px solid rgba(0,210,255,.35)}.teacher-hero h2{margin:0 0 5px;font-size:21px}.teacher-hero p{margin:0;color:var(--text-hint);font-size:13px;line-height:1.45}.teacher-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:14px}.teacher-feature{padding:14px 10px;min-height:82px;cursor:pointer;text-align:left;color:#fff!important;border:1px solid rgba(190,210,230,.35);transition:box-shadow .18s ease,border-color .18s ease,transform .12s ease,background .18s ease}.teacher-feature:hover{border-color:rgba(0,210,255,.75);box-shadow:0 0 10px rgba(0,153,255,.22)}.teacher-feature:active{transform:scale(.985)}.teacher-feature.active{border-color:#00d2ff!important;box-shadow:0 0 7px rgba(0,153,255,.55),0 0 18px rgba(0,153,255,.28),inset 0 0 12px rgba(0,153,255,.10);background:linear-gradient(135deg,rgba(0,153,255,.18),rgba(255,255,255,.05))}.teacher-feature .tf-icon{font-size:24px;display:block;margin-bottom:7px}.teacher-feature b{display:block;font-size:14px;color:#fff!important}.teacher-feature span:last-child{color:#b9c7d8!important}.teacher-feature span:last-child{display:block;color:var(--text-hint);font-size:11px;margin-top:3px;line-height:1.3}.teacher-feature-panel{scroll-margin-top:10px}.teacher-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.teacher-export-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.teacher-session-card{padding:13px 12px 14px;margin-top:9px}.teacher-session-card b{font-size:16px;line-height:1.3}.teacher-chip-row{display:flex;gap:6px;flex-wrap:wrap;margin:7px 0}.teacher-chip{font-size:12px;padding:5px 8px;border-radius:10px;background:rgba(255,255,255,.08)}@media(max-width:520px){.teacher-form-grid{grid-template-columns:1fr}}.teacher-section{padding:17px;margin-bottom:12px}.teacher-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;font-size:17px;font-weight:700;color:#fff}.teacher-mini-btn{border:1px solid var(--aero-border);background:rgba(255,255,255,.08);color:#fff;border-radius:8px;padding:7px 10px;font-size:12px;cursor:pointer}.teacher-chip-row{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 0}.teacher-chip{padding:6px 9px;border-radius:20px;background:rgba(0,120,215,.18);border:1px solid rgba(0,210,255,.25);color:#d9f6ff;font-size:12px;line-height:1.25}.teacher-subsection{margin-top:16px;padding-top:15px;border-top:1px solid rgba(180,205,230,.16)}.teacher-variants-panel{padding:20px 18px;min-height:260px}.teacher-main-variant-grid{gap:10px;margin:8px 0 14px}.variant-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.variant-btn{min-height:48px;padding:10px 5px;border-radius:9px;border:1px solid var(--aero-border);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer}.variant-btn.active{background:linear-gradient(180deg,#0099ff,#005a9e);border-color:#00d2ff;box-shadow:0 0 9px rgba(0,153,255,.45)}.teacher-variant-create-btn{margin-top:2px}.teacher-note{color:var(--text-hint);font-size:12px;line-height:1.5;margin-top:9px}.teacher-session-card .teacher-session-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.teacher-empty{text-align:center;color:var(--text-hint);padding:22px 8px;font-size:13px}
@@ -1585,6 +1698,11 @@
         }
         /* ===== END CREATE SCREEN PREMIUM VISUAL PASS ===== */
 
+
+        /* Faqat 6-slayd: Flash-kartochkalar uchun yangi fon. */
+        #create-promo-carousel .create-promo-slide:nth-child(6) {
+            background-image: linear-gradient(90deg, rgba(5,17,35,.96) 0%, rgba(5,17,35,.78) 48%, rgba(5,17,35,.12) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZyIgeDI9IjEiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjMDkyYjQ4Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTcxMDNlIi8+PC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgaWQ9ImNhcmQiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzEyYzhlOCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzYyNjdmZiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNiZykiLz48Y2lyY2xlIGN4PSI5NjAiIGN5PSIyNDAiIHI9IjIxMCIgZmlsbD0iIzIwZDhmZiIgb3BhY2l0eT0iLjEwIi8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNzEwIDc4KSByb3RhdGUoMTAgMTkwIDE3MCkiPjxyZWN0IHg9Ijk1IiB5PSIyOCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSIzMzAiIHJ4PSIzMCIgZmlsbD0iIzEwMTcyZSIgc3Ryb2tlPSIjOWY4Y2ZmIiBzdHJva2Utd2lkdGg9IjgiLz48cmVjdCB4PSI0OCIgeT0iNTYiIHdpZHRoPSIzMDAiIGhlaWdodD0iMzMwIiByeD0iMzAiIGZpbGw9IiMxNzJiNGEiIHN0cm9rZT0iIzQwZGNmZiIgc3Ryb2tlLXdpZHRoPSI4Ii8+PHJlY3QgeD0iMCIgeT0iODgiIHdpZHRoPSIzMDAiIGhlaWdodD0iMzMwIiByeD0iMzAiIGZpbGw9InVybCgjY2FyZCkiIHN0cm9rZT0iI2Q3ZmFmZiIgc3Ryb2tlLXdpZHRoPSI3Ii8+PHBhdGggZD0iTTcyIDE2NWgxNTZNNzIgMjA1aDEyMCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiIG9wYWNpdHk9Ii45Ii8+PGNpcmNsZSBjeD0iMjIyIiBjeT0iMzAwIiByPSIzOCIgZmlsbD0iI2ZmZiIgb3BhY2l0eT0iLjk1Ii8+PHBhdGggZD0iTTIwNSAzMDBsMTIgMTIgMjMtMjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzI4NjZkNyIgc3Ryb2tlLXdpZHRoPSIxMCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9nPjxnIGZpbGw9IiM3N2VkZmYiIG9wYWNpdHk9Ii44Ij48cGF0aCBkPSJNOTQwIDQybDEyIDI2IDI3IDEyLTI3IDEyLTEyIDI3LTEyLTI3LTI3LTEyIDI3LTEyeiIvPjxjaXJjbGUgY3g9IjEwODAiIGN5PSIzOTAiIHI9IjkiLz48Y2lyY2xlIGN4PSI2NzAiIGN5PSI4NSIgcj0iNyIvPjwvZz48L3N2Zz4=") !important;
+        }
 </style>
 <style id="quizpilot-theme-manager">
 
@@ -9644,11 +9762,17 @@ html[data-quiz-theme="nebula"] #game-progress{color:#000000!important;text-shado
 
 /* Nebula: correct/wrong answers glow and pulse in their state colors. */
 html[data-quiz-theme="nebula"] #options-container button.correct{
+    background:linear-gradient(135deg,#19b978,#137d5b)!important;
     color:#ffffff!important;
+    border-color:#54e8b1!important;
+    box-shadow:0 0 10px rgba(25,185,120,.72),0 0 22px rgba(25,185,120,.38),inset 0 1px 0 rgba(255,255,255,.22)!important;
     animation:nebulaCorrectPulse .85s ease-in-out 2;
 }
 html[data-quiz-theme="nebula"] #options-container button.wrong{
+    background:linear-gradient(135deg,#e05267,#9f2639)!important;
     color:#ffffff!important;
+    border-color:#ff8b98!important;
+    box-shadow:0 0 10px rgba(224,82,103,.78),0 0 22px rgba(224,82,103,.40),inset 0 1px 0 rgba(255,255,255,.22)!important;
     animation:nebulaWrongPulse .85s ease-in-out 2;
 }
 @keyframes nebulaCorrectPulse{
@@ -12984,6 +13108,15 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 #settings-screen #performance-toggle:active{ transform:scale(.96) !important; }
 </style>
 
+<style id="promo-slide-all-themes-fix">
+
+/* PROMO SLIDES: fon rasmlari barcha 6 temada ko‘rinsin; faqat slayd kartochkalari. */
+html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(1) { background-image: linear-gradient(90deg,rgba(3,16,32,.94) 0%,rgba(3,16,32,.72) 46%,rgba(3,16,32,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWEzNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA2MmM1NSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkzMCIgY3k9IjI0MCIgcj0iMjIwIiBmaWxsPSIjMDBjZmZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjExMCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSIyMzAiIHJ4PSI0NSIgZmlsbD0iIzEwMmI0YiIgc3Ryb2tlPSIjNTVlYWZmIiBzdHJva2Utd2lkdGg9IjYiLz48cmVjdCB4PSI3NjUiIHk9IjE1NSIgd2lkdGg9IjIxMCIgaGVpZ2h0PSIxMjAiIHJ4PSIyMCIgZmlsbD0iIzA0MTcyZSIgc3Ryb2tlPSIjMDBjZmZmIiBzdHJva2Utd2lkdGg9IjUiLz48Y2lyY2xlIGN4PSI4MjUiIGN5PSIyMTAiIHI9IjEzIiBmaWxsPSIjNTVlYWZmIi8+PGNpcmNsZSBjeD0iOTE1IiBjeT0iMjEwIiByPSIxMyIgZmlsbD0iIzU1ZWFmZiIvPjxwYXRoIGQ9Ik04MjAgMjQ1aDEwMCIgc3Ryb2tlPSIjNTVlYWZmIiBzdHJva2Utd2lkdGg9IjgiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPjxwYXRoIGQ9Ik04NzAgMTEwVjcwIiBzdHJva2U9IiM1NWVhZmYiIHN0cm9rZS13aWR0aD0iNiIvPjxjaXJjbGUgY3g9Ijg3MCIgY3k9IjYyIiByPSIxMSIgZmlsbD0iI2ZmZDM0ZCIvPjwvc3ZnPg==") !important; }
+html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(2) { background-image: linear-gradient(90deg,rgba(5,23,30,.94) 0%,rgba(5,23,30,.72) 46%,rgba(5,23,30,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MjUyYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzA2M2U0NSIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkzMCIgY3k9IjI1MCIgcj0iMjMwIiBmaWxsPSIjMmJlMGM0IiBvcGFjaXR5PSIuMTgiLz48cGF0aCBkPSJNNzMwIDEyMGwyMTAgNzAtMjEwIDcwLTE3MC03MHoiIGZpbGw9IiMyMGNiYjQiIHN0cm9rZT0iI2I0ZmZmNSIgc3Ryb2tlLXdpZHRoPSI1Ii8+PGNpcmNsZSBjeD0iODEwIiBjeT0iMjUwIiByPSI0OCIgZmlsbD0iI2YyYzlhNSIvPjxwYXRoIGQ9Ik03NTUgMjQwYzEwLTY1IDEwMC03MCAxMTUgMC0zNS0yMC03NS0yMC0xMTUgMHoiIGZpbGw9IiMyNTMxNGIiLz48cGF0aCBkPSJNNzcwIDMxNWg5MGw0NSAxMDBINzI1eiIgZmlsbD0iIzJhYTlhMCIvPjwvc3ZnPg==") !important; }
+html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(3) { background-image: linear-gradient(90deg,rgba(38,20,5,.94) 0%,rgba(38,20,5,.72) 46%,rgba(38,20,5,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzM1MWIwNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzVhMjYwNiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkzMCIgY3k9IjI1MCIgcj0iMjMwIiBmaWxsPSIjZmY5ZDI4IiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3NDAiIHk9IjkwIiB3aWR0aD0iMjUwIiBoZWlnaHQ9IjMyMCIgcng9IjI1IiBmaWxsPSIjNDIyODE3IiBzdHJva2U9IiNmZmQyN2EiIHN0cm9rZS13aWR0aD0iNyIvPjxwYXRoIGQ9Ik03OTUgMTc1aDE0ME03OTUgMjMwaDE0ME03OTUgMjg1aDk1IiBzdHJva2U9IiNmZmQyN2EiIHN0cm9rZS13aWR0aD0iOCIvPjxwYXRoIGQ9Ik05MDAgMzQ1bDM1IDM1IDY1LTgwIiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyN2EiIHN0cm9rZS13aWR0aD0iMTAiLz48L3N2Zz4=") !important; }
+html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(4) { background-image: linear-gradient(90deg,rgba(4,18,40,.94) 0%,rgba(4,18,40,.72) 46%,rgba(4,18,40,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWMzYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMWI0MCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI2MCIgcj0iMjQwIiBmaWxsPSIjMDBiOGZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjI1MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjEzMCIgcng9IjgiIGZpbGw9IiMzOWI3ZmYiLz48cmVjdCB4PSI4MDUiIHk9IjE5MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjE5MCIgcng9IjgiIGZpbGw9IiM2MmQ4YjUiLz48cmVjdCB4PSI4OTAiIHk9IjEwNSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjI3NSIgcng9IjgiIGZpbGw9IiNmZmQzNGQiLz48cGF0aCBkPSJNNzAwIDE0MGM4MCA1MCAxNTAtNDUgMjcwIDEwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3Y2U5ZmYiIHN0cm9rZS13aWR0aD0iOCIvPjwvc3ZnPg==") !important; }
+html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { background-image: linear-gradient(90deg,rgba(25,11,48,.94) 0%,rgba(25,11,48,.72) 46%,rgba(25,11,48,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzIwMTA0NCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzQwMTU2YiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI1MCIgcj0iMjQwIiBmaWxsPSIjYjA2Y2ZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MDAiIHk9IjEyMCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjZDk1NzdjIiBzdHJva2U9IiNmZmIyYzUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDE1NSkiLz48cmVjdCB4PSI3MDAiIHk9IjE5MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjNGY4ZmU4IiBzdHJva2U9IiNhOWQ0ZmYiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDIyNSkiLz48cmVjdCB4PSI3MTUiIHk9IjI2MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjMzZiODhmIiBzdHJva2U9IiNhOGZmZTUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODQ1IDI5NSkiLz48L3N2Zz4=") !important; }
+</style>
 </head>
 <body>
 
@@ -13043,7 +13176,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 <button type="button" class="create-promo-hotspot create-promo-hotspot-left" aria-label="Oldingi slayd"></button>
                 <button type="button" class="create-promo-hotspot create-promo-hotspot-right" aria-label="Keyingi slayd"></button>
                 <div class="create-promo-title" data-lang="promo_6_title">🎁 Bepul limitlar</div>
-                <div class="create-promo-desc" data-lang="promo_6_desc">Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.</div>
+                <div class="create-promo-desc" data-lang="promo_6_desc">Bepul limitlar yuklanmoqda...</div>
             </div>
             <div class="create-promo-dots" aria-hidden="true">
                 <span class="create-promo-dot active"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span><span class="create-promo-dot"></span>
@@ -13351,6 +13484,30 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
         </div>
     </div>
 
+    <div id="quiz-split-modal" aria-hidden="true">
+        <div class="quiz-split-box" role="dialog" aria-modal="true" aria-labelledby="quiz-split-title">
+            <h3 id="quiz-split-title" class="quiz-split-title">📚 Testni bo‘lish</h3>
+            <div id="quiz-split-subtitle" class="quiz-split-subtitle"></div>
+            <div id="quiz-split-options" class="quiz-split-options"></div>
+            <button type="button" class="quiz-split-close" onclick="closeQuizSplitModal()" data-lang="btn_cancel">Yopish</button>
+        </div>
+    </div>
+
+    <div id="ai-generation-overlay" aria-hidden="true" role="status" aria-live="polite">
+        <div class="ai-generation-card">
+            <div class="ai-loader-shell">
+                <div class="ai-loader-orbit" aria-hidden="true">
+                    <div class="ai-loader-core">✦</div>
+                </div>
+                <div id="ai-generation-title" class="ai-loader-title">AI test yaratmoqda</div>
+                <div id="ai-generation-subtitle" class="ai-loader-subtitle">Savollar tahlil qilinmoqda va test tayyorlanmoqda...</div>
+                <div class="ai-loader-progress" aria-hidden="true"><span></span></div>
+                <div class="ai-loader-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+                <div id="ai-generation-lock-note" class="ai-generation-lock-note">Iltimos kuting. Test tayyor bo‘lguncha ilova boshqaruvlari vaqtincha bloklangan.</div>
+            </div>
+        </div>
+    </div>
+
     <div id="app-dialog" class="app-dialog-overlay">
         <div class="app-dialog-box">
             <span id="app-dialog-icon" class="app-dialog-icon">⚠️</span>
@@ -13389,9 +13546,40 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
     </div>
 
     <script>
+        // Railway Variables orqali boshqariladi: SHOW_QUIZ_EXPLANATIONS=true/false.
+        const SHOW_QUIZ_EXPLANATIONS = {{ show_quiz_explanations | tojson }};
+
         const tg = window.Telegram.WebApp;
-        tg.ready(); tg.expand();
-        tg.setHeaderColor('#121214');
+        tg.ready();
+        tg.expand();
+
+        // Telegram tashqi panellari ilovaning tanlangan foniga moslashadi.
+        // Fon rangi qotirib qo'yilmaydi: foydalanuvchi oboyni almashtirsa, yuqori/pastki panellar ham yangilanadi.
+        function syncTelegramChromeColor() {
+            try {
+                const rootStyle = getComputedStyle(document.documentElement);
+                const wallpaper = rootStyle.getPropertyValue('--quizpilot-wallpaper').trim();
+                const aeroBg = rootStyle.getPropertyValue('--aero-bg').trim();
+                const backgroundValue = wallpaper || aeroBg;
+                const gradientMatch = backgroundValue.match(/linear-gradient\([^,]+,\s*(#[0-9a-fA-F]{3,8})/);
+                const colorMatch = backgroundValue.match(/#[0-9a-fA-F]{6}\b/);
+                const chromeColor = (gradientMatch && gradientMatch[1]) || (colorMatch && colorMatch[0]) || '#1c2b3a';
+
+                if (typeof tg.setHeaderColor === 'function') tg.setHeaderColor(chromeColor);
+                if (typeof tg.setBackgroundColor === 'function') tg.setBackgroundColor(chromeColor);
+                if (typeof tg.setBottomBarColor === 'function') tg.setBottomBarColor(chromeColor);
+            } catch (e) {
+                console.warn('Telegram tashqi panellari rangini moslashda xatolik:', e);
+            }
+        }
+
+        syncTelegramChromeColor();
+        const telegramChromeObserver = new MutationObserver(syncTelegramChromeColor);
+        telegramChromeObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['style', 'data-quiz-theme']
+        });
+        document.addEventListener('DOMContentLoaded', syncTelegramChromeColor);
 
         const BASE_URL = window.location.origin;
         let userId = 99999; 
@@ -13434,12 +13622,12 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
                 upload_box: "Darslik yuklash (PDF yoki DOCX)", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
-                btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🎁 Bepul limitlar", promo_6_desc: "Har 30 kunda 3 ta bepul test, 3 ta ommaviy test va 3 ta flash-kartochka yaratish imkoniyati.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
+                btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🗂 Flash-kartochkalar", promo_6_desc: "Muhim atamalarni takrorlang, bilimlaringizni mustahkamlang va eslab qolishni osonlashtiring.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
                 theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Oboy", wallpaper_desc: "Ilova fonini o‘zingizga moslang.", wallpaper_default: "Standart", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Yengil rejim", performance_mode_desc: "Kuchsizroq telefonlarda ilovani silliqroq ishlatish uchun grafik effektlarni yengillashtiradi.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
                 msg_no_cards: "Flesh-kartochkalar ro'yxati bo'sh.", score_text: "Oxirgi natija", q_count: "Savollar soni",
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
-                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", missing_input: "✍️ Iltimos, matn kiriting yoki fayl yuklang!", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", 
+                alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", missing_input: "✍️ Iltimos, matn kiriting yoki fayl yuklang!", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", quiz_split_title: "📚 Testni bo‘lish", quiz_split_subtitle: "{total} ta savol tayyor. Test hajmini tanlang:", quiz_split_single: "Bitta test", quiz_split_parts: "{count} ta alohida test", quiz_split_questions: "{count} ta savol", quiz_split_working: "Testlar tayyorlanmoqda...", quiz_split_done: "✅ {count} ta test tayyorlandi.", quiz_split_error: "❌ Testlarni bo‘lishda xatolik.", ai_generation_title: "AI test yaratmoqda", ai_generation_subtitle: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...", ai_generation_lock_note: "Iltimos kuting. Test tayyor bo‘lguncha ilova boshqaruvlari vaqtincha bloklangan.", 
                 card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
                 premium_status_title: "💎 Sizning Statusingiz", regular_user: "Oddiy foydalanuvchi", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
                 modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
@@ -13464,12 +13652,12 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.", student_active_tests: "🚀 Активные тесты", student_no_active_tests: "Активных тестов пока нет. Когда учитель запустит тест, он появится здесь.", student_test_start: "🚀 Начать тест", student_test_info: "📝 {total} вопросов · ⏱️ {duration} мин.", student_test_remaining: "Осталось: {time}", student_new_test: "🔔 Новый тест начался", student_session_expired: "⏰ Эта сессия теста завершена.", student_session_access: "Чтобы войти в групповой тест, сначала присоединитесь к группе.", student_active_students: "Активные ученики", student_completed_students: "Завершили", student_time_up: "⏰ Время вышло.", student_test_completed: "✅ Тест завершён", student_test_result: "Ваш результат: {score}/{total} ({percent}%)",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
                 upload_box: "Загрузить учебник (PDF или DOCX)", selected_file: "Выбрано: ", or_text: "или введите текст:",
-                btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🎁 Бесплатные лимиты", promo_6_desc: "Каждые 30 дней: 3 бесплатных теста, 3 публичных теста и 3 флеш-карточки.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
+                btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🗂 Флеш-карточки", promo_6_desc: "Повторяйте важные термины, закрепляйте знания и запоминайте материал легче.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
                 theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Обои", wallpaper_desc: "Настройте фон приложения под себя.", wallpaper_default: "Стандартные", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Лёгкий режим", performance_mode_desc: "Уменьшает графические эффекты для более плавной работы на слабых телефонах.", performance_mode_on: "ВКЛ", performance_mode_off: "ВЫКЛ", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
                 msg_no_cards: "Список карточек пуст.", score_text: "Последний результат", q_count: "Количество вопросов",
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
-                alert_del_quiz: "Вы хотите удалить этот тест?", missing_input: "✍️ Пожалуйста, введите текст или загрузите файл!", alert_success: "🎉 Тест успешно создан!", 
+                alert_del_quiz: "Вы хотите удалить этот тест?", missing_input: "✍️ Пожалуйста, введите текст или загрузите файл!", alert_success: "🎉 Тест успешно создан!", quiz_split_title: "📚 Разделить тест", quiz_split_subtitle: "Подготовлено {total} вопросов. Выберите размер теста:", quiz_split_single: "Один тест", quiz_split_parts: "{count} отдельных тестов", quiz_split_questions: "{count} вопросов", quiz_split_working: "Подготавливаем тесты...", quiz_split_done: "✅ Подготовлено тестов: {count}.", quiz_split_error: "❌ Не удалось разделить тест.", ai_generation_title: "Создаётся AI-тест", ai_generation_subtitle: "Вопросы анализируются и тест подготавливается...", ai_generation_lock_note: "Пожалуйста, подождите. Управление приложением временно заблокировано до завершения создания теста.", 
                 card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
                 premium_status_title: "💎 Ваш Статус", regular_user: "Обычный пользователь", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
                 modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
@@ -13494,12 +13682,12 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.", student_active_tests: "🚀 Active tests", student_no_active_tests: "No active tests yet. It will appear here when the teacher starts a test.", student_test_start: "🚀 Start test", student_test_info: "📝 {total} questions · ⏱️ {duration} min", student_test_remaining: "Time left: {time}", student_new_test: "🔔 New test started", student_session_expired: "⏰ This test session has ended.", student_session_access: "Join the group first to enter this group test.", student_active_students: "Active students", student_completed_students: "Completed", student_time_up: "⏰ Time is up.", student_test_completed: "✅ Test completed", student_test_result: "Your result: {score}/{total} ({percent}%)",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
                 upload_box: "Upload textbook (PDF or DOCX)", selected_file: "Selected: ", or_text: "or enter text:",
-                btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🎁 Free limits", promo_6_desc: "Every 30 days: 3 free quizzes, 3 public quizzes, and 3 flashcards.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
+                btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🗂 Flashcards", promo_6_desc: "Review key terms, reinforce your knowledge, and remember information more easily.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
                 theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Wallpaper", wallpaper_desc: "Customize the app background to your liking.", wallpaper_default: "Default", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Lite Mode", performance_mode_desc: "Reduces graphic effects for smoother performance on less powerful phones.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
                 msg_no_cards: "Flashcard list is empty.", score_text: "Last score", q_count: "Number of questions",
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
-                alert_del_quiz: "Do you want to delete this quiz?", missing_input: "✍️ Please enter text or upload a file!", alert_success: "🎉 Quiz successfully created!", 
+                alert_del_quiz: "Do you want to delete this quiz?", missing_input: "✍️ Please enter text or upload a file!", alert_success: "🎉 Quiz successfully created!", quiz_split_title: "📚 Split quiz", quiz_split_subtitle: "{total} questions are ready. Choose the quiz size:", quiz_split_single: "One quiz", quiz_split_parts: "{count} separate quizzes", quiz_split_questions: "{count} questions", quiz_split_working: "Preparing quizzes...", quiz_split_done: "✅ {count} quizzes are ready.", quiz_split_error: "❌ Failed to split the quiz.", ai_generation_title: "Creating AI quiz", ai_generation_subtitle: "Questions are being analyzed and the quiz is being prepared...", ai_generation_lock_note: "Please wait. App controls are temporarily locked until the quiz is ready.", 
                 card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
                 premium_status_title: "💎 Your Status", regular_user: "Regular User", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
                 modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
@@ -14005,6 +14193,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
         }
 
         function switchScreen(screenName, swipeDirection) {
+            if (aiGenerationLocked) return;
             const nextScreen = document.getElementById(`${screenName}-screen`);
             if (!nextScreen) return;
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active','swipe-enter-left','swipe-enter-right'));
@@ -14038,8 +14227,9 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                     document.getElementById('p-status-val').innerText =
                         data.is_paid ? (data.user_status || "PRO") : localizedRegularUser;
 
-                    // Premium oynasida foydalanuvchiga TEST yaratish bo'yicha qolgan
-                    // 30 kunlik bepul limit ko'rsatiladi: 3 → 2 → 1 → 0.
+                    // Qolgan bepul test limiti serverdan olinadi.
+                    // Railway'dagi FREE_QUIZ_LIMIT qiymati o'zgarsa, status oynasi
+                    // quiz_remaining orqali yangi qiymatni avtomatik ko'rsatadi.
                     document.getElementById('p-limit-val').innerText =
                         data.quiz_remaining !== undefined ? data.quiz_remaining : "0";
 
@@ -14057,6 +14247,7 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 localStorage.setItem(LANGUAGE_STORAGE_KEY, currentLang);
             } catch (_) {}
             applyLocalization();
+
             try {
                 await fetch(`${BASE_URL}/api/set-language?user_id=${userId}&lang=${lang}`, { method: 'POST' });
             } catch(e){}
@@ -14149,13 +14340,32 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
                 const t=e.changedTouches[0], dx=t.clientX-aeroTouchStartX, dy=t.clientY-aeroTouchStartY;
                 if(Math.abs(dx)<12 || Math.abs(dx)<Math.abs(dy)*1.02) return;
                 const target=e.target;
-                if(target && target.closest && (target.closest('input,textarea,select,button,a,[contenteditable="true"]') || target.closest('#game-screen') || target.closest('.modal-overlay') || target.closest('.app-dialog-overlay'))) return;
+                if(target && target.closest && (target.closest('input,textarea,select,button,a,[contenteditable="true"]') || target.closest('#game-screen') || target.closest('.modal-overlay') || target.closest('.app-dialog-overlay') || target.closest('#ai-generation-overlay'))) return;
                 // Kutubxona ichidagi ichki tablar Swipe qilinmaydi.
                 // Ammo Kutubxonaning o'zidan asosiy bo'limlar orasida Swipe ishlaydi.
                 aeroSwipeTarget(dx);
             }, {passive:true});
         }
         if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',initAeroSwipe); else initAeroSwipe();
+
+        let aiGenerationLocked = false;
+
+        function setAIGenerationLock(locked) {
+            aiGenerationLocked = !!locked;
+            const overlay = document.getElementById('ai-generation-overlay');
+            if (!overlay) return;
+
+            const title = document.getElementById('ai-generation-title');
+            const subtitle = document.getElementById('ai-generation-subtitle');
+            const note = document.getElementById('ai-generation-lock-note');
+            if (title) title.innerText = langPack[currentLang].ai_generation_title;
+            if (subtitle) subtitle.innerText = langPack[currentLang].ai_generation_subtitle;
+            if (note) note.innerText = langPack[currentLang].ai_generation_lock_note;
+
+            overlay.classList.toggle('active', aiGenerationLocked);
+            overlay.setAttribute('aria-hidden', aiGenerationLocked ? 'false' : 'true');
+            document.body.classList.toggle('ai-generation-active', aiGenerationLocked);
+        }
 
         async function startGeneration() {
             const textInput = document.getElementById('text-input').value.trim();
@@ -14171,21 +14381,52 @@ html[data-performance-mode="lite"] .screen.swipe-enter-right {
 
             genBtn.style.display = "none";
             loader.style.display = "block";
+            setAIGenerationLock(true);
+
+            let uploadLimits = { max_upload_file_mb: 10, max_text_input_chars: 80000 };
+            try {
+                const limitsResponse = await fetch(BASE_URL + '/api/upload-limits');
+                if (limitsResponse.ok) {
+                    const limitsData = await limitsResponse.json();
+                    if (limitsData && Number(limitsData.max_upload_file_mb) > 0) {
+                        uploadLimits.max_upload_file_mb = Number(limitsData.max_upload_file_mb);
+                    }
+                    if (limitsData && Number(limitsData.max_text_input_chars) > 0) {
+                        uploadLimits.max_text_input_chars = Number(limitsData.max_text_input_chars);
+                    }
+                }
+            } catch (limitsError) {
+                console.warn("Yuklash limitlarini serverdan olish imkoni bo‘lmadi; standart qiymatlar ishlatiladi.");
+            }
+
+            if (textInput.length > uploadLimits.max_text_input_chars) {
+                const textLimitAlerts = {
+                    uz: `Matn ${uploadLimits.max_text_input_chars.toLocaleString()} ta belgidan oshmasligi kerak!`,
+                    ru: `Текст не должен превышать ${uploadLimits.max_text_input_chars.toLocaleString()} символов!`,
+                    en: `Text must not exceed ${uploadLimits.max_text_input_chars.toLocaleString()} characters!`
+                };
+                showAppAlert("⚠️", textLimitAlerts[currentLang] || textLimitAlerts.uz);
+                genBtn.style.display = "block";
+                loader.style.display = "none";
+                setAIGenerationLock(false);
+                return;
+            }
 
             const formData = new FormData();
             formData.append('user_id', userId);
             if (textInput) formData.append('text', textInput);
             if (fileInput.files.length > 0) {
             const selectedFile = fileInput.files[0];
-            if (selectedFile.size > 10 * 1024 * 1024) { // 10 MB limit
+            if (selectedFile.size > uploadLimits.max_upload_file_mb * 1024 * 1024) {
                 const fileLimitAlerts = {
-    uz: "Fayl hajmi 10 MB dan oshmasligi kerak!",
-    ru: "Размер файла не должен превышать 10 МБ!",
-    en: "File size must not exceed 10 MB!"
+    uz: `Fayl hajmi ${uploadLimits.max_upload_file_mb} MB dan oshmasligi kerak!`,
+    ru: `Размер файла не должен превышать ${uploadLimits.max_upload_file_mb} МБ!`,
+    en: `File size must not exceed ${uploadLimits.max_upload_file_mb} MB!`
 };
 showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 genBtn.style.display = "block";
                 loader.style.display = "none";
+                setAIGenerationLock(false);
                 return;
             }
             formData.append('file', selectedFile);
@@ -14196,13 +14437,11 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 const response = await fetch(BASE_URL + '/api/create-quiz-web', { method: 'POST', body: formData });
                 const data = await response.json();
                 if (data && data.status === "ok") {
-                    showAppAlert("🚀", langPack[currentLang].alert_success, () => {
-                        document.getElementById('text-input').value = "";
-                        document.getElementById('quiz-title-input').value = "";
-                        fileInput.value = "";
-                        document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
-                        switchScreen('library');
-                    });
+                    document.getElementById('text-input').value = "";
+                    document.getElementById('quiz-title-input').value = "";
+                    fileInput.value = "";
+                    document.getElementById('upload-text').innerText = langPack[currentLang].upload_box;
+                    openQuizSplitModal(data.quiz_id, Number(data.total || 0));
                 } else {
                     if (data.error_code === "free_limit" || data.message && (data.message.includes("limit") || data.message.includes("лимит") || data.message.includes("Premium") || data.message.includes("tugadi"))) {
                         showAppAlert("⚠️", langPack[currentLang].alert_limit_over, () => { switchScreen('premium'); });
@@ -14214,6 +14453,72 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             finally {
                 genBtn.style.display = "block";
                 loader.style.display = "none";
+                setAIGenerationLock(false);
+            }
+        }
+
+        function closeQuizSplitModal() {
+            const modal = document.getElementById('quiz-split-modal');
+            if (modal) { modal.style.display = 'none'; modal.setAttribute('aria-hidden', 'true'); }
+        }
+
+        function openQuizSplitModal(quizId, total) {
+            const modal = document.getElementById('quiz-split-modal');
+            const title = document.getElementById('quiz-split-title');
+            const subtitle = document.getElementById('quiz-split-subtitle');
+            const options = document.getElementById('quiz-split-options');
+            if (!modal || !title || !subtitle || !options || !quizId || !total) return;
+
+            title.innerText = langPack[currentLang].quiz_split_title;
+            subtitle.innerText = langPack[currentLang].quiz_split_subtitle.replace('{total}', total);
+            options.innerHTML = '';
+
+            [20, 30, 40].forEach(size => {
+                if (total < size) return;
+                const count = Math.ceil(total / size);
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'quiz-split-option';
+                btn.innerHTML = `<span class="quiz-split-option-main">${langPack[currentLang].quiz_split_questions.replace('{count}', size)}</span><span class="quiz-split-option-count">${langPack[currentLang].quiz_split_parts.replace('{count}', count)}</span>`;
+                btn.onclick = () => splitQuizFromModal(quizId, size);
+                options.appendChild(btn);
+            });
+
+            const singleBtn = document.createElement('button');
+            singleBtn.type = 'button';
+            singleBtn.className = 'quiz-split-option';
+            singleBtn.innerHTML = `<span class="quiz-split-option-main">${langPack[currentLang].quiz_split_single}</span><span class="quiz-split-option-count">${langPack[currentLang].quiz_split_questions.replace('{count}', total)}</span>`;
+            singleBtn.onclick = () => {
+                closeQuizSplitModal();
+                // Bitta test tanlanganda faqat Kutubxonaga qaytamiz.
+                // Testni avtomatik boshlash bu oynadan qilinmaydi.
+                currentTab = 'personal';
+                switchScreen('library');
+            };
+            options.appendChild(singleBtn);
+            modal.style.display = 'flex';
+            modal.setAttribute('aria-hidden', 'false');
+        }
+
+        async function splitQuizFromModal(quizId, questionCount) {
+            const options = document.getElementById('quiz-split-options');
+            if (!options) return;
+            const original = options.innerHTML;
+            options.innerHTML = `<div style="text-align:center;color:var(--text-hint);padding:12px 4px;">${langPack[currentLang].quiz_split_working}</div>`;
+            try {
+                const response = await fetch(`${BASE_URL}/api/split-quiz?quiz_id=${encodeURIComponent(quizId)}&user_id=${encodeURIComponent(userId)}&question_count=${questionCount}`, { method: 'POST' });
+                const data = await response.json();
+                if (data && data.status === 'ok') {
+                    closeQuizSplitModal();
+                    switchScreen('library');
+                    setTimeout(() => loadQuizzes(), 150);
+                } else {
+                    options.innerHTML = original;
+                    showAppAlert('❌', langPack[currentLang].quiz_split_error);
+                }
+            } catch (error) {
+                options.innerHTML = original;
+                showAppAlert('❌', langPack[currentLang].quiz_split_error);
             }
         }
 
@@ -14589,9 +14894,13 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             } else {
                 btn.classList.add('wrong'); wrongAnswersCount++; q._answered = true; q._wrong = true; playQuizSound('wrong');
                 if (buttons[correctIdx]) buttons[correctIdx].classList.add('correct');
-                const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
-                expBox.innerText = `${expLabel} ` + (explanation || "...");
-                expBox.style.display = 'block';
+                if (SHOW_QUIZ_EXPLANATIONS) {
+                    const expLabel = langPack[currentLang].explanation_label || "💡 Izoh:";
+                    expBox.innerText = `${expLabel} ` + (explanation || "...");
+                    expBox.style.display = 'block';
+                } else {
+                    expBox.style.display = 'none';
+                }
             }
             document.getElementById('next-question-btn').style.display = 'block';
         }
@@ -14617,9 +14926,9 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             footer.style.flexDirection = 'column';
             const allowRetryActions = currentTab !== 'group_join';
             footer.innerHTML = `
-                ${allowRetryActions ? `<button class="app-dialog-btn primary" id="quiz-retry-btn" style="width:100%;">${langPack[currentLang].quiz_retry}</button>` : ''}
-                ${allowRetryActions && wrong > 0 ? `<button class="app-dialog-btn secondary" id="quiz-review-btn" style="width:100%;color:#ff8b94;border-color:rgba(232,17,35,.45);">${langPack[currentLang].quiz_review_errors}</button>` : ''}
-                <button class="app-dialog-btn secondary" id="quiz-result-ok-btn" style="width:100%;">${langPack[currentLang].btn_ok || 'OK'}</button>
+                ${allowRetryActions ? `<button class="app-dialog-btn quiz-result-btn quiz-result-primary" id="quiz-retry-btn">${langPack[currentLang].quiz_retry}</button>` : ''}
+                ${allowRetryActions && wrong > 0 ? `<button class="app-dialog-btn quiz-result-btn quiz-result-danger" id="quiz-review-btn">${langPack[currentLang].quiz_review_errors}</button>` : ''}
+                <button class="app-dialog-btn quiz-result-btn quiz-result-neutral" id="quiz-result-ok-btn">${langPack[currentLang].btn_ok || 'OK'}</button>
             `;
             dialog.style.display = 'flex';
 
