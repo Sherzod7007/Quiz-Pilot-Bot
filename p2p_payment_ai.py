@@ -415,9 +415,11 @@ Rules:
 - recipient_name and bank_or_app: visible values only.
 - confidence: 0..1 reflecting extraction confidence, not proof of real payment.
 - is_receipt=false if this does not clearly look like a payment receipt.
-- suspicious_edits=true if visible signs suggest an important field may have been altered, pasted, covered, overlaid, digitally replaced, or composited (especially amount, date/time, recipient card/name, transaction/operation ID, status, or bank branding).
-- suspicion_reason: state the exact visible clue(s); empty if none are visible.
-- Inspect transaction/operation IDs carefully: do not confuse a watermark, stamp, background text, or overlapping text with the ID. If the ID appears to have a different font, weight, sharpness, baseline, spacing, background, alignment, compression pattern, or overlap from neighboring fields, mark suspicious_edits=true.
+- suspicious_edits=true only when there are concrete visual signs that an important field was altered, pasted, covered, digitally replaced, or composited (especially amount, date/time, recipient card/name, transaction/operation ID, or payment status).
+- Do NOT mark suspicious_edits=true just because the receipt is shown small, compressed, captured in a screenshot, or has a legitimate bank stamp/watermark such as a "payment completed" stamp. These features alone are not evidence of fraud.
+- A stamp or watermark may overlap other printed areas naturally. Do not treat the stamp alone as proof of editing; however, if it actually hides or makes a key field unreadable, report that field as unknown and explain the specific obstruction.
+- suspicion_reason: state the exact concrete visual clue(s); empty if none are visible.
+- Inspect transaction/operation IDs carefully: do not confuse a watermark, bank stamp, background text, or overlapping stamp text with the ID. Mark suspicious_edits=true only if the ID itself shows concrete signs of replacement, such as a distinct font/sharpness/background or an unexplained patch, not merely because a stamp crosses nearby text.
 - Inspect the whole receipt for inconsistent fonts, misaligned rows, uneven backgrounds, duplicated/blurred characters, unexplained patches, inconsistent shadows, clipped labels, or text covering other fields.
 - If a value is obscured, overlapped, ambiguous, or looks edited, do not guess it; report it as unknown and mark suspicious_edits=true when alteration is plausible.
 - reason: concise explanation of missing/ambiguous data.
@@ -464,7 +466,7 @@ def _vision(file_bytes, mime_type, attempt_number):
             if not acquired:
                 last_error = TemporaryAIError("OCR concurrency limit")
                 logging.warning(
-                    "P2P Gemini navbatida parallel slot olinmadi | model=%s | kalit=%s",
+                    "P2P Gemini navbatidan parallel ish joyi olinmadi | model=%s | kalit=%s",
                     model, key_idx
                 )
                 continue
@@ -477,19 +479,19 @@ def _vision(file_bytes, mime_type, attempt_number):
                     if best_incomplete is None or result.confidence > best_incomplete[0].confidence:
                         best_incomplete = (result, key_idx, inp, out, model)
                     logging.warning(
-                        "P2P Gemini natijasi to‘liq emas; keyingi kalit sinab ko‘riladi | model=%s | kalit=%s | chek_urinish=%s | ishonchlilik=%.2f",
+                        "P2P Gemini natijasi to‘liq emas; keyingi kalit tekshiriladi | model=%s | kalit=%s | chek_urinish=%s | ishonchlilik=%.2f",
                         model, key_idx, attempt_number, result.confidence
                     )
                     continue
                 logging.info(
-                    "P2P Gemini Rotation muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
+                    "P2P Gemini kalit aylanishi muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
                     model, key_idx, attempted_calls, attempt_number
                 )
                 return result, key_idx, inp, out, model
             except Exception as exc:
                 last_error = exc
                 logging.warning(
-                    "P2P Gemini xatosi; keyingi kalit/model sinab ko‘riladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
+                    "P2P Gemini xatosi; keyingi kalit/model tekshiriladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
                     model, key_idx, attempt_number, exc
                 )
                 # A key may be invalid or rate-limited; continue the controlled
@@ -499,7 +501,7 @@ def _vision(file_bytes, mime_type, attempt_number):
 
     if best_incomplete is not None:
         logging.warning(
-            "P2P Gemini barcha sozlangan urinishlardan so‘ng eng yaxshi to‘liq bo‘lmagan OCR natijasini qaytarmoqda | API_urinishlari=%s",
+            "P2P Gemini barcha sozlangan urinishlardan keyin eng yaxshi, ammo to‘liq bo‘lmagan OCR natijasini qaytarmoqda | API_urinishlari=%s",
             attempted_calls
         )
         return best_incomplete
@@ -885,7 +887,7 @@ def _retry_scheduler():
         try:
             _recover_queued(force=False)
         except Exception:
-            logging.exception("P2P OCR: qayta urinish jadvalida xatolik")
+            logging.exception("P2P OCR: qayta urinish jadvalida xatolik yuz berdi")
         time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
@@ -975,6 +977,34 @@ def _process(item):
                      ai_input_tokens=inp, ai_output_tokens=out, estimated_cost_usd=cost,
                      processed_at=_now(), next_retry_at=0)
 
+        # Bir tranzaksiya ID qayta ishlatilmasin: bu tekshiruv admin-review qaroridan
+        # oldin bajariladi, shunda avval ko‘rilgan chek qayta yuborilsa admin navbatiga tushmaydi.
+        transaction_id = (result.transaction_id or "").strip()
+        if transaction_id:
+            conn = _connect()
+            try:
+                duplicate = conn.execute(
+                    "SELECT tx_id FROM p2p_receipts "
+                    "WHERE transaction_id=? AND tx_id<>? "
+                    "AND status IN ('analyzed','approved','review') LIMIT 1",
+                    (transaction_id, tx_id)
+                ).fetchone()
+            finally:
+                conn.close()
+            if duplicate:
+                _mark_by_tx(
+                    tx_id, status="rejected",
+                    reason="Transaction ID avval ishlatilgan",
+                    processed_at=_now(), next_retry_at=0
+                )
+                logging.warning(
+                    "P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | "
+                    "buyurtma=%s | transaction_id=%s | avvalgi_buyurtma=%s",
+                    tx_id, transaction_id, duplicate["tx_id"]
+                )
+                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
+                return
+
         expected = _expected_amount(pay["tariff_price"])
         amount_ok = abs(_parse_amount(result.amount) - expected) < 0.01
         conf_ok = result.confidence >= 0.85
@@ -989,6 +1019,17 @@ def _process(item):
         receipt_date = _parse_receipt_date(result.transaction_date)
         today_uz = datetime.now(UZ_TZ).date()
         date_ok = receipt_date is not None and receipt_date == today_uz
+
+        # Har bir chek bo‘yicha OCR natijasi va qaror mezonlarini logda ko‘rsatish.
+        logging.info(
+            "P2P CHEK TAHLILI | buyurtma=%s | confidence=%.2f | suspicious_edits=%s | "
+            "transaction_id=%s | transaction_date=%s | summa_mos=%s | karta_mos=%s | sana_mos=%s",
+            tx_id, result.confidence, suspicious_edits,
+            (result.transaction_id or "aniqlanmadi"),
+            (result.transaction_date or "aniqlanmadi"),
+            amount_ok, card_ok, date_ok
+        )
+
         if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok or suspicious_edits:
             reasons = []
             if not receipt_ok: reasons.append("chek aniqlanmadi")
@@ -1005,6 +1046,14 @@ def _process(item):
             elif receipt_date != today_uz:
                 reasons.append(f"chek sanasi bugungi sana bilan mos emas: {receipt_date.strftime('%d.%m.%Y')} / bugun: {today_uz.strftime('%d.%m.%Y')}")
             reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=ADMIN_REVIEW | buyurtma=%s | confidence=%.2f | "
+                "suspicious_edits=%s | transaction_id=%s | transaction_date=%s | sabab=%s",
+                tx_id, result.confidence, suspicious_edits,
+                (result.transaction_id or "aniqlanmadi"),
+                (result.transaction_date or "aniqlanmadi"),
+                reason_text
+            )
             _mark_by_tx(tx_id, status="review", reason=reason_text)
             display_name, username = _user_identity(user_id)
             user_issue_keys = []
@@ -1045,24 +1094,18 @@ def _process(item):
             )
             return
 
-        conn = _connect()
-        try:
-            duplicate = conn.execute(
-                "SELECT tx_id FROM p2p_receipts WHERE transaction_id=? AND tx_id<>? AND status IN ('analyzed','approved','review') LIMIT 1",
-                (result.transaction_id.strip(), tx_id)
-            ).fetchone()
-        finally:
-            conn.close()
-        if duplicate:
-            _mark_by_tx(tx_id, status="rejected", reason="Transaction ID avval ishlatilgan")
-            _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
-            return
-
         ok, info = _approve(tx_id, user_id)
         if ok:
             _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
             _notify_user(user_id, _p2p_message(user_id, "approved"))
-            logging.info("P2P: to‘lov avtomatik tasdiqlandi | buyurtma=%s | foydalanuvchi=%s | model=%s | xarajat=$%.6f", tx_id, user_id, used_model, cost)
+            logging.info(
+                "P2P TO‘LOV QARORI | qaror=AVTOMATIK_TASDIQLANDI | buyurtma=%s | "
+                "foydalanuvchi=%s | confidence=%.2f | suspicious_edits=%s | "
+                "transaction_id=%s | transaction_date=%s | sabab= barcha tekshiruvlar muvaffaqiyatli | model=%s | xarajat=$%.6f",
+                tx_id, user_id, result.confidence, bool(result.suspicious_edits),
+                (result.transaction_id or "aniqlanmadi"),
+                (result.transaction_date or "aniqlanmadi"), used_model, cost
+            )
         else:
             _mark_by_tx(tx_id, status="review", reason=info)
     except BudgetBlockedError as exc:
@@ -1134,7 +1177,7 @@ def _worker():
         try:
             _process(item)
         except Exception:
-            logging.exception("P2P OCR ishchi jarayonida kutilmagan xatolik")
+            logging.exception("P2P OCR ishchi jarayonida kutilmagan xatolik yuz berdi")
         finally:
             _queue.task_done()
 
