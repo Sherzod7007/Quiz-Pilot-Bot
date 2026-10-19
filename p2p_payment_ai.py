@@ -464,7 +464,7 @@ def _vision(file_bytes, mime_type, attempt_number):
             if not acquired:
                 last_error = TemporaryAIError("OCR concurrency limit")
                 logging.warning(
-                    "P2P Gemini navbatida parallel slot olinmadi | model=%s | kalit=%s",
+                    "P2P Gemini navbatidan parallel ish joyi olinmadi | model=%s | kalit=%s",
                     model, key_idx
                 )
                 continue
@@ -477,19 +477,19 @@ def _vision(file_bytes, mime_type, attempt_number):
                     if best_incomplete is None or result.confidence > best_incomplete[0].confidence:
                         best_incomplete = (result, key_idx, inp, out, model)
                     logging.warning(
-                        "P2P Gemini natijasi to‘liq emas; keyingi kalit sinab ko‘riladi | model=%s | kalit=%s | chek_urinish=%s | ishonchlilik=%.2f",
+                        "P2P Gemini natijasi to‘liq emas; keyingi kalit tekshiriladi | model=%s | kalit=%s | chek_urinish=%s | ishonchlilik=%.2f",
                         model, key_idx, attempt_number, result.confidence
                     )
                     continue
                 logging.info(
-                    "P2P Gemini Rotation muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
+                    "P2P Gemini kalit aylanishi muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
                     model, key_idx, attempted_calls, attempt_number
                 )
                 return result, key_idx, inp, out, model
             except Exception as exc:
                 last_error = exc
                 logging.warning(
-                    "P2P Gemini xatosi; keyingi kalit/model sinab ko‘riladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
+                    "P2P Gemini xatosi; keyingi kalit/model tekshiriladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
                     model, key_idx, attempt_number, exc
                 )
                 # A key may be invalid or rate-limited; continue the controlled
@@ -499,7 +499,7 @@ def _vision(file_bytes, mime_type, attempt_number):
 
     if best_incomplete is not None:
         logging.warning(
-            "P2P Gemini barcha sozlangan urinishlardan so‘ng eng yaxshi to‘liq bo‘lmagan OCR natijasini qaytarmoqda | API_urinishlari=%s",
+            "P2P Gemini barcha sozlangan urinishlardan keyin eng yaxshi, ammo to‘liq bo‘lmagan OCR natijasini qaytarmoqda | API_urinishlari=%s",
             attempted_calls
         )
         return best_incomplete
@@ -885,7 +885,7 @@ def _retry_scheduler():
         try:
             _recover_queued(force=False)
         except Exception:
-            logging.exception("P2P OCR: qayta urinish jadvalida xatolik")
+            logging.exception("P2P OCR: qayta urinish jadvalida xatolik yuz berdi")
         time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
@@ -989,6 +989,17 @@ def _process(item):
         receipt_date = _parse_receipt_date(result.transaction_date)
         today_uz = datetime.now(UZ_TZ).date()
         date_ok = receipt_date is not None and receipt_date == today_uz
+
+        # Har bir chek bo‘yicha OCR natijasi va qaror mezonlarini logda ko‘rsatish.
+        logging.info(
+            "P2P CHEK TAHLILI | buyurtma=%s | confidence=%.2f | suspicious_edits=%s | "
+            "transaction_id=%s | transaction_date=%s | summa_mos=%s | karta_mos=%s | sana_mos=%s",
+            tx_id, result.confidence, suspicious_edits,
+            (result.transaction_id or "aniqlanmadi"),
+            (result.transaction_date or "aniqlanmadi"),
+            amount_ok, card_ok, date_ok
+        )
+
         if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok or suspicious_edits:
             reasons = []
             if not receipt_ok: reasons.append("chek aniqlanmadi")
@@ -1005,6 +1016,14 @@ def _process(item):
             elif receipt_date != today_uz:
                 reasons.append(f"chek sanasi bugungi sana bilan mos emas: {receipt_date.strftime('%d.%m.%Y')} / bugun: {today_uz.strftime('%d.%m.%Y')}")
             reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=ADMIN_REVIEW | buyurtma=%s | confidence=%.2f | "
+                "suspicious_edits=%s | transaction_id=%s | transaction_date=%s | sabab=%s",
+                tx_id, result.confidence, suspicious_edits,
+                (result.transaction_id or "aniqlanmadi"),
+                (result.transaction_date or "aniqlanmadi"),
+                reason_text
+            )
             _mark_by_tx(tx_id, status="review", reason=reason_text)
             display_name, username = _user_identity(user_id)
             user_issue_keys = []
@@ -1062,7 +1081,14 @@ def _process(item):
         if ok:
             _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
             _notify_user(user_id, _p2p_message(user_id, "approved"))
-            logging.info("P2P: to‘lov avtomatik tasdiqlandi | buyurtma=%s | foydalanuvchi=%s | model=%s | xarajat=$%.6f", tx_id, user_id, used_model, cost)
+            logging.info(
+                "P2P TO‘LOV QARORI | qaror=AVTOMATIK_TASDIQLANDI | buyurtma=%s | "
+                "foydalanuvchi=%s | confidence=%.2f | suspicious_edits=%s | "
+                "transaction_id=%s | transaction_date=%s | sabab= barcha tekshiruvlar muvaffaqiyatli | model=%s | xarajat=$%.6f",
+                tx_id, user_id, result.confidence, bool(result.suspicious_edits),
+                (result.transaction_id or "aniqlanmadi"),
+                (result.transaction_date or "aniqlanmadi"), used_model, cost
+            )
         else:
             _mark_by_tx(tx_id, status="review", reason=info)
     except BudgetBlockedError as exc:
@@ -1134,7 +1160,7 @@ def _worker():
         try:
             _process(item)
         except Exception:
-            logging.exception("P2P OCR ishchi jarayonida kutilmagan xatolik")
+            logging.exception("P2P OCR ishchi jarayonida kutilmagan xatolik yuz berdi")
         finally:
             _queue.task_done()
 
