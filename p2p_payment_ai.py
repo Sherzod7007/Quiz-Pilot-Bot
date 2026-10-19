@@ -687,7 +687,7 @@ def _p2p_retry_receipt_message(user_id, issue_keys):
     lines = [messages["retry_receipt_title"], "", messages["retry_receipt_intro"]]
     lines.extend(messages[key] for key in issue_keys if key in messages)
     lines.extend(["", messages["retry_receipt_next"]])
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def _notify_user(user_id, text):
