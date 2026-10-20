@@ -300,15 +300,29 @@ def budget_status():
 
 
 def enqueue_receipt(tx_id, user_id, file_id):
+    """Persist a receipt before queueing it; rejected pending orders may submit a new image."""
     conn = _connect()
     try:
         row = conn.execute("SELECT status FROM p2p_receipts WHERE tx_id=?", (tx_id,)).fetchone()
-        if row and row["status"] in ("analyzed", "approved", "rejected", "review"):
+        if row and row["status"] in ("analyzed", "approved", "review"):
             return False, "already_processed"
-        conn.execute("INSERT OR IGNORE INTO p2p_receipts (tx_id,user_id,telegram_file_id,status,created_at,next_retry_at) VALUES (?,?,?,?,?,0)",
-                     (tx_id, user_id, file_id, "queued", _now()))
-        conn.execute("UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='', next_retry_at=0 WHERE tx_id=? AND status IN ('waiting_capacity','error','retry_wait','budget_blocked')",
-                     (file_id, tx_id))
+        if row and row["status"] == "rejected":
+            payment = conn.execute(
+                "SELECT status FROM payments WHERE tx_id=? AND user_id=?", (tx_id, int(user_id))
+            ).fetchone()
+            # A rejected receipt can be replaced only while its payment order is still pending.
+            if not payment or payment["status"] != "pending":
+                return False, "already_processed"
+            conn.execute(
+                "UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='', "
+                "next_retry_at=0, processed_at=0, image_sha256='', attempts=0 WHERE tx_id=? AND user_id=?",
+                (file_id, tx_id, int(user_id))
+            )
+        else:
+            conn.execute("INSERT OR IGNORE INTO p2p_receipts (tx_id,user_id,telegram_file_id,status,created_at,next_retry_at) VALUES (?,?,?,?,?,0)",
+                         (tx_id, user_id, file_id, "queued", _now()))
+            conn.execute("UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='', next_retry_at=0 WHERE tx_id=? AND status IN ('waiting_capacity','error','retry_wait','budget_blocked')",
+                         (file_id, tx_id))
         conn.commit()
     finally:
         conn.close()
@@ -484,14 +498,14 @@ def _vision(file_bytes, mime_type, attempt_number):
                     )
                     continue
                 logging.info(
-                    "P2P Gemini kalit aylanishi muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
+                    "P2P Gemini kalitlari aylanishi muvaffaqiyatli | model=%s | kalit_indeksi=%s | API_urinishlari=%s | chek_urinish=%s",
                     model, key_idx, attempted_calls, attempt_number
                 )
                 return result, key_idx, inp, out, model
             except Exception as exc:
                 last_error = exc
                 logging.warning(
-                    "P2P Gemini xatosi; keyingi kalit/model tekshiriladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
+                    "P2P Gemini xatosi; keyingi kalit yoki model tekshiriladi | model=%s | kalit=%s | chek_urinish=%s | sabab=%s",
                     model, key_idx, attempt_number, exc
                 )
                 # A key may be invalid or rate-limited; continue the controlled
@@ -561,11 +575,22 @@ def _get_user_lang(user_id):
 P2P_MESSAGES = {
     "uz": {
         "received": "⏳ Chekingiz qabul qilindi.\nAI tekshiruvi vaqtincha bandligi sabab biroz choʻzilmoqda. Tekshiruv avtomatik davom etadi. Premium toʻlovingiz tasdiqlangandan soʻng avtomatik faollashadi.",
-        "queue": "⏳ Chekingiz qabul qilindi. AI tekshiruvi navbatga qoʻyildi. Toʻlov avtomatik tekshiriladi.",
+        "queue": "⏳ Chekingiz qabul qilindi va navbatga saqlandi. Navbat vaqtincha band; tizim uni avtomatik qayta ishlaydi va natijani xabar qiladi. Iltimos, ayni chekni qayta yubormang.",
         "budget": "⏳ Chekingiz saqlandi. AI tekshiruv limiti vaqtincha toʻldi; tizim avtomatik qayta tekshiradi. Sizdan qayta toʻlov talab qilinmaydi.",
         "approved": "🎉 Toʻlov tasdiqlandi! PRO status avtomatik faollashtirildi. 👑",
         "duplicate": "❌ Bu chek rasmi avval yuborilgan. Tarif avtomatik faollashtirilmadi.",
         "duplicate_tx": "❌ Bu toʻlov cheki avval ishlatilgan. Tarif avtomatik faollashtirilmadi.",
+        "card_mismatch": "❌ Toʻlov tasdiqlanmadi: chekdagi qabul qiluvchi karta raqami biz ko‘rsatgan kartaga mos emas. Premium faollashtirilmadi. Iltimos, toʻgʻri kartaga toʻlov qilib, yangi chek yuboring.",
+        "card_unreadable": "⚠️ Chekdagi qabul qiluvchi karta raqamini aniq oʻqib boʻlmadi. Premium faollashtirilmadi. Iltimos, karta raqami aniq koʻrinadigan chek rasmini qayta yuboring.",
+        "retry_receipt_title": "❌ Chek tekshiruvdan oʻtmadi.",
+        "retry_receipt_intro": "Quyidagi muammolar aniqlandi:",
+        "retry_receipt_amount": "• Chekdagi summa tanlangan tarif narxiga mos emas.",
+        "retry_receipt_date": "• Chek sanasi bugungi sana emas yoki sana aniqlanmadi.",
+        "retry_receipt_card": "• Qabul qiluvchi karta raqami mos emas yoki aniq koʻrinmayapti.",
+        "retry_receipt_tx": "• Tranzaksiya raqami aniqlanmadi.",
+        "retry_receipt_not_receipt": "• Rasm toʻlov cheki ekanligi aniqlanmadi.",
+        "retry_receipt_confidence": "• Chekdagi maʼlumotlar aniq oʻqilmadi.",
+        "retry_receipt_next": "Premium faollashtirilmadi. Iltimos, maʼlumotlari toʻliq va aniq koʻrinadigan toʻgʻri chek rasmini yuboring. Toʻlovni qaytadan amalga oshirmang; avvalgi buyurtmangiz boʻyicha yangi chek yuboring.",
         "review_title": "⚠️ Chek avtomatik tekshiruvdan oʻtmadi.",
         "review_intro": "Premium avtomatik faollashtirilmadi. Aniqlangan holatlar:",
         "review_date_missing": "• Chek sanasi aniqlanmadi yoki oʻqib boʻlmadi.",
@@ -581,11 +606,22 @@ P2P_MESSAGES = {
     },
     "ru": {
         "received": "⏳ Чек получен.\nИз-за временной нагрузки AI-проверка может занять немного больше времени. Проверка продолжится автоматически. После подтверждения платежа Premium будет активирован автоматически.",
-        "queue": "⏳ Чек получен. Проверка AI поставлена в очередь. Платёж будет проверен автоматически.",
+        "queue": "⏳ Чек принят и сохранён в очереди. Очередь временно перегружена; система автоматически обработает чек и сообщит результат. Пожалуйста, не отправляйте тот же чек повторно.",
         "budget": "⏳ Чек сохранён. Лимит AI-проверок временно исчерпан; система автоматически повторит проверку. Повторно оплачивать не нужно.",
         "approved": "🎉 Платёж подтверждён! Статус PRO активирован автоматически. 👑",
         "duplicate": "❌ Этот чек уже был отправлен ранее. Тариф автоматически не активирован.",
         "duplicate_tx": "❌ Этот платёжный чек уже использовался. Тариф автоматически не активирован.",
+        "card_mismatch": "❌ Платёж не подтверждён: номер карты получателя в чеке не совпадает с указанной нами картой. Premium не активирован. Пожалуйста, оплатите на правильную карту и отправьте новый чек.",
+        "card_unreadable": "⚠️ Не удалось чётко прочитать номер карты получателя на чеке. Premium не активирован. Пожалуйста, отправьте чек, на котором номер карты хорошо виден.",
+        "retry_receipt_title": "❌ Чек не прошёл проверку.",
+        "retry_receipt_intro": "Обнаружены следующие проблемы:",
+        "retry_receipt_amount": "• Сумма в чеке не совпадает с ценой выбранного тарифа.",
+        "retry_receipt_date": "• Дата чека не сегодняшняя или её не удалось определить.",
+        "retry_receipt_card": "• Номер карты получателя не совпадает или плохо виден.",
+        "retry_receipt_tx": "• Не удалось определить номер транзакции.",
+        "retry_receipt_not_receipt": "• Не удалось определить, что изображение является платёжным чеком.",
+        "retry_receipt_confidence": "• Данные чека не удалось прочитать достаточно чётко.",
+        "retry_receipt_next": "Premium не активирован. Пожалуйста, отправьте новый чёткий чек, на котором все данные хорошо видны. Не оплачивайте повторно; отправьте новый чек по текущему заказу.",
         "review_title": "⚠️ Чек не прошёл автоматическую проверку.",
         "review_intro": "Premium не активирован автоматически. Обнаружены следующие проблемы:",
         "review_date_missing": "• Не удалось определить или прочитать дату чека.",
@@ -601,11 +637,22 @@ P2P_MESSAGES = {
     },
     "en": {
         "received": "⏳ Your receipt has been received.\nDue to temporary AI load, verification may take a little longer. The verification will continue automatically. Once your payment is confirmed, Premium will be activated automatically.",
-        "queue": "⏳ Your receipt has been received. AI verification has been queued. Your payment will be checked automatically.",
+        "queue": "⏳ Your receipt has been received and saved in the queue. The queue is temporarily busy; the system will process it automatically and notify you of the result. Please do not resend the same receipt.",
         "budget": "⏳ Your receipt has been saved. The AI verification limit is temporarily reached; the system will retry automatically. You do not need to pay again.",
         "approved": "🎉 Payment confirmed! Your PRO status has been activated automatically. 👑",
         "duplicate": "❌ This receipt image was already submitted. The plan was not activated automatically.",
         "duplicate_tx": "❌ This payment receipt has already been used. The plan was not activated automatically.",
+        "card_mismatch": "❌ Payment not confirmed: the recipient card number on the receipt does not match the card we provided. Premium was not activated. Please pay to the correct card and submit a new receipt.",
+        "card_unreadable": "⚠️ The recipient card number on the receipt could not be read clearly. Premium was not activated. Please resend a receipt where the card number is clearly visible.",
+        "retry_receipt_title": "❌ The receipt did not pass verification.",
+        "retry_receipt_intro": "The following issues were detected:",
+        "retry_receipt_amount": "• The receipt amount does not match the selected plan price.",
+        "retry_receipt_date": "• The receipt date is not today or could not be identified.",
+        "retry_receipt_card": "• The recipient card number does not match or is not clearly visible.",
+        "retry_receipt_tx": "• The transaction number could not be identified.",
+        "retry_receipt_not_receipt": "• The image could not be identified as a payment receipt.",
+        "retry_receipt_confidence": "• The receipt details could not be read clearly enough.",
+        "retry_receipt_next": "Premium was not activated. Please send a new, clear receipt with all details visible. Do not pay again; submit a new receipt for the current order.",
         "review_title": "⚠️ The receipt did not pass automatic verification.",
         "review_intro": "Premium was not activated automatically. The following issues were detected:",
         "review_date_missing": "• The receipt date could not be identified or read.",
@@ -631,6 +678,15 @@ def _p2p_review_message(user_id, issue_keys):
     lines = [messages["review_title"], "", messages["review_intro"]]
     lines.extend(messages[key] for key in issue_keys if key in messages)
     lines.extend(["", messages["review_next"]])
+    return "\n".join(lines)
+
+
+def _p2p_retry_receipt_message(user_id, issue_keys):
+    """Explain definite receipt errors and ask for a replacement, without admin review."""
+    messages = P2P_MESSAGES[_get_user_lang(user_id)]
+    lines = [messages["retry_receipt_title"], "", messages["retry_receipt_intro"]]
+    lines.extend(messages[key] for key in issue_keys if key in messages)
+    lines.extend(["", messages["retry_receipt_next"]])
     return "\n".join(lines)
 
 
@@ -887,7 +943,7 @@ def _retry_scheduler():
         try:
             _recover_queued(force=False)
         except Exception:
-            logging.exception("P2P OCR: qayta urinish jadvalida xatolik yuz berdi")
+            logging.exception("P2P OCR: qayta urinish jadvalida xatolik")
         time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
@@ -1016,82 +1072,135 @@ def _process(item):
         expected_card = _last4(P2P_CARD_NUMBER)
         actual_card = _last4(result.recipient_card_last4)
         card_ok = bool(expected_card) and bool(actual_card) and expected_card == actual_card
+
+        # Clear card failures are actionable user errors, not admin-review cases.
+        # If the expected card is not configured, retain admin review instead of blaming the user.
+        if expected_card and receipt_ok and not actual_card:
+            reason_text = "Chekdagi qabul qiluvchi karta raqami aniq o‘qilmadi"
+            _mark_by_tx(tx_id, status="rejected", reason=reason_text, processed_at=_now(), next_retry_at=0)
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=KARTA_O‘QILMADI | buyurtma=%s | foydalanuvchi=%s",
+                tx_id, user_id
+            )
+            _notify_user(user_id, _p2p_message(user_id, "card_unreadable"))
+            return
+        if expected_card and receipt_ok and conf_ok and actual_card and expected_card != actual_card:
+            reason_text = f"Qabul qiluvchi karta mos emas: {actual_card} != {expected_card}"
+            _mark_by_tx(tx_id, status="rejected", reason=reason_text, processed_at=_now(), next_retry_at=0)
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=KARTA_MOS_EMAS | buyurtma=%s | foydalanuvchi=%s | karta_oxiri=%s",
+                tx_id, user_id, actual_card
+            )
+            _notify_user(user_id, _p2p_message(user_id, "card_mismatch"))
+            return
+
         receipt_date = _parse_receipt_date(result.transaction_date)
         today_uz = datetime.now(UZ_TZ).date()
         date_ok = receipt_date is not None and receipt_date == today_uz
 
         # Har bir chek bo‘yicha OCR natijasi va qaror mezonlarini logda ko‘rsatish.
         logging.info(
-            "P2P CHEK TAHLILI | buyurtma=%s | confidence=%.2f | suspicious_edits=%s | "
-            "transaction_id=%s | transaction_date=%s | summa_mos=%s | karta_mos=%s | sana_mos=%s",
+             "P2P CHEK TAHLILI | buyurtma=%s | aniqlash_ishonchliligi=%.2f | tahrir_alomati=%s | "
+            "tranzaksiya_raqami=%s | chek_sanasi=%s | summa_mos=%s | karta_mos=%s | sana_mos=%s",
             tx_id, result.confidence, suspicious_edits,
             (result.transaction_id or "aniqlanmadi"),
             (result.transaction_date or "aniqlanmadi"),
             amount_ok, card_ok, date_ok
         )
 
-        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok or suspicious_edits:
-            reasons = []
-            if not receipt_ok: reasons.append("chek aniqlanmadi")
-            if not amount_ok: reasons.append(f"summa mos emas: {result.amount} != {expected}")
-            if not conf_ok: reasons.append(f"confidence past: {result.confidence:.2f}")
-            if not txid_ok: reasons.append("transaction ID topilmadi")
-            if not card_ok: reasons.append("qabul qiluvchi karta oxirgi 4 raqami mos emas yoki ko'rinmadi")
-            if suspicious_edits:
-                # Keep the admin-facing explanation Uzbek-only; do not expose raw model text,
-                # which may unexpectedly be returned in English.
-                reasons.append("chekda tahrirlash yoki muhim ma'lumotni almashtirish alomatlari bo'lishi mumkin; rasmni qo'lda tekshiring")
-            if receipt_date is None:
-                reasons.append("chek sanasi aniqlanmadi yoki formati tushunarsiz")
-            elif receipt_date != today_uz:
-                reasons.append(f"chek sanasi bugungi sana bilan mos emas: {receipt_date.strftime('%d.%m.%Y')} / bugun: {today_uz.strftime('%d.%m.%Y')}")
-            reason_text = "; ".join(reasons) or result.reason or "AI tekshiruvi yetarli emas"
+        if not expected_card and not suspicious_edits:
+            # Qabul qiluvchi karta konfiguratsiyasi yo‘q bo‘lsa, foydalanuvchini ayblamasdan
+            # sozlama muammosini administratorga chiqaramiz.
+            reason_text = "P2P_CARD_NUMBER sozlanmagan; qabul qiluvchi kartani tekshirib bo‘lmaydi"
+            _mark_by_tx(tx_id, status="review", reason=reason_text)
+            logging.error(
+                "P2P TO‘LOV QARORI | qaror=ADMIN_TEKSHIRUVI | buyurtma=%s | "
+                "sabab=qabul_qiluvchi_karta_sozlanmagan",
+                tx_id
+            )
+            _notify_user(user_id, _p2p_message(user_id, "technical_error"))
+            display_name, username = _user_identity(user_id)
+            _notify_admin_review(
+                f"⚠️ P2P TO‘LOV — SOZLAMA MUAMMOSI\\n\\n"
+                f"🧾 Buyurtma: {tx_id}\\n"
+                f"👤 Foydalanuvchi: {display_name}\\n"
+                f"🔗 Foydalanuvchi nomi: {username}\\n"
+                f"🆔 Telegram ID: {user_id}\\n\\n"
+                f"🔎 Muammo: {reason_text}. Railway sozlamasidagi P2P_CARD_NUMBER qiymatini tekshiring.\\n"
+                f"ℹ️ To‘lov avtomatik tasdiqlanmadi.",
+                file_id, tx_id, user_id
+            )
+            return
+
+        if suspicious_edits:
+            # Tahrirlash yoki soxtalashtirish alomati bo‘lsa, foydalanuvchiga avtomatik ayb qo‘ymaymiz:
+            # asl chek administrator tomonidan qo‘lda tekshiriladi.
+            reason_text = "Chekda tahrirlash yoki muhim ma’lumotni almashtirish alomatlari bo‘lishi mumkin"
             logging.warning(
-                "P2P TO‘LOV QARORI | qaror=ADMIN_REVIEW | buyurtma=%s | confidence=%.2f | "
-                "suspicious_edits=%s | transaction_id=%s | transaction_date=%s | sabab=%s",
+                "P2P TO‘LOV QARORI | qaror=ADMIN_TEKSHIRUVI | buyurtma=%s | "
+                "ishonchlilik=%.2f | tahrir_alomati=%s | tranzaksiya_raqami=%s | chek_sanasi=%s | sabab=%s",
                 tx_id, result.confidence, suspicious_edits,
-                (result.transaction_id or "aniqlanmadi"),
-                (result.transaction_date or "aniqlanmadi"),
-                reason_text
+                result.transaction_id or "aniqlanmadi",
+                result.transaction_date or "aniqlanmadi", reason_text
             )
             _mark_by_tx(tx_id, status="review", reason=reason_text)
             display_name, username = _user_identity(user_id)
-            user_issue_keys = []
-            if not receipt_ok:
-                user_issue_keys.append("review_not_receipt")
-            if not amount_ok:
-                user_issue_keys.append("review_amount")
-            if not conf_ok:
-                user_issue_keys.append("review_confidence")
-            if not txid_ok:
-                user_issue_keys.append("review_tx_missing")
-            if not card_ok:
-                user_issue_keys.append("review_card")
-            if suspicious_edits:
-                user_issue_keys.append("review_suspicious")
-            if receipt_date is None:
-                user_issue_keys.append("review_date_missing")
-            elif receipt_date != today_uz:
-                user_issue_keys.append("review_date_old")
-            _notify_user(user_id, _p2p_review_message(user_id, user_issue_keys))
+            _notify_user(user_id, _p2p_review_message(user_id, ["review_suspicious"]))
             _notify_admin_review(
-                f"⚠️ P2P TO‘LOV — QO‘SHIMCHA TEKSHIRUV KERAK\n\n"
-                f"🧾 TX: {tx_id}\n"
-                f"👤 Foydalanuvchi: {display_name}\n"
-                f"🔗 Username: {username}\n"
-                f"🆔 Telegram ID: {user_id}\n\n"
-                f"💰 Kutilgan summa: {pay['tariff_price']}\n"
-                f"🤖 AI aniqlagan summa: {result.amount}\n"
-                f"💳 Karta oxiri: {actual_card or 'aniqlanmadi'} / kutilgan: {expected_card or 'sozlanmagan'}\n"
-                f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\n"
-                f"📊 Confidence: {result.confidence:.2f}\n"
-                f"🔢 Transaction ID: {result.transaction_id or 'aniqlanmadi'}\n"
-                f"🛡️ Tahrir alomatlari: {'ANIQLANDI — rasmni qo‘lda tekshiring' if suspicious_edits else 'AI ko‘rinadigan alomat topmadi'}\n"
-                f"🤖 Model: {used_model}\n\n"
-                f"🔎 Tekshiruv sababi: {reason_text}\n\n"
-                f"ℹ️ Premium avtomatik faollashtirilmadi. Qo‘shimcha tekshiruv talab qilinadi.",
+                f"⚠️ P2P TO‘LOV — QO‘SHIMCHA TEKSHIRUV KERAK\\n\\n"
+                f"🧾 Buyurtma: {tx_id}\\n"
+                f"👤 Foydalanuvchi: {display_name}\\n"
+                f"🔗 Foydalanuvchi nomi: {username}\\n"
+                f"🆔 Telegram ID: {user_id}\\n\\n"
+                f"💰 Kutilgan summa: {pay['tariff_price']}\\n"
+                f"🤖 Aniqlangan summa: {result.amount}\\n"
+                f"💳 Karta oxirgi raqamlari: {actual_card or 'aniqlanmadi'} / kutilgan: {expected_card or 'sozlanmagan'}\\n"
+                f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\\n"
+                f"📊 Aniqlash ishonchliligi: {result.confidence:.2f}\\n"
+                f"🔢 Tranzaksiya raqami: {result.transaction_id or 'aniqlanmadi'}\\n"
+                f"🛡️ Tahrir alomati: ANIQLANDI — asl rasmni qo‘lda tekshiring\\n"
+                f"🤖 Ishlatilgan model: {used_model}\\n\\n"
+                f"🔎 Sabab: {reason_text}\\n\\n"
+                f"ℹ️ Premium avtomatik faollashtirilmadi.",
                 file_id, tx_id, user_id
             )
+            return
+
+        # Soxtalashtirish alomati bo‘lmagan aniq yoki o‘qib bo‘lmaydigan xatolar
+        # administrator navbatini band qilmaydi: buyurtma rad etiladi va yangi chek so‘raladi.
+        if not receipt_ok or not amount_ok or not conf_ok or not txid_ok or not card_ok or not date_ok:
+            reasons = []
+            user_issue_keys = []
+            if not receipt_ok:
+                reasons.append("rasm to‘lov cheki emas yoki chek aniqlanmadi")
+                user_issue_keys.append("retry_receipt_not_receipt")
+            if not amount_ok:
+                reasons.append(f"summa mos emas: {result.amount} != {expected}")
+                user_issue_keys.append("retry_receipt_amount")
+            if not conf_ok:
+                reasons.append(f"chek ma’lumotlarini aniqlash ishonchliligi past: {result.confidence:.2f}")
+                user_issue_keys.append("retry_receipt_confidence")
+            if not txid_ok:
+                reasons.append("tranzaksiya raqami aniqlanmadi")
+                user_issue_keys.append("retry_receipt_tx")
+            if not card_ok:
+                reasons.append("qabul qiluvchi karta raqami mos emas yoki aniqlanmadi")
+                user_issue_keys.append("retry_receipt_card")
+            if receipt_date is None or receipt_date != today_uz:
+                if receipt_date is None:
+                    reasons.append("chek sanasi aniqlanmadi yoki o‘qib bo‘lmadi")
+                else:
+                    reasons.append(f"chek sanasi mos emas: {receipt_date.strftime('%d.%m.%Y')} / bugun: {today_uz.strftime('%d.%m.%Y')}")
+                user_issue_keys.append("retry_receipt_date")
+            reason_text = "; ".join(reasons) or "Chek ma’lumotlari tekshiruv talablariga mos emas"
+            _mark_by_tx(tx_id, status="rejected", reason=reason_text, processed_at=_now(), next_retry_at=0)
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=YANGI_CHEK_SO‘RALDI | buyurtma=%s | foydalanuvchi=%s | "
+                "ishonchlilik=%.2f | summa_mos=%s | karta_mos=%s | sana_mos=%s | tranzaksiya_raqami=%s | sabab=%s",
+                tx_id, user_id, result.confidence, amount_ok, card_ok, date_ok,
+                result.transaction_id or "aniqlanmadi", reason_text
+            )
+            _notify_user(user_id, _p2p_retry_receipt_message(user_id, user_issue_keys))
             return
 
         ok, info = _approve(tx_id, user_id)
@@ -1099,9 +1208,9 @@ def _process(item):
             _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
             _notify_user(user_id, _p2p_message(user_id, "approved"))
             logging.info(
-                "P2P TO‘LOV QARORI | qaror=AVTOMATIK_TASDIQLANDI | buyurtma=%s | "
-                "foydalanuvchi=%s | confidence=%.2f | suspicious_edits=%s | "
-                "transaction_id=%s | transaction_date=%s | sabab= barcha tekshiruvlar muvaffaqiyatli | model=%s | xarajat=$%.6f",
+                 "P2P TO‘LOV QARORI | qaror=AVTOMATIK_TASDIQLANDI | buyurtma=%s | "
+                "foydalanuvchi=%s | aniqlash_ishonchliligi=%.2f | tahrir_alomati=%s | "
+                "tranzaksiya_raqami=%s | chek_sanasi=%s | sabab=barcha tekshiruvlar muvaffaqiyatli | model=%s | xarajat=$%.6f",
                 tx_id, user_id, result.confidence, bool(result.suspicious_edits),
                 (result.transaction_id or "aniqlanmadi"),
                 (result.transaction_date or "aniqlanmadi"), used_model, cost
