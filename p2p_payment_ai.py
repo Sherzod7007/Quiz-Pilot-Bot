@@ -1147,20 +1147,20 @@ def _process(item):
             display_name, username = _user_identity(user_id)
             _notify_user(user_id, _p2p_review_message(user_id, ["review_suspicious"]))
             _notify_admin_review(
-                f"⚠️ P2P TO‘LOV — QO‘SHIMCHA TEKSHIRUV KERAK\\n\\n"
-                f"🧾 Buyurtma: {tx_id}\\n"
-                f"👤 Foydalanuvchi: {display_name}\\n"
-                f"🔗 Foydalanuvchi nomi: {username}\\n"
-                f"🆔 Telegram ID: {user_id}\\n\\n"
-                f"💰 Kutilgan summa: {pay['tariff_price']}\\n"
-                f"🤖 Aniqlangan summa: {result.amount}\\n"
-                f"💳 Karta oxirgi raqamlari: {actual_card or 'aniqlanmadi'} / kutilgan: {expected_card or 'sozlanmagan'}\\n"
-                f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\\n"
-                f"📊 Aniqlash ishonchliligi: {result.confidence:.2f}\\n"
-                f"🔢 Tranzaksiya raqami: {result.transaction_id or 'aniqlanmadi'}\\n"
-                f"🛡️ Tahrir alomati: ANIQLANDI — asl rasmni qo‘lda tekshiring\\n"
-                f"🤖 Ishlatilgan model: {used_model}\\n\\n"
-                f"🔎 Sabab: {reason_text}\\n\\n"
+                f"⚠️ P2P TO‘LOV — QO‘SHIMCHA TEKSHIRUV KERAK\n\n"
+                f"🧾 Buyurtma: {tx_id}\n"
+                f"👤 Foydalanuvchi: {display_name}\n"
+                f"🔗 Foydalanuvchi nomi: {username}\n"
+                f"🆔 Telegram ID: {user_id}\n\n"
+                f"💰 Kutilgan summa: {pay['tariff_price']}\n"
+                f"🤖 Aniqlangan summa: {result.amount}\n"
+                f"💳 Karta oxirgi raqamlari: {actual_card or 'aniqlanmadi'} / kutilgan: {expected_card or 'sozlanmagan'}\n"
+                f"📅 Chek sanasi: {receipt_date.strftime('%d.%m.%Y') if receipt_date else (result.transaction_date or 'aniqlanmadi')} / bugun: {today_uz.strftime('%d.%m.%Y')}\n"
+                f"📊 Aniqlash ishonchliligi: {result.confidence:.2f}\n"
+                f"🔢 Tranzaksiya raqami: {result.transaction_id or 'aniqlanmadi'}\n"
+                f"🛡️ Tahrir alomati: ANIQLANDI — asl rasmni qo‘lda tekshiring\n"
+                f"🤖 Ishlatilgan model: {used_model}\n\n"
+                f"🔎 Sabab: {reason_text}\n\n"
                 f"ℹ️ Premium avtomatik faollashtirilmadi.",
                 file_id, tx_id, user_id
             )
