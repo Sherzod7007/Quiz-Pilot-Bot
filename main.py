@@ -46,7 +46,7 @@ from pathlib import Path
 from deep_translator import GoogleTranslator
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from fastapi import Depends, Query
 
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
@@ -1378,9 +1378,73 @@ def handle_support_reply_callback(call):
         logging.error(f"Admin reply callback xatosi: {e}")
         bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
-# --- ADMIN BONUS PREMIUM ---
+# --- ADMIN STATISTICS ---
 def _admin_only(message):
     return bool(ADMIN_ID and int(message.from_user.id) == int(ADMIN_ID))
+
+
+@bot.message_handler(commands=["stats"])
+def admin_stats_command(message):
+    """Show private Quiz AI usage statistics to the configured administrator only."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        # Uzbekistan local day (UTC+5), independent of the server timezone.
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        today_start = int(now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        now_ts = int(time.time())
+        active_since = now_ts - 2 * 60
+
+        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("PRAGMA busy_timeout=30000")
+
+        total_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        new_users_today = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (today_start,)
+        ).fetchone()[0]
+        visitors_today = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (today_start,)
+        ).fetchone()[0]
+        active_now = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (active_since,)
+        ).fetchone()[0]
+
+        total_quizzes = cur.execute("SELECT COUNT(*) FROM quizzes").fetchone()[0]
+        quizzes_today = cur.execute(
+            "SELECT COUNT(*) FROM quizzes WHERE created_at >= ?", (today_start,)
+        ).fetchone()[0]
+        pending_payments = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'pending'"
+        ).fetchone()[0]
+        approved_payments_today = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'approved' AND created_at >= ?",
+            (today_start,),
+        ).fetchone()[0]
+
+        report = (
+            "📊 <b>Quiz AI — Statistika</b>\n"
+            f"📅 Sana: {now_local.strftime('%d-%m-%Y')} (O‘zbekiston)\n\n"
+            f"👥 Jami ro‘yxatdan o‘tganlar: <b>{total_users:,}</b>\n"
+            f"🆕 Bugun ro‘yxatdan o‘tganlar: <b>{new_users_today:,}</b>\n"
+            f"📱 Bugun faol bo‘lgan foydalanuvchilar: <b>{visitors_today:,}</b>\n"
+            f"🟢 Hozir faol (oxirgi 2 daqiqa): <b>{active_now:,}</b>\n\n"
+            f"📝 Jami yaratilgan testlar: <b>{total_quizzes:,}</b>\n"
+            f"✨ Bugun yaratilgan testlar: <b>{quizzes_today:,}</b>\n\n"
+            f"⏳ Kutilayotgan to‘lovlar: <b>{pending_payments:,}</b>\n"
+            f"✅ Bugun yaratilgan va tasdiqlangan to‘lov so‘rovlari: <b>{approved_payments_today:,}</b>"
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Admin statistikasini olishda xato: {e}")
+        bot.send_message(message.chat.id, "❌ Statistikani olishda xatolik yuz berdi. Server loglarini tekshiring.")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @bot.message_handler(commands=["bonus"])
