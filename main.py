@@ -1434,6 +1434,30 @@ def _admin_only(message):
     return bool(ADMIN_ID and int(message.from_user.id) == int(ADMIN_ID))
 
 
+@bot.message_handler(commands=["test_error_alert"])
+def admin_test_error_alert_command(message):
+    """Administrator-only, controlled test for the Telegram error alert handler."""
+    if not _admin_only(message):
+        return
+
+    # Send confirmation first, then emit one controlled ERROR log.
+    # The installed AdminTelegramErrorHandler should deliver this log to ADMIN_ID.
+    try:
+        bot.send_message(
+            message.chat.id,
+            "🧪 Sinov boshlandi. Agar xatolik xabari tizimi ishlasa, administrator chatiga alohida ogohlantirish keladi."
+        )
+        logging.error(
+            "TEST ALERT: administrator tomonidan avtomatik xatolik xabari tekshirilmoqda."
+        )
+    except Exception as e:
+        logging.exception("Test error alert buyrug'ida xatolik yuz berdi: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Sinov buyrug'ini bajarishda xatolik yuz berdi.")
+        except Exception:
+            pass
+
+
 @bot.message_handler(commands=["stats"])
 def admin_stats_command(message):
     """Show private Quiz AI usage statistics to the configured administrator only."""
