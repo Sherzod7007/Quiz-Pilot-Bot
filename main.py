@@ -68,6 +68,57 @@ except Exception as e:
     logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
     ADMIN_ID = None
 
+
+# --- ADMIN ERROR ALERTS ---
+# ERROR/CRITICAL log yozuvlarini administratorga Telegram orqali yuboradi.
+# Xabarlar ko'payib ketmasligi uchun 60 soniyada ko'pi bilan bitta alert yuboriladi.
+class AdminTelegramErrorHandler(logging.Handler):
+    def __init__(self, cooldown_seconds=60):
+        super().__init__(level=logging.ERROR)
+        self.cooldown_seconds = cooldown_seconds
+        self._alert_lock = threading.Lock()
+        self._last_alert_at = 0.0
+        self._suppressed_count = 0
+        self._sending_alert = False
+
+    def emit(self, record):
+        if not ADMIN_ID or getattr(self, "_sending_alert", False):
+            return
+
+        now = time.monotonic()
+        with self._alert_lock:
+            if now - self._last_alert_at < self.cooldown_seconds:
+                self._suppressed_count += 1
+                return
+            suppressed = self._suppressed_count
+            self._suppressed_count = 0
+            self._last_alert_at = now
+
+        try:
+            details = self.format(record)
+            # Telegram xabar uzunligi va maxfiy ma'lumotlar xavfini kamaytirish uchun qisqartiramiz.
+            details = details[:2500]
+            message = (
+                "🚨 <b>Quiz AI — Server xatoligi</b>\n"
+                f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n"
+                f"📍 Modul: <code>{record.name[:120]}</code>\n\n"
+                f"<pre>{details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')[:2500]}</pre>"
+            )
+            if suppressed:
+                message += f"\n\nℹ️ Oxirgi xabardan beri yana {suppressed} ta xatolik logi birlashtirildi."
+            self._sending_alert = True
+            bot.send_message(ADMIN_ID, message, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            # Telegram ogohlantirishining o'zi muvaffaqiyatsiz bo'lsa, cheksiz log aylanishini boshlamaymiz.
+            pass
+        finally:
+            self._sending_alert = False
+
+
+_admin_error_handler = AdminTelegramErrorHandler()
+_admin_error_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+logging.getLogger().addHandler(_admin_error_handler)
+
 # --- ADMIN SUPPORT ---
 support_waiting_users = set()
 support_reply_targets = {}
