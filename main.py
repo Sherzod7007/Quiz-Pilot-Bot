@@ -2584,6 +2584,50 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
+# --- AI NAVBATI YUKLAMASI BO'YICHA AVTOMATIK ADMIN OGOHLANTIRISHI ---
+# Navbat sig'imining 80% yoki undan ko'pi band bo'lsa, adminga xabar yuboradi.
+# Takroriy xabarlar 5 daqiqalik cooldown bilan cheklanadi.
+_AI_QUEUE_ALERT_THRESHOLD = max(1, int(AI_MAX_QUEUE * 0.80))
+_ai_queue_alert_lock = threading.Lock()
+_ai_queue_last_alert_at = 0.0
+
+
+def _maybe_alert_ai_queue_load():
+    """Send a rate-limited admin alert when AI queue capacity is nearly exhausted."""
+    global _ai_queue_last_alert_at
+
+    if not ADMIN_ID:
+        return
+
+    try:
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+        if queue_slots_used < _AI_QUEUE_ALERT_THRESHOLD:
+            return
+
+        now = time.monotonic()
+        with _ai_queue_alert_lock:
+            if now - _ai_queue_last_alert_at < 300:
+                return
+            _ai_queue_last_alert_at = now
+
+        percent = min(100.0, queue_slots_used * 100.0 / max(1, AI_MAX_QUEUE))
+        alert = (
+            "⚠️ <b>Quiz AI — AI navbati band</b>\\n"
+            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\\n"
+            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\\n"
+            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /monitor buyrug'idan foydalaning."
+        )
+        bot.send_message(ADMIN_ID, alert, parse_mode="HTML", disable_web_page_preview=True)
+        logging.warning(
+            "AI navbati yuqori yuklamada | band=%s | limit=%s | foiz=%.1f",
+            queue_slots_used, AI_MAX_QUEUE, percent
+        )
+    except Exception:
+        # Monitoring xatosi test yaratish jarayoniga xalaqit bermasligi kerak.
+        logging.exception("AI navbati bo'yicha admin ogohlantirishini yuborishda xatolik")
+
+
 def _generate_quiz_from_gemini_impl(extracted_text):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
@@ -2647,6 +2691,7 @@ MUHIM QOIDALAR:
         logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
+    _maybe_alert_ai_queue_load()
     if queue_wait_seconds >= 1.0:
         logging.info("AI NAVBATI | So'rov navbat joyini kutdi | kutish=%.2f soniya", queue_wait_seconds)
 
@@ -2843,15 +2888,15 @@ def admin_ai_generation_stats_command(message):
         ).strftime("%d-%m-%Y %H:%M:%S")
 
     report = (
-        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\n"
-        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
-        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\n"
-        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\n"
-        f"📦 Jami urinishlar: <b>{total}</b>\n"
-        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\n"
-        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\n\n"
-        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\n"
-        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\n\n"
+        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\\n"
+        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\\n\\n"
+        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\\n"
+        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\\n"
+        f"📦 Jami urinishlar: <b>{total}</b>\\n"
+        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\\n"
+        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\\n\\n"
+        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\\n"
+        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\\n\\n"
         "ℹ️ Hisob server qayta ishga tushguncha saqlanadi; bu tarixiy DB hisoboti emas."
     )
     try:
