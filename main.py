@@ -2985,15 +2985,15 @@ def admin_ai_generation_stats_command(message):
         ).strftime("%d-%m-%Y %H:%M:%S")
 
     report = (
-        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\\n"
-        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\\n\\n"
-        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\\n"
-        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\\n"
-        f"📦 Jami urinishlar: <b>{total}</b>\\n"
-        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\\n"
-        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\\n\\n"
-        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\\n"
-        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\\n\\n"
+        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\n"
+        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\n"
+        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\n"
+        f"📦 Jami urinishlar: <b>{total}</b>\n"
+        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\n"
+        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\n\n"
+        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\n"
+        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\n\n"
         "ℹ️ Hisob server qayta ishga tushguncha saqlanadi; bu tarixiy DB hisoboti emas."
     )
     try:
