@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import docx
 import asyncio
+from contextlib import asynccontextmanager
 import re
 from io import BytesIO
 from docx import Document
@@ -898,8 +899,30 @@ def init_news_master_db():
 init_news_master_db()
 
 
+# --- FASTAPI ISHGA TUSHISHI (zamonaviy lifespan usuli) ---
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    # P2P OCR alohida fon tizimi; ishga tushmasa ham asosiy ilova ishlashda davom etadi.
+    try:
+        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
+        p2p_payment_ai.start()
+    except Exception as p2p_error:
+        logging.exception(
+            "P2P to'lov AI tizimini ishga tushirib bo'lmadi; asosiy ilova ishlashda davom etadi: %s",
+            p2p_error,
+        )
+    threading.Thread(target=start_bot_polling, daemon=True).start()
+    threading.Thread(target=limit_notification_worker, daemon=True).start()
+    try:
+        yield
+    finally:
+        # Hozirgi versiyada fon oqimlari daemon sifatida ishlaydi; mavjud to'xtatish
+        # mexanizmi o'zgartirilmaydi.
+        pass
+
+
 # --- FASTAPI ENDPOINTS ---
-app = FastAPI()
+app = FastAPI(lifespan=app_lifespan)
 
 class NewsCreateSchema(BaseModel):
     title_uz: str = Field(min_length=1, max_length=255)
@@ -4713,17 +4736,6 @@ async def api_exception_handler(request: Request, exc: Exception):
     raise exc
 
 
-@app.on_event("startup")
-async def startup_event():
-    # P2P OCR is an isolated background subsystem. It never blocks the bot/event loop.
-    try:
-        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
-        p2p_payment_ai.start()
-    except Exception as p2p_error:
-        # Payment OCR failure must never stop Quiz Pilot startup.
-        logging.exception("P2P Payment AI could not start; normal app continues: %s", p2p_error)
-    threading.Thread(target=start_bot_polling, daemon=True).start()
-    threading.Thread(target=limit_notification_worker, daemon=True).start()
 
 
 
