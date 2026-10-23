@@ -2584,7 +2584,7 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def generate_quiz_from_gemini(extracted_text):
+def _generate_quiz_from_gemini_impl(extracted_text):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
     Timeout + Concurrency Protection.
@@ -2782,6 +2782,82 @@ MUHIM QOIDALAR:
         return None
     finally:
         ai_queue_slots.release()
+
+
+# --- AI GENERATION OUTCOME STATISTICS (in-memory, since process start) ---
+_ai_stats_lock = threading.Lock()
+_ai_generation_stats = {
+    "success": 0,
+    "failed": 0,
+    "total_seconds": 0.0,
+    "last_success_at": 0.0,
+    "last_failure_at": 0.0,
+}
+
+
+def generate_quiz_from_gemini(extracted_text):
+    """Track each top-level generation attempt without changing generation logic."""
+    started_at = time.monotonic()
+    succeeded = False
+    try:
+        result = _generate_quiz_from_gemini_impl(extracted_text)
+        succeeded = bool(result)
+        return result
+    except Exception:
+        # Preserve the existing exception behavior while counting the failed attempt.
+        raise
+    finally:
+        elapsed = max(0.0, time.monotonic() - started_at)
+        with _ai_stats_lock:
+            if succeeded:
+                _ai_generation_stats["success"] += 1
+                _ai_generation_stats["last_success_at"] = time.time()
+            else:
+                _ai_generation_stats["failed"] += 1
+                _ai_generation_stats["last_failure_at"] = time.time()
+            _ai_generation_stats["total_seconds"] += elapsed
+
+
+@bot.message_handler(commands=["ai_stats"])
+def admin_ai_generation_stats_command(message):
+    """Show generation success/failure counts since this process started."""
+    if not _admin_only(message):
+        return
+
+    with _ai_stats_lock:
+        success = _ai_generation_stats["success"]
+        failed = _ai_generation_stats["failed"]
+        total_seconds = _ai_generation_stats["total_seconds"]
+        last_success_at = _ai_generation_stats["last_success_at"]
+        last_failure_at = _ai_generation_stats["last_failure_at"]
+
+    total = success + failed
+    avg_seconds = total_seconds / total if total else 0.0
+    success_rate = (success * 100.0 / total) if total else 0.0
+
+    def _format_stat_time(timestamp):
+        if not timestamp:
+            return "Hali yo‘q"
+        return datetime.fromtimestamp(
+            timestamp, timezone(timedelta(hours=5))
+        ).strftime("%d-%m-%Y %H:%M:%S")
+
+    report = (
+        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\\n"
+        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\\n\\n"
+        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\\n"
+        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\\n"
+        f"📦 Jami urinishlar: <b>{total}</b>\\n"
+        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\\n"
+        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\\n\\n"
+        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\\n"
+        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\\n\\n"
+        "ℹ️ Hisob server qayta ishga tushguncha saqlanadi; bu tarixiy DB hisoboti emas."
+    )
+    try:
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.exception("AI statistikasi yuborilmadi: %s", e)
 
 
 @app.post("/api/contact-admin")
