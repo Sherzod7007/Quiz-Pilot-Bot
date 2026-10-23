@@ -124,6 +124,12 @@ logging.getLogger().addHandler(_admin_error_handler)
 support_waiting_users = set()
 support_reply_targets = {}
 
+# Ommaviy xabar yuborish holati (faqat administrator uchun).
+broadcast_waiting_content = set()
+broadcast_pending_messages = {}
+broadcast_active = False
+broadcast_lock = threading.Lock()
+
 # Test yaratish API kalitlari:
 # 1) Eski usul saqlanadi: GOOGLE_API_KEYS=key1,key2,key3
 # 2) Railway Variables'da alohida o'zgaruvchilar: GOOGLE_API_KEY_001 ... GOOGLE_API_KEY_110
@@ -231,17 +237,6 @@ MAX_TEXT_INPUT_CHARS = max(1, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
-
-# AI navbati va API kalitlari bo'yicha joriy jarayon statistikasi.
-_ai_monitor_lock = threading.Lock()
-_ai_monitor_state = {
-    "waiting_for_queue": 0,
-    "accepted_requests": 0,
-    "key_attempts": {},
-    "key_success": {},
-    "key_failures": {},
-    "last_errors": [],
-}
 logging.info(
     "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
@@ -1384,7 +1379,7 @@ def support_continue_markup(lang: str):
     return markup
 
 # --- ADMIN SUPPORT: murojaat va javob ---
-@bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
+@bot.message_handler(content_types=["text"], func=lambda message: (message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets) and message.from_user.id not in broadcast_waiting_content)
 def handle_support_text(message):
     user_id = message.from_user.id
     if ADMIN_ID and user_id == ADMIN_ID and user_id in support_reply_targets:
@@ -2040,6 +2035,156 @@ def admin_database_backup_command(message):
     except Exception:
         logging.exception("SQLite backup havolasini yaratishda xatolik yuz berdi.")
         bot.send_message(message.chat.id, "❌ Zaxira havolasini yaratishda xatolik yuz berdi.")
+
+
+# --- ADMIN OMMAVIY XABAR YUBORISH ---
+@bot.message_handler(commands=["broadcast"])
+def admin_broadcast_command(message):
+    """Administrator matnini oldindan ko'rsatib, tasdiqdan keyin foydalanuvchilarga yuboradi."""
+    if not _admin_only(message):
+        return
+    if broadcast_active:
+        bot.send_message(message.chat.id, "⏳ Hozir boshqa ommaviy xabar yuborilmoqda. Tugashini kuting.")
+        return
+    broadcast_waiting_content.add(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "📣 <b>Ommaviy xabar yuborish</b>\n\n"
+        "Barcha ro‘yxatdan o‘tgan foydalanuvchilarga yuboriladigan matnni yuboring.\n"
+        "Yuborishdan oldin xabarni ko‘rib chiqib, alohida tasdiqlaysiz.\n\n"
+        "Bekor qilish uchun /broadcast_cancel buyrug‘ini yuboring.",
+        parse_mode="HTML",
+    )
+    logging.info("Administrator ommaviy xabar matnini kiritish jarayonini boshladi.")
+
+
+@bot.message_handler(commands=["broadcast_cancel"])
+def admin_broadcast_cancel_command(message):
+    if not _admin_only(message):
+        return
+    broadcast_waiting_content.discard(message.from_user.id)
+    broadcast_pending_messages.pop(message.from_user.id, None)
+    bot.send_message(message.chat.id, "❎ Ommaviy xabar tayyorlash bekor qilindi.")
+    logging.info("Administrator ommaviy xabar tayyorlashni bekor qildi.")
+
+
+@bot.message_handler(content_types=["text"], func=lambda message: bool(ADMIN_ID and message.from_user.id == ADMIN_ID and message.from_user.id in broadcast_waiting_content))
+def admin_broadcast_receive_text(message):
+    if not _admin_only(message):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        bot.send_message(message.chat.id, "⚠️ Xabar bo‘sh. Iltimos, matn yuboring.")
+        return
+    if len(text) > 4000:
+        bot.send_message(message.chat.id, "⚠️ Xabar 4 000 belgidan oshmasligi kerak. Qisqaroq matn yuboring.")
+        return
+
+    broadcast_waiting_content.discard(message.from_user.id)
+    broadcast_pending_messages[message.from_user.id] = text
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.row(
+        telebot.types.InlineKeyboardButton("✅ Yuborishni tasdiqlash", callback_data="broadcast_confirm"),
+        telebot.types.InlineKeyboardButton("❎ Bekor qilish", callback_data="broadcast_cancel"),
+    )
+    try:
+        bot.send_message(
+            message.chat.id,
+            "👁 Ommaviy xabar — ko‘rib chiqish\n\n"
+            + text
+            + "\n\n⚠️ Bu xabar ro‘yxatdan o‘tgan foydalanuvchilarga yuboriladi. Yuborishni boshlash uchun tasdiqlang.",
+            parse_mode=None,
+            reply_markup=markup,
+        )
+        logging.info("Ommaviy xabar matni tayyorlandi; administrator tasdig‘i kutilmoqda.")
+    except Exception as e:
+        broadcast_pending_messages.pop(message.from_user.id, None)
+        logging.error("Ommaviy xabarni ko‘rib chiqish xabarini yuborishda xatolik: %s", e)
+        bot.send_message(message.chat.id, "❌ Ko‘rib chiqish xabarini yuborishda xatolik yuz berdi.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data in ("broadcast_confirm", "broadcast_cancel"))
+def admin_broadcast_callback(call):
+    global broadcast_active
+    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "Bu amal faqat administrator uchun.", show_alert=True)
+        return
+
+    if call.data == "broadcast_cancel":
+        broadcast_pending_messages.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "Ommaviy xabar bekor qilindi.")
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            bot.send_message(call.message.chat.id, "❎ Ommaviy xabar yuborilmadi.")
+        except Exception as e:
+            logging.warning("Ommaviy xabarni bekor qilish xabarini yangilashda xatolik: %s", e)
+        logging.info("Administrator tasdiqlash bosqichida ommaviy xabarni bekor qildi.")
+        return
+
+    text = broadcast_pending_messages.pop(call.from_user.id, None)
+    if not text:
+        bot.answer_callback_query(call.id, "Tasdiqlash uchun xabar topilmadi.", show_alert=True)
+        return
+    with broadcast_lock:
+        if broadcast_active:
+            broadcast_pending_messages[call.from_user.id] = text
+            bot.answer_callback_query(call.id, "Boshqa ommaviy xabar yuborilmoqda.", show_alert=True)
+            return
+        broadcast_active = True
+
+    bot.answer_callback_query(call.id, "Yuborish boshlandi.")
+    try:
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except Exception as e:
+        logging.warning("Tasdiqlash tugmasini olib tashlashda xatolik: %s", e)
+
+    def _send_broadcast():
+        global broadcast_active
+        sent_count = 0
+        failed_count = 0
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+            conn.execute("PRAGMA busy_timeout=30000")
+            rows = conn.execute("SELECT user_id FROM users ORDER BY user_id").fetchall()
+            user_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+            total = len(user_ids)
+            bot.send_message(
+                ADMIN_ID,
+                f"📣 Ommaviy xabar yuborish boshlandi.\n👥 Qabul qiluvchilar: {total:,}\n⏱ Tezlik cheklovi: taxminan 10 ta xabar/soniya."
+            )
+            logging.info("Ommaviy xabar yuborish boshlandi | qabul_qiluvchilar=%s", total)
+            for user_id in user_ids:
+                try:
+                    bot.send_message(user_id, text, disable_web_page_preview=True)
+                    sent_count += 1
+                except Exception as send_error:
+                    failed_count += 1
+                    logging.warning("Ommaviy xabar yuborilmadi | user_id=%s | sabab=%s", user_id, str(send_error)[:300])
+                time.sleep(0.1)  # Telegram API yukini cheklash: taxminan 10 xabar/soniya.
+
+            summary = (
+                "📣 <b>Ommaviy xabar yuborish yakunlandi</b>\n\n"
+                f"👥 Jami qabul qiluvchilar: <b>{total:,}</b>\n"
+                f"✅ Muvaffaqiyatli yuborildi: <b>{sent_count:,}</b>\n"
+                f"❌ Yuborilmadi: <b>{failed_count:,}</b>\n\n"
+                "Xatolar tafsilotlari Railway loglarida qayd etildi."
+            )
+            bot.send_message(ADMIN_ID, summary, parse_mode="HTML")
+            logging.info("Ommaviy xabar yuborish yakunlandi | jami=%s | yuborildi=%s | xato=%s", total, sent_count, failed_count)
+        except Exception as e:
+            logging.exception("Ommaviy xabar yuborish jarayonida umumiy xatolik: %s", e)
+            try:
+                bot.send_message(ADMIN_ID, "❌ Ommaviy xabar jarayonida umumiy xatolik yuz berdi. Railway loglarini tekshiring.")
+            except Exception:
+                pass
+        finally:
+            if conn is not None:
+                conn.close()
+            with broadcast_lock:
+                broadcast_active = False
+
+    threading.Thread(target=_send_broadcast, daemon=True, name="admin-broadcast-worker").start()
 
 
 
@@ -3160,23 +3305,8 @@ MUHIM QOIDALAR:
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
-    with _ai_monitor_lock:
-        _ai_monitor_state["waiting_for_queue"] += 1
-    queue_acquired = ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT)
-    with _ai_monitor_lock:
-        _ai_monitor_state["waiting_for_queue"] = max(
-            0, _ai_monitor_state["waiting_for_queue"] - 1
-        )
-        if queue_acquired:
-            _ai_monitor_state["accepted_requests"] += 1
-    if not queue_acquired:
+    if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
         logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
-        with _ai_monitor_lock:
-            _ai_monitor_state["last_errors"].append({
-                "time": time.time(),
-                "message": "AI navbatida kutish muddati tugadi",
-            })
-            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
     _maybe_alert_ai_queue_load()
@@ -3222,11 +3352,6 @@ MUHIM QOIDALAR:
                     if semaphore_wait_seconds >= 1.0:
                         logging.info("GEMINI PARALLELLIGI | Bo'sh so'rov o'rnini kutish yakunlandi | kutish=%.2f soniya", semaphore_wait_seconds)
 
-                    key_label = f"Kalit #{key_idx + 1}"
-                    with _ai_monitor_lock:
-                        _ai_monitor_state["key_attempts"][key_idx] = (
-                            _ai_monitor_state["key_attempts"].get(key_idx, 0) + 1
-                        )
                     started = time.monotonic()
                     try:
                         client = genai.Client(api_key=api_key)
@@ -3280,10 +3405,6 @@ MUHIM QOIDALAR:
                                 question_count = 0
                                 json_valid = False
 
-                            with _ai_monitor_lock:
-                                _ai_monitor_state["key_success"][key_idx] = (
-                                    _ai_monitor_state["key_success"].get(key_idx, 0) + 1
-                                )
                             logging.info(
                                 "AI TEST MUVAFFAQIYATLI YARATILDI | model=%s | API kalit indeksi=%s | urinish=%s | "
                                 "kiruvchi_matn_belgilari=%s | chiquvchi_matn_belgilari=%s | savollar_soni=%s | "
@@ -3304,27 +3425,9 @@ MUHIM QOIDALAR:
                             return response.text
 
                         last_error = f"{model_name}: Gemini bo'sh javob qaytardi"
-                        with _ai_monitor_lock:
-                            _ai_monitor_state["key_failures"][key_idx] = (
-                                _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
-                            )
-                            _ai_monitor_state["last_errors"].append({
-                                "time": time.time(),
-                                "message": f"{model_name}, {key_label}: bo'sh javob",
-                            })
-                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
 
                     except Exception as e:
                         last_error = str(e)
-                        with _ai_monitor_lock:
-                            _ai_monitor_state["key_failures"][key_idx] = (
-                                _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
-                            )
-                            _ai_monitor_state["last_errors"].append({
-                                "time": time.time(),
-                                "message": f"{model_name}, {key_label}: {str(e)[:180]}",
-                            })
-                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
                         logging.warning(
                             "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_tafsiloti=%s",
                             model_name, key_idx, retry_round + 1, e
@@ -3376,108 +3479,6 @@ def generate_quiz_from_gemini(extracted_text):
                 _ai_generation_stats["failed"] += 1
                 _ai_generation_stats["last_failure_at"] = time.time()
             _ai_generation_stats["total_seconds"] += elapsed
-
-
-@bot.message_handler(commands=["ai_monitor"])
-def admin_ai_monitor_command(message):
-    """Administrator uchun AI navbati, xatolar va API kalitlar statistikasini yuboradi."""
-    if not _admin_only(message):
-        return
-
-    try:
-        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
-        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
-        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
-        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
-
-        with _ai_monitor_lock:
-            waiting = _ai_monitor_state["waiting_for_queue"]
-            accepted = _ai_monitor_state["accepted_requests"]
-            key_attempts = dict(_ai_monitor_state["key_attempts"])
-            key_success = dict(_ai_monitor_state["key_success"])
-            key_failures = dict(_ai_monitor_state["key_failures"])
-            recent_errors = list(_ai_monitor_state["last_errors"])
-
-        with _ai_stats_lock:
-            successful_generations = _ai_generation_stats["success"]
-            failed_generations = _ai_generation_stats["failed"]
-
-        report = (
-            "🤖 <b>Quiz AI — AI navbati va API nazorati</b>\n"
-            f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
-            "⚙️ <b>Joriy yuklama</b>\n"
-            f"🔄 Ishlayotgan AI so‘rovlari: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
-            f"⏳ Navbat slotlari band: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
-            f"🕰 Navbat joyini kutayotgan so‘rovlar: <b>{waiting}</b>\n"
-            f"🟢 Bo‘sh navbat slotlari: <b>{queue_slots_free}</b>\n\n"
-            "📊 <b>Test yaratish natijalari (server ishga tushganidan beri)</b>\n"
-            f"✅ Muvaffaqiyatli: <b>{successful_generations}</b>\n"
-            f"❌ Muvaffaqiyatsiz: <b>{failed_generations}</b>\n"
-            f"📥 Navbatga qabul qilingan jami so‘rovlar: <b>{accepted}</b>\n\n"
-            "🔑 <b>API kalitlari statistikasi</b>\n"
-            f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
-        )
-
-        # Telegram bitta xabar uchun taxminan 4096 belgi cheklaydi.
-        # Kalitlar ro'yxatini kichik bo'laklarga ajratib yuboramiz.
-        messages = [report]
-        if GOOGLE_API_KEYS:
-            key_lines = []
-            for key_idx in range(len(GOOGLE_API_KEYS)):
-                attempts = key_attempts.get(key_idx, 0)
-                successes = key_success.get(key_idx, 0)
-                failures = key_failures.get(key_idx, 0)
-                key_lines.append(
-                    f"• Kalit #{key_idx + 1}: urinish <b>{attempts}</b>, "
-                    f"muvaffaqiyat <b>{successes}</b>, xato <b>{failures}</b>"
-                )
-            chunk = "🔑 <b>API kalitlari (davomi bo‘lishi mumkin)</b>\n"
-            for line in key_lines:
-                addition = line + "\n"
-                if len(chunk) + len(addition) > 3000:
-                    messages.append(chunk.rstrip())
-                    chunk = "🔑 <b>API kalitlari (davomi)</b>\n"
-                chunk += addition
-            if chunk.strip():
-                messages.append(chunk.rstrip())
-        else:
-            messages.append("⚠️ AI test yaratish API kalitlari topilmadi.")
-
-        if recent_errors:
-            error_chunk = "⚠️ <b>Oxirgi AI xatolari</b>\n"
-            for item in recent_errors[-3:]:
-                error_time = datetime.fromtimestamp(
-                    item["time"], timezone(timedelta(hours=5))
-                ).strftime("%d-%m %H:%M:%S")
-                safe_message = (str(item["message"]).replace("&", "&amp;")
-                                .replace("<", "&lt;").replace(">", "&gt;"))
-                line = f"• <code>{error_time}</code> — {safe_message[:180]}\n"
-                if len(error_chunk) + len(line) > 3000:
-                    messages.append(error_chunk.rstrip())
-                    error_chunk = "⚠️ <b>Oxirgi AI xatolari (davomi)</b>\n"
-                error_chunk += line
-            messages.append(error_chunk.rstrip())
-        else:
-            messages.append("✅ Hozircha qayd etilgan AI API xatolari yo‘q.")
-
-        messages.append(
-            "ℹ️ Hisoblagichlar xotirada saqlanadi va server qayta ishga tushganda "
-            "noldan boshlanadi. API kalitlarining maxfiy qiymatlari ko‘rsatilmaydi."
-        )
-
-        for part in messages:
-            if part:
-                bot.send_message(message.chat.id, part, parse_mode="HTML")
-        logging.info("AI navbati va API nazorati hisoboti administratorga yuborildi.")
-    except Exception as e:
-        logging.exception("AI navbati va API nazorati hisobotini yuborishda xatolik: %s", e)
-        try:
-            bot.send_message(
-                message.chat.id,
-                "❌ AI nazorati hisobotini yuborishda xatolik yuz berdi. Batafsil ma’lumot Railway loglarida."
-            )
-        except Exception:
-            pass
 
 
 @bot.message_handler(commands=["ai_stats"])
