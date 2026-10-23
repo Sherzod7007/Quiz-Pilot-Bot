@@ -1599,6 +1599,168 @@ def admin_stats_command(message):
             conn.close()
 
 
+
+
+# --- ADMIN PAYMENTS & SUBSCRIPTION REPORT ---
+def _payment_price_to_sum(value):
+    """Narx matnidan so'm miqdorini xavfsiz ajratib oladi."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return int(digits) if digits else 0
+
+
+@bot.message_handler(commands=["payments"])
+def admin_payments_report_command(message):
+    """Administrator uchun tushum, tariflar, tugayotgan obunalar va kutilayotgan to'lovlar."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        now = int(time.time())
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        today_start = int(now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        week_end = now + 7 * 24 * 3600
+
+        conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=20000")
+        cur = conn.cursor()
+
+        # Faqat tasdiqlangan to'lovlar tushum hisoblanadi.
+        approved_rows = cur.execute(
+            "SELECT tariff_name, tariff_price, created_at FROM payments WHERE status='approved'"
+        ).fetchall()
+        pending_rows = cur.execute(
+            "SELECT tx_id, user_id, tariff_name, tariff_price, created_at FROM payments "
+            "WHERE status='pending' ORDER BY created_at ASC LIMIT 8"
+        ).fetchall()
+        pending_total = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status='pending'"
+        ).fetchone()[0]
+        approved_today_rows = cur.execute(
+            "SELECT tariff_price FROM payments WHERE status='approved' AND created_at >= ?",
+            (today_start,)
+        ).fetchall()
+
+        # Obuna muddati yaqinlashayotgan PRO foydalanuvchilar; bonuslar alohida hisoblanmaydi.
+        expiring_rows = cur.execute(
+            "SELECT user_id, status, plan_key, premium_until, premium_source FROM users "
+            "WHERE premium_until > ? AND premium_until <= ? AND status LIKE '%PRO%' "
+            "ORDER BY premium_until ASC LIMIT 8",
+            (now, week_end)
+        ).fetchall()
+        expiring_total = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE premium_until > ? AND premium_until <= ? "
+            "AND status LIKE '%PRO%'",
+            (now, week_end)
+        ).fetchone()[0]
+
+        total_revenue = sum(_payment_price_to_sum(row["tariff_price"]) for row in approved_rows)
+        today_revenue = sum(_payment_price_to_sum(row["tariff_price"]) for row in approved_today_rows)
+
+        tariff_stats = {key: {"count": 0, "revenue": 0} for key in TARIFFS}
+        for row in approved_rows:
+            plan_key = get_plan_key(row["tariff_name"] or "")
+            if plan_key in tariff_stats:
+                tariff_stats[plan_key]["count"] += 1
+                tariff_stats[plan_key]["revenue"] += _payment_price_to_sum(row["tariff_price"])
+
+        def money(amount):
+            return f"{amount:,}".replace(",", " ") + " so‘m"
+
+        report_lines = [
+            "💳 <b>Quiz AI — Daromad va obunalar hisoboti</b>",
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M')} (O‘zbekiston)",
+            "",
+            "💰 <b>Tushum</b>",
+            f"• Jami tasdiqlangan to‘lovlar: <b>{len(approved_rows):,}</b>",
+            f"• Jami tushum: <b>{money(total_revenue)}</b>",
+            f"• Bugungi tushum: <b>{money(today_revenue)}</b>",
+            "",
+            "📊 <b>Tariflar savdosi</b>",
+        ]
+        for key, tariff in TARIFFS.items():
+            stats = tariff_stats[key]
+            report_lines.append(
+                f"• {tariff['names']['uz']}: <b>{stats['count']}</b> ta — {money(stats['revenue'])}"
+            )
+
+        most_sold = max(tariff_stats.items(), key=lambda item: item[1]["count"]) if approved_rows else None
+        if most_sold and most_sold[1]["count"] > 0:
+            report_lines.extend([
+                "",
+                f"🏆 Eng ko‘p sotilgan tarif: <b>{TARIFFS[most_sold[0]]['names']['uz']}</b> "
+                f"({most_sold[1]['count']} ta)"
+            ])
+        else:
+            report_lines.extend(["", "🏆 Eng ko‘p sotilgan tarif: hozircha tasdiqlangan savdo yo‘q."])
+
+        report_lines.extend([
+            "",
+            f"⏳ <b>Tasdiqlanmagan to‘lovlar: {pending_total}</b>",
+        ])
+        if pending_rows:
+            for row in pending_rows:
+                created = time.strftime("%d-%m-%Y %H:%M", time.gmtime(int(row["created_at"] or 0) + 5 * 3600))
+                report_lines.append(
+                    f"• <code>{str(row['tx_id'])[:40]}</code> — ID <code>{row['user_id']}</code>\n"
+                    f"  {row['tariff_name'] or 'Tarif noma’lum'} | {row['tariff_price'] or 'Narx noma’lum'} | {created}"
+                )
+            if pending_total > len(pending_rows):
+                report_lines.append(f"… va yana {pending_total - len(pending_rows)} ta to‘lov.")
+        else:
+            report_lines.append("• Kutilayotgan to‘lov yo‘q.")
+
+        report_lines.extend([
+            "",
+            f"📅 <b>7 kun ichida muddati tugaydigan obunalar: {expiring_total}</b>",
+        ])
+        if expiring_rows:
+            for row in expiring_rows:
+                expiry = time.strftime("%d-%m-%Y %H:%M", time.gmtime(int(row["premium_until"]) + 5 * 3600))
+                plan_name = localized_tariff_name(row["plan_key"], "uz") if row["plan_key"] in TARIFFS else (row["status"] or "PRO")
+                source_note = " (bonus)" if row["premium_source"] == "admin_bonus" else ""
+                report_lines.append(
+                    f"• ID <code>{row['user_id']}</code> — {plan_name}{source_note}\n"
+                    f"  Tugash vaqti: {expiry}"
+                )
+            if expiring_total > len(expiring_rows):
+                report_lines.append(f"… va yana {expiring_total - len(expiring_rows)} ta obuna.")
+        else:
+            report_lines.append("• Yaqin 7 kunda muddati tugaydigan obuna yo‘q.")
+
+        # Telegram xabar limiti oshmasligi uchun hisobot bo'laklarga ajratiladi.
+        full_report = "\n".join(report_lines)
+        max_length = 3800
+        chunks = []
+        while len(full_report) > max_length:
+            split_at = full_report.rfind("\n", 0, max_length)
+            if split_at <= 0:
+                split_at = max_length
+            chunks.append(full_report[:split_at])
+            full_report = full_report[split_at:].lstrip("\n")
+        if full_report:
+            chunks.append(full_report)
+        for chunk in chunks:
+            bot.send_message(message.chat.id, chunk, parse_mode="HTML", disable_web_page_preview=True)
+
+        logging.info(
+            "Daromad va obunalar hisoboti yuborildi | tasdiqlangan_to'lov=%s | tushum=%s | kutilayotgan=%s | tugayotgan_obuna=%s",
+            len(approved_rows), total_revenue, pending_total, expiring_total
+        )
+    except Exception as e:
+        logging.exception("Daromad va obunalar hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Daromad va obunalar hisobotini tayyorlab bo‘lmadi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
 @bot.message_handler(commands=["db_health"])
 def admin_database_health_command(message):
     """Administrator uchun SQLite bazasining yengil holat tekshiruvi."""
