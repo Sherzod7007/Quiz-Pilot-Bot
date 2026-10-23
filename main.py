@@ -1601,6 +1601,131 @@ def admin_stats_command(message):
 
 
 
+# --- ADMIN FOYDALANUVCHILAR HISOBOTI ---
+@bot.message_handler(commands=["users"])
+def admin_users_report_command(message):
+    """Administrator uchun foydalanuvchilar, obunalar va uzoq faollashmaganlar hisoboti."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        now = int(time.time())
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        day_7 = now - 7 * 24 * 3600
+        day_30 = now - 30 * 24 * 3600
+
+        conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=20000")
+        cur = conn.cursor()
+
+        total_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        created_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (day_7,)
+        ).fetchone()[0]
+        created_30_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (day_30,)
+        ).fetchone()[0]
+        active_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (day_7,)
+        ).fetchone()[0]
+        inactive_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(last_active, 0) > 0 AND last_active < ?", (day_7,)
+        ).fetchone()[0]
+        never_active = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(last_active, 0) = 0"
+        ).fetchone()[0]
+        active_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ?", (now,)
+        ).fetchone()[0]
+        expired_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > 0 AND premium_until <= ?", (now,)
+        ).fetchone()[0]
+        ordinary_users = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE NOT (status LIKE '%PRO%' AND premium_until > ?)", (now,)
+        ).fetchone()[0]
+        paid_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ? AND COALESCE(premium_source, 'paid') != 'admin_bonus'", (now,)
+        ).fetchone()[0]
+        bonus_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ? AND premium_source = 'admin_bonus'", (now,)
+        ).fetchone()[0]
+
+        inactive_rows = cur.execute(
+            "SELECT user_id, created_at, last_active, status, plan_key, premium_until "
+            "FROM users WHERE COALESCE(last_active, 0) > 0 AND last_active < ? "
+            "ORDER BY last_active ASC, created_at DESC LIMIT 8", (day_7,)
+        ).fetchall()
+
+        def date_text(timestamp):
+            timestamp = int(timestamp or 0)
+            return time.strftime('%d-%m-%Y %H:%M', time.gmtime(timestamp + 5 * 3600)) if timestamp > 0 else "ma’lumot yo‘q"
+
+        lines = [
+            "👥 <b>Quiz AI — Foydalanuvchilar hisoboti</b>",
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M')} (O‘zbekiston)",
+            "",
+            "📊 <b>Foydalanuvchilar</b>",
+            f"• Jami ro‘yxatdan o‘tganlar: <b>{total_users:,}</b>",
+            f"• Oxirgi 7 kunda qo‘shilganlar: <b>{created_7_days:,}</b>",
+            f"• Oxirgi 30 kunda qo‘shilganlar: <b>{created_30_days:,}</b>",
+            f"• Oxirgi 7 kunda faol bo‘lganlar: <b>{active_7_days:,}</b>",
+            f"• 7 kundan beri faol bo‘lmaganlar: <b>{inactive_7_days:,}</b>",
+            f"• Faollik qaydi yo‘q: <b>{never_active:,}</b>",
+            "",
+            "👑 <b>Obuna holati</b>",
+            f"• Faol Premium obunachilar: <b>{active_premium:,}</b>",
+            f"• Pullik Premium obunachilar: <b>{paid_premium:,}</b>",
+            f"• Admin bonusi orqali Premium: <b>{bonus_premium:,}</b>",
+            f"• Muddati tugagan PRO statuslar: <b>{expired_premium:,}</b>",
+            f"• Hozir faol Premium bo‘lmaganlar: <b>{ordinary_users:,}</b>",
+            "",
+            f"🕰 <b>7 kundan beri faol bo‘lmaganlar (ko‘pi bilan 8 ta):</b>",
+        ]
+        if inactive_rows:
+            for row in inactive_rows:
+                last_seen = date_text(row["last_active"])
+                created = date_text(row["created_at"])
+                status = row["status"] or "Oddiy foydalanuvchi"
+                lines.append(
+                    f"• ID <code>{row['user_id']}</code> — {status}\n"
+                    f"  Oxirgi faollik: {last_seen}\n"
+                    f"  Ro‘yxatdan o‘tgan: {created}"
+                )
+            if inactive_7_days > len(inactive_rows):
+                lines.append(f"… va yana {inactive_7_days - len(inactive_rows)} ta foydalanuvchi.")
+        else:
+            lines.append("• 7 kundan beri faol bo‘lmagan foydalanuvchi yo‘q.")
+
+        report = "\n".join(lines)
+        max_length = 3800
+        while len(report) > max_length:
+            split_at = report.rfind("\n", 0, max_length)
+            if split_at <= 0:
+                split_at = max_length
+            bot.send_message(message.chat.id, report[:split_at], parse_mode="HTML", disable_web_page_preview=True)
+            report = report[split_at:].lstrip("\n")
+        if report:
+            bot.send_message(message.chat.id, report, parse_mode="HTML", disable_web_page_preview=True)
+
+        logging.info(
+            "Foydalanuvchilar hisoboti yuborildi | jami=%s | premium_faol=%s | oxirgi_7_kunda_faol=%s | 7_kun_faol_emas=%s",
+            total_users, active_premium, active_7_days, inactive_7_days
+        )
+    except Exception as e:
+        logging.exception("Foydalanuvchilar hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Foydalanuvchilar hisobotini tayyorlab bo‘lmadi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
 # --- ADMIN PAYMENTS & SUBSCRIPTION REPORT ---
 def _payment_price_to_sum(value):
     """Narx matnidan so'm miqdorini xavfsiz ajratib oladi."""
