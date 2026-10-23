@@ -5260,6 +5260,138 @@ async def api_exception_handler(request: Request, exc: Exception):
 
 
 
+# ==================================================================
+# QUIZ AI ADMIN PANEL — barcha mavjud admin amallarini bitta menyuga jamlash
+# ==================================================================
+def _admin_panel_main_markup():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("📊 Umumiy statistika", callback_data="adminpanel:run:stats"),
+        telebot.types.InlineKeyboardButton("👥 Foydalanuvchilar", callback_data="adminpanel:run:users"),
+        telebot.types.InlineKeyboardButton("💳 Daromad va obunalar", callback_data="adminpanel:run:payments"),
+        telebot.types.InlineKeyboardButton("🖥 Server monitoring", callback_data="adminpanel:run:monitor"),
+        telebot.types.InlineKeyboardButton("🤖 AI test statistikasi", callback_data="adminpanel:run:ai_stats"),
+        telebot.types.InlineKeyboardButton("🧾 To‘lov AI holati", callback_data="adminpanel:run:payment_ai_status"),
+        telebot.types.InlineKeyboardButton("🗄 Baza holati", callback_data="adminpanel:run:db_health"),
+        telebot.types.InlineKeyboardButton("📥 Baza backup", callback_data="adminpanel:run:db_backup"),
+        telebot.types.InlineKeyboardButton("📢 Ommaviy xabar", callback_data="adminpanel:run:broadcast"),
+        telebot.types.InlineKeyboardButton("🎁 Bonuslar", callback_data="adminpanel:submenu:bonuses"),
+        telebot.types.InlineKeyboardButton("🛠 Xatolik ogohlantirish sinovi", callback_data="adminpanel:run:test_error_alert"),
+    )
+    return markup
+
+
+def _admin_panel_bonus_markup():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
+        telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
+        telebot.types.InlineKeyboardButton("🗑 Bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
+        telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
+    )
+    return markup
+
+
+@bot.message_handler(commands=["help_admin"])
+def admin_help_panel_command(message):
+    """Administrator uchun tugmali boshqaruv markazi."""
+    if not _admin_only(message):
+        return
+    text = (
+        "🛡 <b>Quiz AI — Admin Panel</b>\n\n"
+        "Kerakli bo‘limni tanlang. Hisobotlar shu yerning o‘zida ochiladi.\n\n"
+        "📊 Statistika — foydalanuvchilar, testlar va bugungi faollik.\n"
+        "👥 Foydalanuvchilar — yangi, faol va Premium foydalanuvchilar.\n"
+        "💳 Daromad — tushum, tariflar va to‘lovlar.\n"
+        "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
+        "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
+        "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
+        "🎁 Bonuslar — buyruq formati bo‘yicha yordam.\n\n"
+        "🔐 Ushbu menyu faqat administrator uchun ochiq."
+    )
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
+    logging.info("Admin Panel ochildi.")
+
+
+@bot.callback_query_handler(func=lambda call: (call.data or "").startswith("adminpanel:"))
+def admin_help_panel_callback(call):
+    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "Bu menyu faqat administrator uchun.", show_alert=True)
+        return
+
+    action = call.data.split(":", 2)
+    kind = action[1] if len(action) > 1 else "home"
+    value = action[2] if len(action) > 2 else ""
+
+    if kind == "home":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text(
+                "🛡 <b>Quiz AI — Admin Panel</b>\n\nKerakli funksiyani tanlang:",
+                call.message.chat.id, call.message.message_id,
+                parse_mode="HTML", reply_markup=_admin_panel_main_markup()
+            )
+        except Exception:
+            bot.send_message(call.message.chat.id, "🛡 <b>Quiz AI — Admin Panel</b>\n\nKerakli funksiyani tanlang:", parse_mode="HTML", reply_markup=_admin_panel_main_markup())
+        return
+
+    if kind == "submenu" and value == "bonuses":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text("🎁 <b>Bonuslarni boshqarish</b>\n\nKerakli amalni tanlang:", call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=_admin_panel_bonus_markup())
+        except Exception:
+            bot.send_message(call.message.chat.id, "🎁 <b>Bonuslarni boshqarish</b>\n\nKerakli amalni tanlang:", parse_mode="HTML", reply_markup=_admin_panel_bonus_markup())
+        return
+
+    if kind == "guide":
+        guide_texts = {
+            "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
+            "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
+            "bonus_revoke": "🗑 <b>Bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
+        }
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, guide_texts.get(value, "Buyruq topilmadi."), parse_mode="HTML", reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("⬅️ Admin Panel", callback_data="adminpanel:home")))
+        return
+
+    if kind == "run":
+        handlers = {
+            "stats": admin_stats_command,
+            "users": admin_users_report_command,
+            "payments": admin_payments_report_command,
+            "monitor": admin_monitor_command,
+            "ai_stats": admin_ai_generation_stats_command,
+            "payment_ai_status": admin_payment_ai_status,
+            "db_health": admin_database_health_command,
+            "db_backup": admin_database_backup_command,
+            "broadcast": admin_broadcast_command,
+            "test_error_alert": admin_test_error_alert_command,
+        }
+        handler = handlers.get(value)
+        if not handler:
+            bot.answer_callback_query(call.id, "Bu funksiya ushbu faylda mavjud emas.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "Funksiya ishga tushirilmoqda…")
+        # Mavjud handlerlarni qayta ishlatamiz; ularning asosiy funksional kodi o‘zgarmaydi.
+        from types import SimpleNamespace
+        synthetic_message = SimpleNamespace(
+            chat=call.message.chat,
+            from_user=call.from_user,
+            text="/" + value,
+            message_id=call.message.message_id,
+        )
+        try:
+            handler(synthetic_message)
+            logging.info("Admin Panel orqali funksiya ishga tushirildi | funksiya=%s", value)
+        except Exception:
+            logging.exception("Admin Panel funksiyasini ishga tushirishda xatolik | funksiya=%s", value)
+            bot.send_message(call.message.chat.id, "❌ Funksiyani ishga tushirishda xatolik yuz berdi. Railway loglarini tekshiring.")
+        return
+
+    bot.answer_callback_query(call.id, "Noma’lum menyu amali.", show_alert=True)
+
+
+
+
     # ==================================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
