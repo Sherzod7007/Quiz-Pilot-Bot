@@ -1576,6 +1576,80 @@ def admin_stats_command(message):
             conn.close()
 
 
+@bot.message_handler(commands=["db_health"])
+def admin_database_health_command(message):
+    """Administrator uchun SQLite bazasining yengil holat tekshiruvi."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout=10000")
+        cur = conn.cursor()
+
+        # quick_check yengil tekshiruv; bazani o'zgartirmaydi.
+        check_row = cur.execute("PRAGMA quick_check").fetchone()
+        integrity_status = "✅ Sog‘lom" if check_row and check_row[0] == "ok" else "⚠️ Tekshirish kerak"
+
+        table_counts = {}
+        for table_name, label in (
+            ("users", "foydalanuvchilar"),
+            ("quizzes", "testlar"),
+            ("payments", "to‘lovlar"),
+            ("flashcards", "flash-kartochkalar"),
+        ):
+            try:
+                table_counts[label] = int(
+                    cur.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                )
+            except sqlite3.Error:
+                table_counts[label] = None
+
+        db_size = os.path.getsize(DB_PATH) if os.path.isfile(DB_PATH) else 0
+        wal_path = DB_PATH + "-wal"
+        wal_size = os.path.getsize(wal_path) if os.path.isfile(wal_path) else 0
+
+        def _format_bytes(size):
+            if size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            return f"{size / (1024 * 1024):.2f} MB"
+
+        def _count_text(value):
+            return f"{value:,}" if value is not None else "Jadval topilmadi"
+
+        now_local = datetime.now(timezone(timedelta(hours=5)))
+        report = (
+            "🗄 <b>Quiz AI — Ma’lumotlar bazasi holati</b>\n"
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            f"🔎 Bazaning yaxlitligi: <b>{integrity_status}</b>\n"
+            f"📦 SQLite fayli: <b>{_format_bytes(db_size)}</b>\n"
+            f"🧾 WAL jurnali: <b>{_format_bytes(wal_size)}</b>\n\n"
+            "📊 <b>Jadval yozuvlari</b>\n"
+            f"👥 Foydalanuvchilar: <b>{_count_text(table_counts['foydalanuvchilar'])}</b>\n"
+            f"📝 Testlar: <b>{_count_text(table_counts['testlar'])}</b>\n"
+            f"💳 To‘lovlar: <b>{_count_text(table_counts['to‘lovlar'])}</b>\n"
+            f"🗂 Flash-kartochkalar: <b>{_count_text(table_counts['flash-kartochkalar'])}</b>\n\n"
+            "ℹ️ Bu tekshiruv bazani o‘zgartirmaydi va zaxira nusxa yaratilganini anglatmaydi."
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+        logging.info("Ma’lumotlar bazasi holati tekshirildi | yaxlitlik=%s | SQLite_hajmi=%s_bayt | WAL_hajmi=%s_bayt",
+                     integrity_status, db_size, wal_size)
+    except Exception as e:
+        logging.exception("Ma’lumotlar bazasi holatini tekshirishda xatolik yuz berdi: %s", e)
+        try:
+            bot.send_message(
+                message.chat.id,
+                "❌ Ma’lumotlar bazasi holatini tekshirib bo‘lmadi. Railway loglarini tekshiring."
+            )
+        except Exception:
+            logging.exception("Baza tekshiruvi xatosi haqida Telegram xabarini yuborib bo‘lmadi.")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
 @bot.message_handler(commands=["bonus"])
 def admin_bonus_command(message):
     if not _admin_only(message):
