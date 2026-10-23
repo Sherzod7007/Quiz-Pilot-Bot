@@ -1458,6 +1458,60 @@ def admin_test_error_alert_command(message):
             pass
 
 
+
+@bot.message_handler(commands=["monitor"])
+def admin_monitor_command(message):
+    """Show a lightweight, administrator-only snapshot of server and AI capacity."""
+    if not _admin_only(message):
+        return
+
+    # Semaphore availability gives a best-effort snapshot; it is not a historical metric.
+    try:
+        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+
+        db_status = "✅ Ulandi"
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5, check_same_thread=False)
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("SELECT 1").fetchone()
+        except Exception as db_error:
+            db_status = "❌ Xato"
+            logging.error("Monitor: SQLite health check xatosi: %s", db_error)
+        finally:
+            if conn is not None:
+                conn.close()
+
+        now_local = datetime.now(timezone(timedelta(hours=5)))
+        report = (
+            "🖥 <b>Quiz AI — Server va AI monitoring</b>\\n"
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\\n\\n"
+            f"🗄 SQLite bazasi: <b>{db_status}</b>\\n"
+            f"🤖 Asosiy model: <code>{GEMINI_MODEL}</code>\\n"
+            f"🔁 Zaxira model: <code>{GEMINI_FALLBACK_MODEL}</code>\\n\\n"
+            "⚙️ <b>AI parallel so‘rovlar</b>\\n"
+            f"Band: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\\n"
+            f"Bo‘sh slotlar: <b>{ai_slots_free}</b>\\n\\n"
+            "⏳ <b>AI navbat sig‘imi</b>\\n"
+            f"Band slotlar: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\\n"
+            f"Bo‘sh slotlar: <b>{queue_slots_free}</b>\\n\\n"
+            f"🔑 Generation API kalitlari: <b>{len(GOOGLE_API_KEYS)}</b>\\n"
+            f"⏱ Bitta so‘rov limiti: <b>{AI_REQUEST_TIMEOUT} soniya</b>\\n"
+            f"⏱ Umumiy vaqt limiti: <b>{AI_TOTAL_TIMEOUT} soniya</b>\\n\\n"
+            "ℹ️ Bu joriy holatning bir martalik surati; CPU/RAM foizlari va tarixiy grafiklar bu hisobotga kirmaydi."
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.exception("Admin monitoring hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Monitoring ma’lumotlarini olishda xatolik yuz berdi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+
+
 @bot.message_handler(commands=["stats"])
 def admin_stats_command(message):
     """Show private Quiz AI usage statistics to the configured administrator only."""
