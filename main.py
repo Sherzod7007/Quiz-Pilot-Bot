@@ -3380,7 +3380,7 @@ def generate_quiz_from_gemini(extracted_text):
 
 @bot.message_handler(commands=["ai_monitor"])
 def admin_ai_monitor_command(message):
-    """Administrator uchun AI navbati, xatolar va API kalitlar statistikasi."""
+    """Administrator uchun AI navbati, xatolar va API kalitlar statistikasini yuboradi."""
     if not _admin_only(message):
         return
 
@@ -3418,41 +3418,63 @@ def admin_ai_monitor_command(message):
             f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
         )
 
+        # Telegram bitta xabar uchun taxminan 4096 belgi cheklaydi.
+        # Kalitlar ro'yxatini kichik bo'laklarga ajratib yuboramiz.
+        messages = [report]
         if GOOGLE_API_KEYS:
+            key_lines = []
             for key_idx in range(len(GOOGLE_API_KEYS)):
                 attempts = key_attempts.get(key_idx, 0)
                 successes = key_success.get(key_idx, 0)
                 failures = key_failures.get(key_idx, 0)
-                report += (
+                key_lines.append(
                     f"• Kalit #{key_idx + 1}: urinish <b>{attempts}</b>, "
-                    f"muvaffaqiyat <b>{successes}</b>, xato <b>{failures}</b>\n"
+                    f"muvaffaqiyat <b>{successes}</b>, xato <b>{failures}</b>"
                 )
+            chunk = "🔑 <b>API kalitlari (davomi bo‘lishi mumkin)</b>\n"
+            for line in key_lines:
+                addition = line + "\n"
+                if len(chunk) + len(addition) > 3000:
+                    messages.append(chunk.rstrip())
+                    chunk = "🔑 <b>API kalitlari (davomi)</b>\n"
+                chunk += addition
+            if chunk.strip():
+                messages.append(chunk.rstrip())
         else:
-            report += "⚠️ AI test yaratish API kalitlari topilmadi.\n"
+            messages.append("⚠️ AI test yaratish API kalitlari topilmadi.")
 
         if recent_errors:
-            report += "\n⚠️ <b>Oxirgi AI xatolari</b>\n"
+            error_chunk = "⚠️ <b>Oxirgi AI xatolari</b>\n"
             for item in recent_errors[-3:]:
                 error_time = datetime.fromtimestamp(
                     item["time"], timezone(timedelta(hours=5))
                 ).strftime("%d-%m %H:%M:%S")
-                safe_message = (item["message"].replace("&", "&amp;")
+                safe_message = (str(item["message"]).replace("&", "&amp;")
                                 .replace("<", "&lt;").replace(">", "&gt;"))
-                report += f"• <code>{error_time}</code> — {safe_message[:220]}\n"
+                line = f"• <code>{error_time}</code> — {safe_message[:180]}\n"
+                if len(error_chunk) + len(line) > 3000:
+                    messages.append(error_chunk.rstrip())
+                    error_chunk = "⚠️ <b>Oxirgi AI xatolari (davomi)</b>\n"
+                error_chunk += line
+            messages.append(error_chunk.rstrip())
         else:
-            report += "\n✅ Hozircha qayd etilgan AI API xatolari yo‘q.\n"
+            messages.append("✅ Hozircha qayd etilgan AI API xatolari yo‘q.")
 
-        report += (
-            "\nℹ️ Hisoblagichlar xotirada saqlanadi va server qayta ishga tushganda noldan boshlanadi. "
-            "API kalitlarining maxfiy qiymatlari ko‘rsatilmaydi."
+        messages.append(
+            "ℹ️ Hisoblagichlar xotirada saqlanadi va server qayta ishga tushganda "
+            "noldan boshlanadi. API kalitlarining maxfiy qiymatlari ko‘rsatilmaydi."
         )
-        bot.send_message(message.chat.id, report, parse_mode="HTML")
+
+        for part in messages:
+            if part:
+                bot.send_message(message.chat.id, part, parse_mode="HTML")
+        logging.info("AI navbati va API nazorati hisoboti administratorga yuborildi.")
     except Exception as e:
-        logging.exception("AI navbati va API nazorati hisobotida xatolik: %s", e)
+        logging.exception("AI navbati va API nazorati hisobotini yuborishda xatolik: %s", e)
         try:
             bot.send_message(
                 message.chat.id,
-                "❌ AI nazorati hisobotini tayyorlashda xatolik yuz berdi. Railway loglarini tekshiring."
+                "❌ AI nazorati hisobotini yuborishda xatolik yuz berdi. Batafsil ma’lumot Railway loglarida."
             )
         except Exception:
             pass
