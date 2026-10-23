@@ -237,6 +237,17 @@ MAX_TEXT_INPUT_CHARS = max(1, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
+
+# AI navbati va API kalitlari bo'yicha joriy jarayon statistikasi.
+_ai_monitor_lock = threading.Lock()
+_ai_monitor_state = {
+    "waiting_for_queue": 0,
+    "accepted_requests": 0,
+    "key_attempts": {},
+    "key_success": {},
+    "key_failures": {},
+    "last_errors": [],
+}
 logging.info(
     "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
@@ -3305,7 +3316,17 @@ MUHIM QOIDALAR:
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
-    if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] += 1
+    queue_acquired = ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT)
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
+        if queue_acquired:
+            _ai_monitor_state["accepted_requests"] += 1
+        else:
+            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": "AI navbatida kutish muddati tugadi"})
+            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
+    if not queue_acquired:
         logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
@@ -3353,6 +3374,8 @@ MUHIM QOIDALAR:
                         logging.info("GEMINI PARALLELLIGI | Bo'sh so'rov o'rnini kutish yakunlandi | kutish=%.2f soniya", semaphore_wait_seconds)
 
                     started = time.monotonic()
+                    with _ai_monitor_lock:
+                        _ai_monitor_state["key_attempts"][key_idx] = _ai_monitor_state["key_attempts"].get(key_idx, 0) + 1
                     try:
                         client = genai.Client(api_key=api_key)
                         response = client.models.generate_content(
@@ -3422,12 +3445,22 @@ MUHIM QOIDALAR:
                                 "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN",
                                 time.monotonic() - queue_wait_started
                             )
+                            with _ai_monitor_lock:
+                                _ai_monitor_state["key_success"][key_idx] = _ai_monitor_state["key_success"].get(key_idx, 0) + 1
                             return response.text
 
                         last_error = f"{model_name}: Gemini bo'sh javob qaytardi"
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_idx] = _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
+                            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": f"{model_name}, Kalit #{key_idx + 1}: Gemini bo'sh javob qaytardi"})
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
 
                     except Exception as e:
                         last_error = str(e)
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_idx] = _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
+                            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": f"{model_name}, Kalit #{key_idx + 1}: {str(e)[:180]}"})
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
                         logging.warning(
                             "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_tafsiloti=%s",
                             model_name, key_idx, retry_round + 1, e
@@ -3479,6 +3512,109 @@ def generate_quiz_from_gemini(extracted_text):
                 _ai_generation_stats["failed"] += 1
                 _ai_generation_stats["last_failure_at"] = time.time()
             _ai_generation_stats["total_seconds"] += elapsed
+
+
+@bot.message_handler(commands=["ai_monitor"])
+def admin_ai_monitor_command(message):
+    """Administrator uchun AI navbati, xatolar va API kalitlar statistikasini yuboradi."""
+    if not _admin_only(message):
+        return
+
+    try:
+        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+
+        with _ai_monitor_lock:
+            waiting = _ai_monitor_state["waiting_for_queue"]
+            accepted = _ai_monitor_state["accepted_requests"]
+            key_attempts = dict(_ai_monitor_state["key_attempts"])
+            key_success = dict(_ai_monitor_state["key_success"])
+            key_failures = dict(_ai_monitor_state["key_failures"])
+            recent_errors = list(_ai_monitor_state["last_errors"])
+
+        with _ai_stats_lock:
+            successful_generations = _ai_generation_stats["success"]
+            failed_generations = _ai_generation_stats["failed"]
+
+        report = (
+            "🤖 <b>Quiz AI — AI navbati va API nazorati</b>\n"
+            f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            "⚙️ <b>Joriy yuklama</b>\n"
+            f"🔄 Ishlayotgan AI so‘rovlari: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
+            f"⏳ Navbat slotlari band: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
+            f"🕰 Navbat joyini kutayotgan so‘rovlar: <b>{waiting}</b>\n"
+            f"🟢 Bo‘sh navbat slotlari: <b>{queue_slots_free}</b>\n\n"
+            "📊 <b>Test yaratish natijalari (server ishga tushganidan beri)</b>\n"
+            f"✅ Muvaffaqiyatli: <b>{successful_generations}</b>\n"
+            f"❌ Muvaffaqiyatsiz: <b>{failed_generations}</b>\n"
+            f"📥 Navbatga qabul qilingan jami so‘rovlar: <b>{accepted}</b>\n\n"
+            "🔑 <b>API kalitlari statistikasi</b>\n"
+            f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
+        )
+
+        # Telegram bitta xabar uchun taxminan 4096 belgi cheklaydi.
+        # Kalitlar ro'yxatini kichik bo'laklarga ajratib yuboramiz.
+        messages = [report]
+        if GOOGLE_API_KEYS:
+            key_lines = []
+            for key_idx in range(len(GOOGLE_API_KEYS)):
+                attempts = key_attempts.get(key_idx, 0)
+                successes = key_success.get(key_idx, 0)
+                failures = key_failures.get(key_idx, 0)
+                key_lines.append(
+                    f"• Kalit #{key_idx + 1}: urinish <b>{attempts}</b>, "
+                    f"muvaffaqiyat <b>{successes}</b>, xato <b>{failures}</b>"
+                )
+            chunk = "🔑 <b>API kalitlari (davomi bo‘lishi mumkin)</b>\n"
+            for line in key_lines:
+                addition = line + "\n"
+                if len(chunk) + len(addition) > 3000:
+                    messages.append(chunk.rstrip())
+                    chunk = "🔑 <b>API kalitlari (davomi)</b>\n"
+                chunk += addition
+            if chunk.strip():
+                messages.append(chunk.rstrip())
+        else:
+            messages.append("⚠️ AI test yaratish API kalitlari topilmadi.")
+
+        if recent_errors:
+            error_chunk = "⚠️ <b>Oxirgi AI xatolari</b>\n"
+            for item in recent_errors[-3:]:
+                error_time = datetime.fromtimestamp(
+                    item["time"], timezone(timedelta(hours=5))
+                ).strftime("%d-%m %H:%M:%S")
+                safe_message = (str(item["message"]).replace("&", "&amp;")
+                                .replace("<", "&lt;").replace(">", "&gt;"))
+                line = f"• <code>{error_time}</code> — {safe_message[:180]}\n"
+                if len(error_chunk) + len(line) > 3000:
+                    messages.append(error_chunk.rstrip())
+                    error_chunk = "⚠️ <b>Oxirgi AI xatolari (davomi)</b>\n"
+                error_chunk += line
+            messages.append(error_chunk.rstrip())
+        else:
+            messages.append("✅ Hozircha qayd etilgan AI API xatolari yo‘q.")
+
+        messages.append(
+            "ℹ️ Hisoblagichlar xotirada saqlanadi va server qayta ishga tushganda "
+            "noldan boshlanadi. API kalitlarining maxfiy qiymatlari ko‘rsatilmaydi."
+        )
+
+        for part in messages:
+            if part:
+                bot.send_message(message.chat.id, part, parse_mode="HTML")
+        logging.info("AI navbati va API nazorati hisoboti administratorga yuborildi.")
+    except Exception as e:
+        logging.exception("AI navbati va API nazorati hisobotini yuborishda xatolik: %s", e)
+        try:
+            bot.send_message(
+                message.chat.id,
+                "❌ AI nazorati hisobotini yuborishda xatolik yuz berdi. Batafsil ma’lumot Railway loglarida."
+            )
+        except Exception:
+            pass
+
 
 
 @bot.message_handler(commands=["ai_stats"])
@@ -5271,6 +5407,7 @@ def _admin_panel_main_markup():
         telebot.types.InlineKeyboardButton("💳 Daromad va obunalar", callback_data="adminpanel:run:payments"),
         telebot.types.InlineKeyboardButton("🖥 Server monitoring", callback_data="adminpanel:run:monitor"),
         telebot.types.InlineKeyboardButton("🤖 AI test statistikasi", callback_data="adminpanel:run:ai_stats"),
+        telebot.types.InlineKeyboardButton("🔎 AI navbati va API nazorati", callback_data="adminpanel:run:ai_monitor"),
         telebot.types.InlineKeyboardButton("🧾 To‘lov AI holati", callback_data="adminpanel:run:payment_ai_status"),
         telebot.types.InlineKeyboardButton("🗄 Baza holati", callback_data="adminpanel:run:db_health"),
         telebot.types.InlineKeyboardButton("📥 Baza backup", callback_data="adminpanel:run:db_backup"),
@@ -5360,6 +5497,7 @@ def admin_help_panel_callback(call):
             "payments": admin_payments_report_command,
             "monitor": admin_monitor_command,
             "ai_stats": admin_ai_generation_stats_command,
+            "ai_monitor": admin_ai_monitor_command,
             "payment_ai_status": admin_payment_ai_status,
             "db_health": admin_database_health_command,
             "db_backup": admin_database_backup_command,
