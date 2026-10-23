@@ -1672,6 +1672,78 @@ def admin_database_health_command(message):
             conn.close()
 
 
+# --- ADMIN SQLITE BACKUP: BROWSER DOWNLOAD LINK ---
+# Har bir havola tasodifiy, 10 daqiqalik va bir martalik bo'ladi.
+SQLITE_BACKUP_TOKEN_TTL = 10 * 60
+_sqlite_backup_tokens = {}
+_sqlite_backup_tokens_lock = threading.Lock()
+BACKUP_PUBLIC_BASE_URL = os.getenv("BACKUP_PUBLIC_BASE_URL", "").strip().rstrip("/")
+if not BACKUP_PUBLIC_BASE_URL:
+    _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
+    if _railway_domain:
+        BACKUP_PUBLIC_BASE_URL = (
+            _railway_domain if _railway_domain.startswith(("http://", "https://"))
+            else "https://" + _railway_domain
+        )
+
+
+def _issue_sqlite_backup_token():
+    now = time.time()
+    token = secrets.token_urlsafe(32)
+    with _sqlite_backup_tokens_lock:
+        expired = [key for key, expires_at in _sqlite_backup_tokens.items() if expires_at <= now]
+        for key in expired:
+            _sqlite_backup_tokens.pop(key, None)
+        _sqlite_backup_tokens[token] = now + SQLITE_BACKUP_TOKEN_TTL
+    return token
+
+
+def _consume_sqlite_backup_token(token: str) -> bool:
+    now = time.time()
+    with _sqlite_backup_tokens_lock:
+        expires_at = _sqlite_backup_tokens.pop(token, None)
+    return bool(expires_at and expires_at > now)
+
+
+@bot.message_handler(commands=["db_backup"])
+def admin_database_backup_command(message):
+    """Administrator-only: create a short-lived browser download link."""
+    if not _admin_only(message):
+        return
+
+    if not os.path.isfile(DB_PATH):
+        bot.send_message(message.chat.id, "❌ SQLite bazasi fayli topilmadi.")
+        return
+
+    if not BACKUP_PUBLIC_BASE_URL:
+        bot.send_message(
+            message.chat.id,
+            "⚠️ Yuklab olish havolasini yaratib bo‘lmadi. Railway Variables bo‘limida "
+            "RAILWAY_PUBLIC_DOMAIN mavjudligini tekshiring yoki BACKUP_PUBLIC_BASE_URL "
+            "o‘zgaruvchisiga ilovaning to‘liq HTTPS manzilini kiriting."
+        )
+        logging.error("DB backup link yaratilmadi: public base URL sozlanmagan.")
+        return
+
+    try:
+        token = _issue_sqlite_backup_token()
+        download_url = f"{BACKUP_PUBLIC_BASE_URL}/admin/sqlite-backup?token={token}"
+        bot.send_message(
+            message.chat.id,
+            "🗄 <b>Quiz AI — Baza zaxira nusxasi</b>\n\n"
+            "Havola 10 daqiqa davomida amal qiladi va faqat bir marta ishlatiladi.\n"
+            "Havolani Chrome yoki Yandex Browser orqali oching — zaxira fayli yuklanadi.\n\n"
+            f'⬇️ <a href="{download_url}">Zaxira nusxasini yuklab olish</a>\n\n'
+            "🔐 Havolani boshqa odamlarga yubormang.",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        logging.info("Administrator uchun bir martalik SQLite backup havolasi yaratildi.")
+    except Exception:
+        logging.exception("SQLite backup havolasini yaratishda xatolik yuz berdi.")
+        bot.send_message(message.chat.id, "❌ Zaxira havolasini yaratishda xatolik yuz berdi.")
+
+
 
 @bot.message_handler(commands=["bonus"])
 def admin_bonus_command(message):
@@ -2000,49 +2072,54 @@ def hybrid_db_check(
         raise HTTPException(status_code=500, detail=f"Hybrid DB diagnostic failed: {e}")
 
 
-# --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
-# Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
-# The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
-# so the live /data database is never moved, renamed or modified.
-SQLITE_BACKUP_TOKEN = os.getenv("SQLITE_BACKUP_TOKEN", "").strip()
+# --- SQLITE BACKUP DOWNLOAD ENDPOINT ---
+# Faqat botdagi administrator buyrug'i bergan, 10 daqiqalik bir martalik token qabul qilinadi.
 BACKUP_DIR = "/tmp/quiz_pilot_backups"
+
 
 def _remove_temp_backup(path: str):
     try:
         if os.path.exists(path):
             os.remove(path)
     except Exception:
-        logging.exception("Temporary SQLite backup cleanup failed")
+        logging.exception("Vaqtinchalik SQLite backup faylini o'chirishda xatolik.")
+
 
 @app.get("/admin/sqlite-backup")
 def download_sqlite_backup(
-    token: str = Query(..., min_length=16),
+    token: str = Query(..., min_length=32, max_length=128),
     background_tasks: BackgroundTasks = None,
 ):
-    if not SQLITE_BACKUP_TOKEN:
-        raise HTTPException(status_code=503, detail="SQLite backup endpoint is not configured")
-    if not secrets.compare_digest(token, SQLITE_BACKUP_TOKEN):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not os.path.exists(DB_PATH):
-        raise HTTPException(status_code=404, detail="SQLite database file was not found")
+    if not _consume_sqlite_backup_token(token):
+        raise HTTPException(
+            status_code=403,
+            detail="Havola yaroqsiz, muddati tugagan yoki avval ishlatilgan. Botdan /db_backup buyrug'ini qayta yuboring.",
+        )
+    if not os.path.isfile(DB_PATH):
+        raise HTTPException(status_code=404, detail="SQLite baza fayli topilmadi.")
 
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"quiz_pilot_sqlite_backup_{stamp}.db")
+    stamp = datetime.now(timezone(timedelta(hours=5))).strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(BACKUP_DIR, f"quiz_ai_sqlite_backup_{stamp}.db")
 
     try:
-        # sqlite3 backup API creates a consistent snapshot while the app is live.
-        src_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        dst_conn = sqlite3.connect(backup_path, check_same_thread=False)
+        # SQLite backup API jonli bazaning izchil nusxasini yaratadi;
+        # asosiy DB fayli ko'chirilmaydi va o'zgartirilmaydi.
+        src_conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        dst_conn = sqlite3.connect(backup_path, timeout=30, check_same_thread=False)
         try:
+            src_conn.execute("PRAGMA busy_timeout=30000")
             src_conn.backup(dst_conn)
+            check_result = dst_conn.execute("PRAGMA quick_check").fetchone()
+            if not check_result or check_result[0] != "ok":
+                raise sqlite3.DatabaseError("Zaxira nusxasi quick_check tekshiruvidan o'tmadi.")
         finally:
             dst_conn.close()
             src_conn.close()
     except Exception:
         _remove_temp_backup(backup_path)
-        logging.exception("SQLite backup creation failed")
-        raise HTTPException(status_code=500, detail="SQLite backup creation failed")
+        logging.exception("SQLite backup yaratishda xatolik yuz berdi.")
+        raise HTTPException(status_code=500, detail="Zaxira nusxasini yaratib bo'lmadi.")
 
     tasks = background_tasks or BackgroundTasks()
     tasks.add_task(_remove_temp_backup, backup_path)
@@ -2051,6 +2128,7 @@ def download_sqlite_backup(
         media_type="application/octet-stream",
         filename=os.path.basename(backup_path),
         background=tasks,
+        headers={"Cache-Control": "no-store"},
     )
 
 
