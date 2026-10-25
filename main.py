@@ -1356,47 +1356,54 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
     user_id = message.from_user.id
-    add_user_to_db(user_id)
-    user_lang = get_user_lang(user_id)
+    logging.info("/start qabul qilindi | user_id=%s | chat_id=%s", user_id, message.chat.id)
+    try:
+        add_user_to_db(user_id)
+        user_lang = get_user_lang(user_id)
+        if user_lang not in MESSAGES:
+            user_lang = "uz"
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
+        welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # Admin menyusi alohida qoladi: foydalanuvchi tugmalari Admin chatiga qo'shilmaydi.
-    if _admin_only(message):
-        markup.row(telebot.types.KeyboardButton(text="/help_admin"))
-        markup.row(telebot.types.KeyboardButton(text="/start"))
-    else:
-        # /start birinchi qatorda alohida, asosiy ilova tugmasi esa uning tagida keng joylashadi.
-        markup.row(telebot.types.KeyboardButton(text="/start"))
-        app_url = os.getenv("WEB_APP_URL", "").strip().rstrip("/")
-        if not app_url:
-            railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
-            if railway_domain:
-                app_url = railway_domain if railway_domain.startswith(("https://", "http://")) else "https://" + railway_domain
-        if app_url.startswith("https://"):
-            markup.row(telebot.types.KeyboardButton(
-                text=MESSAGES[user_lang].get("open_app", MESSAGES["uz"]["open_app"]),
-                web_app=telebot.types.WebAppInfo(url=app_url)
-            ))
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        # Admin menyusi alohida qoladi: foydalanuvchi tugmalari Admin chatiga qo'shilmaydi.
+        if _admin_only(message):
+            markup.row(telebot.types.KeyboardButton(text="/help_admin"))
+            markup.row(telebot.types.KeyboardButton(text="/start"))
         else:
-            # URL sozlanmagan bo'lsa, tugma noto'g'ri manzil ochmasligi uchun uni qo'shmaymiz.
-            logging.warning("Ilova tugmasi qo'shilmadi: WEB_APP_URL yoki RAILWAY_PUBLIC_DOMAIN sozlanmagan")
+            # /start birinchi qatorda alohida, asosiy ilova tugmasi esa uning tagida keng joylashadi.
+            markup.row(telebot.types.KeyboardButton(text="/start"))
+            app_url = os.getenv("WEB_APP_URL", "").strip().rstrip("/")
+            if not app_url:
+                railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
+                if railway_domain:
+                    app_url = railway_domain if railway_domain.startswith(("https://", "http://")) else "https://" + railway_domain
+            if app_url.startswith("https://"):
+                markup.row(telebot.types.KeyboardButton(
+                    text=MESSAGES[user_lang].get("open_app", MESSAGES["uz"]["open_app"]),
+                    web_app=telebot.types.WebAppInfo(url=app_url)
+                ))
+            else:
+                # URL sozlanmagan bo'lsa, tugma noto'g'ri manzil ochmasligi uchun uni qo'shmaymiz.
+                logging.warning("Ilova tugmasi qo'shilmadi: WEB_APP_URL yoki RAILWAY_PUBLIC_DOMAIN sozlanmagan")
 
-        # Foydalanuvchi uchun tarif/limit va yordam tugmalari ikki ustunda.
-        # Mobil Telegram tugmalarida matnlar bir tekis turishi uchun UZ/RU
-        # yorliqlari ixchamlashtirildi; tugmalarning handlerlari eski matnlarni ham qabul qiladi.
-        button_texts = {
-            "uz": ("👑 Tarif va limitlar", "💬 Admin bilan aloqa"),
-            "ru": ("👑 Тариф и лимиты", "💬 Связь с админом"),
-            "en": ("👑 My plan and limits", "💬 Contact Admin"),
-        }
-        tariff_btn_text, support_btn_text = button_texts.get(user_lang, button_texts["uz"])
-        markup.row(
-            telebot.types.KeyboardButton(text=tariff_btn_text),
-            telebot.types.KeyboardButton(text=support_btn_text),
-        )
-    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+            # Foydalanuvchi uchun tarif/limit va yordam tugmalari ikki ustunda.
+            # Mobil Telegram tugmalarida matnlar bir tekis turishi uchun UZ/RU
+            # yorliqlari ixchamlashtirildi; tugmalarning handlerlari eski matnlarni ham qabul qiladi.
+            button_texts = {
+                "uz": ("👑 Tarif va limitlar", "💬 Admin bilan aloqa"),
+                "ru": ("👑 Тариф и лимиты", "💬 Связь с админом"),
+                "en": ("👑 My plan and limits", "💬 Contact Admin"),
+            }
+            tariff_btn_text, support_btn_text = button_texts.get(user_lang, button_texts["uz"])
+            markup.row(
+                telebot.types.KeyboardButton(text=tariff_btn_text),
+                telebot.types.KeyboardButton(text=support_btn_text),
+            )
+        bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+        logging.info("/start javobi yuborildi | user_id=%s | til=%s", user_id, user_lang)
+    except Exception:
+        logging.exception("/start handler xatosi | user_id=%s | chat_id=%s", user_id, message.chat.id)
 
 
 @bot.message_handler(content_types=["text"], func=lambda message: (message.text or "").strip() in {
@@ -4006,17 +4013,19 @@ def set_language(user_id: int, lang: str):
     lang = (lang or "").strip().lower()
     if lang not in MESSAGES:
         raise HTTPException(status_code=400, detail="Til qo'llab-quvvatlanmaydi")
+    user_id = int(user_id)
+    # Mini App tilni botdagi /start dan oldin yuborsa ham foydalanuvchini yaratamiz.
+    add_user_to_db(user_id)
     conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     try:
         conn.execute("PRAGMA busy_timeout=10000;")
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE users SET language = ? WHERE user_id = ?", (lang, int(user_id))
+            "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
         )
-        updated = cursor.rowcount
         conn.commit()
-        if not updated:
-            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=500, detail="Foydalanuvchi tilini saqlab bo'lmadi")
     finally:
         conn.close()
     logging.info("Foydalanuvchi tili yangilandi | user_id=%s | til=%s", user_id, lang)
