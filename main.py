@@ -1362,24 +1362,38 @@ def send_welcome(message):
     welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
+    # Admin menyusi alohida qoladi: foydalanuvchi tugmalari Admin chatiga qo'shilmaydi.
     if _admin_only(message):
-        btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
-        markup.row(btn_help_admin)
-    # /start asosiy tugma bo'lib, birinchi qatorda alohida turadi.
-    btn_start = telebot.types.KeyboardButton(text="/start")
-    markup.row(btn_start)
-    # Foydalanuvchilar uchun foydali tugmalar: tarif/limitlar va mavjud Admin yordami.
-    button_texts = {
-        "uz": ("👑 Mening tariflarim va limitlarim", "💬 Admin bilan bog'lanish"),
-        "ru": ("👑 Мой тариф и лимиты", "💬 Связаться с администратором"),
-        "en": ("👑 My plan and limits", "💬 Contact Admin"),
-    }
-    tariff_btn_text, support_btn_text = button_texts.get(user_lang, button_texts["uz"])
-    markup.row(
-        telebot.types.KeyboardButton(text=tariff_btn_text),
-        telebot.types.KeyboardButton(text=support_btn_text),
-    )
+        markup.row(telebot.types.KeyboardButton(text="/help_admin"))
+        markup.row(telebot.types.KeyboardButton(text="/start"))
+    else:
+        # /start birinchi qatorda alohida, asosiy ilova tugmasi esa uning tagida keng joylashadi.
+        markup.row(telebot.types.KeyboardButton(text="/start"))
+        app_url = os.getenv("WEB_APP_URL", "").strip().rstrip("/")
+        if not app_url:
+            railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
+            if railway_domain:
+                app_url = railway_domain if railway_domain.startswith(("https://", "http://")) else "https://" + railway_domain
+        if app_url.startswith("https://"):
+            markup.row(telebot.types.KeyboardButton(
+                text=MESSAGES[user_lang].get("open_app", MESSAGES["uz"]["open_app"]),
+                web_app=telebot.types.WebAppInfo(url=app_url)
+            ))
+        else:
+            # URL sozlanmagan bo'lsa, tugma noto'g'ri manzil ochmasligi uchun uni qo'shmaymiz.
+            logging.warning("Ilova tugmasi qo'shilmadi: WEB_APP_URL yoki RAILWAY_PUBLIC_DOMAIN sozlanmagan")
+
+        # Foydalanuvchi uchun tarif/limit va yordam tugmalari ikki ustunda.
+        button_texts = {
+            "uz": ("👑 Mening tariflarim va limitlarim", "💬 Admin bilan bog'lanish"),
+            "ru": ("👑 Мой тариф и лимиты", "💬 Связаться с администратором"),
+            "en": ("👑 My plan and limits", "💬 Contact Admin"),
+        }
+        tariff_btn_text, support_btn_text = button_texts.get(user_lang, button_texts["uz"])
+        markup.row(
+            telebot.types.KeyboardButton(text=tariff_btn_text),
+            telebot.types.KeyboardButton(text=support_btn_text),
+        )
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 
