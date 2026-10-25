@@ -1384,9 +1384,11 @@ def send_welcome(message):
             logging.warning("Ilova tugmasi qo'shilmadi: WEB_APP_URL yoki RAILWAY_PUBLIC_DOMAIN sozlanmagan")
 
         # Foydalanuvchi uchun tarif/limit va yordam tugmalari ikki ustunda.
+        # Mobil Telegram tugmalarida matnlar bir tekis turishi uchun UZ/RU
+        # yorliqlari ixchamlashtirildi; tugmalarning handlerlari eski matnlarni ham qabul qiladi.
         button_texts = {
-            "uz": ("👑 Mening tariflarim va limitlarim", "💬 Admin bilan bog'lanish"),
-            "ru": ("👑 Мой тариф и лимиты", "💬 Связаться с администратором"),
+            "uz": ("👑 Tarif va limitlar", "💬 Admin bilan aloqa"),
+            "ru": ("👑 Тариф и лимиты", "💬 Связь с админом"),
             "en": ("👑 My plan and limits", "💬 Contact Admin"),
         }
         tariff_btn_text, support_btn_text = button_texts.get(user_lang, button_texts["uz"])
@@ -1398,7 +1400,8 @@ def send_welcome(message):
 
 
 @bot.message_handler(content_types=["text"], func=lambda message: (message.text or "").strip() in {
-    "👑 Mening tariflarim va limitlarim", "👑 Мой тариф и лимиты", "👑 My plan and limits"
+    "👑 Mening tariflarim va limitlarim", "👑 Мой тариф и лимиты", "👑 My plan and limits",
+    "👑 Tarif va limitlar", "👑 Тариф и лимиты"
 })
 def show_user_plan_and_limits(message):
     """Foydalanuvchining haqiqiy tarif holati va qolgan bepul limitlarini ko'rsatadi."""
@@ -1456,7 +1459,8 @@ def show_user_plan_and_limits(message):
 
 
 @bot.message_handler(content_types=["text"], func=lambda message: (message.text or "").strip() in {
-    "💬 Admin bilan bog'lanish", "💬 Связаться с администратором", "💬 Contact Admin"
+    "💬 Admin bilan bog'lanish", "💬 Связаться с администратором", "💬 Contact Admin",
+    "💬 Admin bilan aloqa", "💬 Связь с админом"
 })
 def start_support_from_keyboard(message):
     user_id = message.from_user.id
@@ -3997,15 +4001,26 @@ def toggle_public(quiz_id: str, user_id: int, is_public: int):
 
 @app.post("/api/set-language")
 def set_language(user_id: int, lang: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+    # Faqat qo'llab-quvvatlanadigan tillarni saqlaymiz; bot /start paytida
+    # aynan shu qiymatni o'qib, xabar va klaviaturani bir xil tilda chiqaradi.
+    lang = (lang or "").strip().lower()
+    if lang not in MESSAGES:
+        raise HTTPException(status_code=400, detail="Til qo'llab-quvvatlanmaydi")
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+    try:
+        conn.execute("PRAGMA busy_timeout=10000;")
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET language = ? WHERE user_id = ?", (lang, int(user_id))
+        )
+        updated = cursor.rowcount
+        conn.commit()
+        if not updated:
+            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+    finally:
+        conn.close()
+    logging.info("Foydalanuvchi tili yangilandi | user_id=%s | til=%s", user_id, lang)
+    return {"status": "ok", "language": lang}
 
 
 # --- O'QITUVCHI PROFESSIONAL VOSITALARI ---
