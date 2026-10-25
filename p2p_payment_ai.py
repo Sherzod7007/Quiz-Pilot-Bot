@@ -66,7 +66,8 @@ PAYMENT_OCR_RETRY_BASE_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_BASE_SE
 PAYMENT_OCR_RETRY_MAX_SECONDS = max(PAYMENT_OCR_RETRY_BASE_SECONDS, int(os.getenv("PAYMENT_OCR_RETRY_MAX_SECONDS", "600")))
 PAYMENT_OCR_RETRY_SCAN_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_SCAN_SECONDS", "10")))
 PAYMENT_OCR_PROCESSING_STALE_SECONDS = max(60, int(os.getenv("PAYMENT_OCR_PROCESSING_STALE_SECONDS", "900")))
-P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
+P2P_CARD_NUMBER = re.sub(r"\D", "", os.getenv("P2P_CARD_NUMBER", "").strip())
+PAYMENT_CARDHOLDER = os.getenv("PAYMENT_CARDHOLDER", "").strip()
 PAYMENT_OCR_MAX_IMAGE_MB = max(1, int(os.getenv("PAYMENT_OCR_MAX_IMAGE_MB", "8")))
 PAYMENT_OCR_DAILY_MAX_REQUESTS = max(1, int(os.getenv("PAYMENT_OCR_DAILY_MAX_REQUESTS", "5000")))
 PAYMENT_OCR_MONTHLY_MAX_REQUESTS = max(1, int(os.getenv("PAYMENT_OCR_MONTHLY_MAX_REQUESTS", "50000")))
@@ -582,6 +583,7 @@ P2P_MESSAGES = {
         "duplicate_tx": "❌ Bu toʻlov cheki avval ishlatilgan. Tarif avtomatik faollashtirilmadi.",
         "card_mismatch": "❌ Toʻlov tasdiqlanmadi: chekdagi qabul qiluvchi karta raqami biz ko‘rsatgan kartaga mos emas. Premium faollashtirilmadi. Iltimos, toʻgʻri kartaga toʻlov qilib, yangi chek yuboring.",
         "card_unreadable": "⚠️ Chekdagi qabul qiluvchi karta raqamini aniq oʻqib boʻlmadi. Premium faollashtirilmadi. Iltimos, karta raqami aniq koʻrinadigan chek rasmini qayta yuboring.",
+        "name_mismatch": "❌ Chekdagi karta egasining ismi bizdagi karta egasi maʼlumotiga mos kelmadi. Premium faollashtirilmadi. Toʻlovni ko‘rsatilgan kartaga amalga oshirganingizni tekshirib, toʻgʻri chek yuboring.",
         "retry_receipt_title": "❌ Chek tekshiruvdan oʻtmadi.",
         "retry_receipt_intro": "Quyidagi muammolar aniqlandi:",
         "retry_receipt_amount": "• Chekdagi summa tanlangan tarif narxiga mos emas.",
@@ -613,6 +615,7 @@ P2P_MESSAGES = {
         "duplicate_tx": "❌ Этот платёжный чек уже использовался. Тариф автоматически не активирован.",
         "card_mismatch": "❌ Платёж не подтверждён: номер карты получателя в чеке не совпадает с указанной нами картой. Premium не активирован. Пожалуйста, оплатите на правильную карту и отправьте новый чек.",
         "card_unreadable": "⚠️ Не удалось чётко прочитать номер карты получателя на чеке. Premium не активирован. Пожалуйста, отправьте чек, на котором номер карты хорошо виден.",
+        "name_mismatch": "❌ Имя владельца карты в чеке не совпадает с данными указанной карты. Premium не активирован. Проверьте, что оплатили на указанную карту, и отправьте правильный чек.",
         "retry_receipt_title": "❌ Чек не прошёл проверку.",
         "retry_receipt_intro": "Обнаружены следующие проблемы:",
         "retry_receipt_amount": "• Сумма в чеке не совпадает с ценой выбранного тарифа.",
@@ -644,6 +647,7 @@ P2P_MESSAGES = {
         "duplicate_tx": "❌ This payment receipt has already been used. The plan was not activated automatically.",
         "card_mismatch": "❌ Payment not confirmed: the recipient card number on the receipt does not match the card we provided. Premium was not activated. Please pay to the correct card and submit a new receipt.",
         "card_unreadable": "⚠️ The recipient card number on the receipt could not be read clearly. Premium was not activated. Please resend a receipt where the card number is clearly visible.",
+        "name_mismatch": "❌ The cardholder name on the receipt does not match the configured cardholder. Premium was not activated. Check that you paid to the specified card and send the correct receipt.",
         "retry_receipt_title": "❌ The receipt did not pass verification.",
         "retry_receipt_intro": "The following issues were detected:",
         "retry_receipt_amount": "• The receipt amount does not match the selected plan price.",
@@ -818,11 +822,22 @@ def _approve(tx_id, user_id):
             plan = "teachers"
         elif "haft" in low or "недель" in low or "weekly" in low or "7" in low:
             plan = "weekly"
-        elif "oy" in low or "месяч" in low or "monthly" in low or "30" in low:
+        elif "oy" in low or "месяч" in low or "monthly" in low:
             plan = "monthly"
         else:
             plan = "daily"
-        durations = {"daily": 86400, "weekly": 7*86400, "monthly": 30*86400, "teachers": 30*86400}
+        def _duration_seconds(env_name, default):
+            try:
+                value = int(os.getenv(env_name, str(default)))
+                return value if value > 0 else default
+            except (TypeError, ValueError):
+                return default
+        durations = {
+            "daily": _duration_seconds("TARIFF_DAILY_HOURS", 24) * 3600,
+            "weekly": _duration_seconds("TARIFF_WEEKLY_DAYS", 7) * 86400,
+            "monthly": _duration_seconds("TARIFF_MONTHLY_DAYS", 30) * 86400,
+            "teachers": _duration_seconds("TARIFF_TEACHERS_DAYS", 30) * 86400,
+        }
         now = _now()
         old = cur.execute("SELECT premium_until FROM users WHERE user_id=?", (user_id,)).fetchone()
         old_until = int(old[0] or 0) if old else 0
@@ -1072,6 +1087,10 @@ def _process(item):
         expected_card = _last4(P2P_CARD_NUMBER)
         actual_card = _last4(result.recipient_card_last4)
         card_ok = bool(expected_card) and bool(actual_card) and expected_card == actual_card
+        expected_name = PAYMENT_CARDHOLDER.strip()
+        actual_name = (result.recipient_name or "").strip()
+        name_check_enabled = bool(expected_name)
+        name_ok = _name_matches(expected_name, actual_name) if name_check_enabled and actual_name else False
 
         # Clear card failures are actionable user errors, not admin-review cases.
         # If the expected card is not configured, retain admin review instead of blaming the user.
@@ -1162,6 +1181,35 @@ def _process(item):
                 f"🤖 Ishlatilgan model: {used_model}\n\n"
                 f"🔎 Sabab: {reason_text}\n\n"
                 f"ℹ️ Premium avtomatik faollashtirilmadi.",
+                file_id, tx_id, user_id
+            )
+            return
+
+        # Karta egasi ismi: to'liq ism va ism/familiya bosh harfi variantlari
+        # _name_matches() orqali tekshiriladi. Aniqlangan boshqa ism — aniq xato:
+        # mijozga xabar beriladi, administratorga yuborilmaydi.
+        if name_check_enabled and actual_name and not name_ok:
+            reason_text = f"Chekdagi karta egasi nomi mos emas: {actual_name}"
+            _mark_by_tx(tx_id, status="rejected", reason=reason_text, processed_at=_now(), next_retry_at=0)
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=ISM_MOS_EMAS_RAD_ETILDI | buyurtma=%s | foydalanuvchi=%s | chekdagi_ism=%s",
+                tx_id, user_id, actual_name
+            )
+            _notify_user(user_id, _p2p_message(user_id, "name_mismatch"))
+            return
+
+        # Ism OCR orqali umuman o'qilmasa, aniq boshqa ism deb hisoblamaymiz;
+        # qolgan tekshiruvlar muvaffaqiyatli bo'lsa, xavfsiz ravishda admin ko'rib chiqadi.
+        if name_check_enabled and not actual_name:
+            reason_text = "Chekdagi karta egasi ismi OCR orqali aniqlanmadi"
+            _mark_by_tx(tx_id, status="review", reason=reason_text)
+            logging.warning("P2P TO‘LOV QARORI | qaror=ADMIN_TEKSHIRUVI | buyurtma=%s | sabab=karta_egasi_ismi_aniqlanmadi", tx_id)
+            _notify_user(user_id, _p2p_review_message(user_id, ["review_confidence"]))
+            display_name, username = _user_identity(user_id)
+            _notify_admin_review(
+                f"⚠️ P2P TO‘LOV — KARTA EGASI ISMI ANIQLANMADI\n\n"
+                f"🧾 Buyurtma: {tx_id}\n👤 Foydalanuvchi: {display_name}\n🆔 Telegram ID: {user_id}\n"
+                f"\n🔎 Sabab: {reason_text}\nℹ️ Premium avtomatik faollashtirilmadi.",
                 file_id, tx_id, user_id
             )
             return
@@ -1275,6 +1323,44 @@ def _mark_by_tx(tx_id, **fields):
         conn.commit()
     finally:
         conn.close()
+
+
+def _normalize_person_name(value):
+    """Ismni OCR taqqoslash uchun harflar va bo'shliqlarga normallashtiradi."""
+    value = str(value or "").upper().replace("ʻ", "'").replace("’", "'")
+    value = re.sub(r"[^A-ZА-ЯЁЎҚҒҲ'\s-]", " ", value)
+    return [part for part in re.split(r"[\s-]+", value) if part]
+
+
+def _name_matches(expected, actual):
+    """To'liq ismni yoki xavfsiz bosh-harf variantlarini, tartibdan qat'i nazar, solishtiradi."""
+    expected_parts = _normalize_person_name(expected)
+    actual_parts = _normalize_person_name(actual)
+    if not expected_parts or not actual_parts or len(expected_parts) != len(actual_parts):
+        return False
+
+    # Har bir chekdagi qism alohida kutilgan qismga mos tushishi shart.
+    # Masalan, Sherzod Kabulov uchun: KABULOV SH, SH KABULOV,
+    # SHERZOD K va K SHERZOD qabul qilinadi; boshqa ism qabul qilinmaydi.
+    def compatible(receipt_part, expected_part):
+        if receipt_part == expected_part:
+            return True
+        # O'zbekcha ism bosh harfi "Sh" ikki harf bilan yozilishi mumkin.
+        return len(receipt_part) == 1 and expected_part.startswith(receipt_part) or (
+            receipt_part == "SH" and expected_part.startswith("SH")
+        )
+
+    def assign(index, used):
+        if index == len(actual_parts):
+            return True
+        part = actual_parts[index]
+        for expected_index, expected_part in enumerate(expected_parts):
+            if expected_index not in used and compatible(part, expected_part):
+                if assign(index + 1, used | {expected_index}):
+                    return True
+        return False
+
+    return assign(0, set())
 
 
 def _worker():
