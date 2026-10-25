@@ -13430,7 +13430,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     <span class="tariff-desc">24 soat mutlaqo cheksiz test yaratish</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">10 000 so'm</span>
+                    <span class="tariff-price" id="tariff-price-daily">10 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('daily')">Faollashtirish</button>
                 </div>
             </div>
@@ -13441,7 +13441,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     <span class="tariff-desc">7 kun davomida cheksiz foydalanish</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">35 000 so'm</span>
+                    <span class="tariff-price" id="tariff-price-weekly">35 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('weekly')">Faollashtirish</button>
                 </div>
             </div>
@@ -13452,7 +13452,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     <span class="tariff-desc">30 kun davomida eng qulay cheksiz rejim</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">65 000 so'm</span>
+                    <span class="tariff-price" id="tariff-price-monthly">65 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('monthly')">Faollashtirish</button>
                 </div>
             </div>
@@ -13463,7 +13463,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     <span class="tariff-desc">30 kunlik Guruhlar, sessiyalar, topshiriqlar va o‘quvchilarning o‘zlashtirishini boshqarish (kengaytirilgan)</span>
                 </div>
                 <div class="tariff-action">
-                    <span class="tariff-price">95 000 so'm</span>
+                    <span class="tariff-price" id="tariff-price-teachers">95 000 so'm</span>
                     <button class="activate-btn" data-lang="activate_btn" onclick="openPaymentModal('teachers')">Faollashtirish</button>
                 </div>
             </div>
@@ -13474,7 +13474,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
         <div class="modal-box">
             <h4 id="m-tariff-title">Tarif</h4>
             <p><span data-lang="modal_payment_text">To'lov summasi:</span> <b id="m-tariff-price" style="color:#fff;">0</b><br><span data-lang="modal_payment_hint">Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:</span></p>
-            <div class="card-number-box" onclick="copyCardNumber()">9860 0601 3135 0575</div>
+            <div class="card-number-box" id="payment-card-number" onclick="copyCardNumber()">Karta yuklanmoqda...</div>
             <span class="copy-hint" data-lang="copy_hint">Karta raqamiga bosib nusxa oling 📄</span>
             <div id="toast-notif" class="toast-msg" data-lang="toast_copied">Karta raqami nusxalandi! ✅</div>
             <div class="modal-buttons">
@@ -13710,11 +13710,56 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
         };
 
         const tariffDetails = {
-            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "10 000 so'm" },
-            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "35 000 so'm" },
-            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "65 000 so'm" },
-            teachers: { uz: "O'qituvchilar Uchun (30 kun)", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "95 000 so'm" }
+            daily: { uz: "Kunlik Cheksiz (24 soat)", ru: "Суточный Безлимит (24 ч)", en: "Daily Unlimited (24h)", price: "10 000 so'm", duration: "24 soat" },
+            weekly: { uz: "Haftalik Cheksiz (7 kun)", ru: "Недельный Безлимит (7 дн)", en: "Weekly Unlimited (7d)", price: "35 000 so'm", duration: "7 kun" },
+            monthly: { uz: "Oylik Cheksiz (30 kun)", ru: "Месячный Безлимит (30 дн)", en: "Monthly Unlimited (30d)", price: "65 000 so'm", duration: "30 kun" },
+            teachers: { uz: "O'qituvchilar Uchun (30 kun)", ru: "Для Учителей (30 дн)", en: "For Teachers (30d)", price: "95 000 so'm", duration: "30 kun" }
         };
+        let tariffConfigLoaded = false;
+        function formatDuration(value, unit, lang) {
+            if (unit === 'hours') {
+                if (lang === 'ru') return `${value} ч`;
+                if (lang === 'en') return `${value}h`;
+                return `${value} soat`;
+            }
+            if (lang === 'ru') return `${value} дн`;
+            if (lang === 'en') return `${value}d`;
+            return `${value} kun`;
+        }
+        function applyTariffConfig(config) {
+            if (!config || !config.tariffs) return;
+            Object.keys(tariffDetails).forEach(key => {
+                const item = config.tariffs[key];
+                if (!item) return;
+                tariffDetails[key].price = item.price || tariffDetails[key].price;
+                const names = item.names || {};
+                ['uz','ru','en'].forEach(lang => { if (names[lang]) tariffDetails[key][lang] = names[lang]; });
+                tariffDetails[key].duration = formatDuration(item.duration_value, item.duration_unit, currentLang);
+                const priceNode = document.getElementById(`tariff-price-${key}`);
+                if (priceNode) priceNode.innerText = tariffDetails[key].price;
+                const card = document.getElementById(`card-${key}`);
+                if (card) {
+                    const desc = card.querySelector('.tariff-desc');
+                    if (desc) {
+                        const duration = tariffDetails[key].duration;
+                        if (currentLang === 'ru') desc.innerText = `${duration} безлимитного использования`;
+                        else if (currentLang === 'en') desc.innerText = `${duration} of unlimited access`;
+                        else desc.innerText = `${duration} davomida cheksiz foydalanish`;
+                    }
+                }
+            });
+            const cardNumber = document.getElementById('payment-card-number');
+            if (cardNumber) cardNumber.innerText = config.card_number ? config.card_number.replace(/\D/g, '').replace(/(.{4})/g, '$1 ').trim() : 'Karta sozlanmagan';
+            tariffConfigLoaded = true;
+        }
+        async function loadTariffConfig() {
+            try {
+                const response = await fetch(`${BASE_URL}/api/tariff-config`, { cache: 'no-store' });
+                if (!response.ok) throw new Error('Tarif sozlamasini olish muvaffaqiyatsiz');
+                applyTariffConfig(await response.json());
+            } catch (e) { console.log('Tarif sozlamalari yuklanmadi:', e); }
+        }
+        loadTariffConfig();
 
         function showAppAlert(icon, text, callback = null) {
             document.getElementById('app-dialog-icon').innerText = icon;
@@ -13761,7 +13806,9 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
         }
 
         function copyCardNumber() {
-            navigator.clipboard.writeText("9860060131350575").then(() => {
+            const cardText = (document.getElementById('payment-card-number')?.innerText || '').replace(/\D/g, '');
+            if (!cardText) return;
+            navigator.clipboard.writeText(cardText).then(() => {
                 const toast = document.getElementById('toast-notif');
                 toast.style.display = 'inline-block';
                 setTimeout(() => { toast.style.display = 'none'; }, 2000);
