@@ -300,29 +300,43 @@ DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
 
-# --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
+# --- TARIFLAR: Railway Variables yagona manba ---
+def _env_positive_int(name, default, minimum=1):
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+        return value if value >= minimum else default
+    except (TypeError, ValueError):
+        logging.warning("Railway sozlamasi noto'g'ri | o'zgaruvchi=%s | standart qiymat ishlatiladi", name)
+        return default
+
+def _format_price(amount):
+    return f"{amount:,}".replace(",", " ") + " so'm"
+
+_daily_price = _env_positive_int("TARIFF_DAILY_PRICE", 10000)
+_weekly_price = _env_positive_int("TARIFF_WEEKLY_PRICE", 35000)
+_monthly_price = _env_positive_int("TARIFF_MONTHLY_PRICE", 65000)
+_teachers_price = _env_positive_int("TARIFF_TEACHERS_PRICE", 95000)
+_daily_hours = _env_positive_int("TARIFF_DAILY_HOURS", 24)
+_weekly_days = _env_positive_int("TARIFF_WEEKLY_DAYS", 7)
+_monthly_days = _env_positive_int("TARIFF_MONTHLY_DAYS", 30)
+_teachers_days = _env_positive_int("TARIFF_TEACHERS_DAYS", 30)
 TARIFFS = {
-    "daily": {
-        "price": "10 000 so'm",
-        "duration": 24 * 3600,
-        "names": {"uz": "Kunlik Cheksiz (24 soat)", "ru": "Суточный Безлимит (24 ч)", "en": "Daily Unlimited (24h)"},
-    },
-    "weekly": {
-        "price": "35 000 so'm",
-        "duration": 7 * 24 * 3600,
-        "names": {"uz": "Haftalik Cheksiz (7 kun)", "ru": "Недельный Безлимит (7 дн)", "en": "Weekly Unlimited (7d)"},
-    },
-    "monthly": {
-        "price": "65 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "Oylik Cheksiz (30 kun)", "ru": "Месячный Безлимит (30 дн)", "en": "Monthly Unlimited (30d)"},
-    },
-    "teachers": {
-        "price": "95 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
-    },
+    "daily": {"price": _format_price(_daily_price), "price_amount": _daily_price, "duration": _daily_hours * 3600,
+              "duration_value": _daily_hours, "duration_unit": "hours",
+              "names": {"uz": f"Kunlik Cheksiz ({_daily_hours} soat)", "ru": f"Суточный Безлимит ({_daily_hours} ч)", "en": f"Daily Unlimited ({_daily_hours}h)"}},
+    "weekly": {"price": _format_price(_weekly_price), "price_amount": _weekly_price, "duration": _weekly_days * 86400,
+               "duration_value": _weekly_days, "duration_unit": "days",
+               "names": {"uz": f"Haftalik Cheksiz ({_weekly_days} kun)", "ru": f"Недельный Безлимит ({_weekly_days} дн)", "en": f"Weekly Unlimited ({_weekly_days}d)"}},
+    "monthly": {"price": _format_price(_monthly_price), "price_amount": _monthly_price, "duration": _monthly_days * 86400,
+                "duration_value": _monthly_days, "duration_unit": "days",
+                "names": {"uz": f"Oylik Cheksiz ({_monthly_days} kun)", "ru": f"Месячный Безлимит ({_monthly_days} дн)", "en": f"Monthly Unlimited ({_monthly_days}d)"}},
+    "teachers": {"price": _format_price(_teachers_price), "price_amount": _teachers_price, "duration": _teachers_days * 86400,
+                 "duration_value": _teachers_days, "duration_unit": "days",
+                 "names": {"uz": f"O'qituvchilar Uchun ({_teachers_days} kun)", "ru": f"Для Учителей ({_teachers_days} дн)", "en": f"For Teachers ({_teachers_days}d)"}},
 }
+logging.info("Tariflar Railway'dan yuklandi | kunlik=%s/%s soat | haftalik=%s/%s kun | oylik=%s/%s kun | o'qituvchilar=%s/%s kun",
+             TARIFFS['daily']['price'], _daily_hours, TARIFFS['weekly']['price'], _weekly_days,
+             TARIFFS['monthly']['price'], _monthly_days, TARIFFS['teachers']['price'], _teachers_days)
 # Bepul foydalanuvchi limitlari Railway Variables orqali boshqariladi.
 FREE_QUIZ_LIMIT = max(0, int(os.getenv("FREE_QUIZ_LIMIT", "3")))
 FREE_PUBLIC_LIMIT = max(0, int(os.getenv("FREE_PUBLIC_LIMIT", "3")))
@@ -331,7 +345,8 @@ logging.info(
     "Bepul limitlar sozlamasi | AI_test=%s | ommaviy_test=%s | flash_kartochka=%s",
     FREE_QUIZ_LIMIT, FREE_PUBLIC_LIMIT, FREE_FLASHCARD_LIMIT
 )
-P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
+P2P_CARD_NUMBER = re.sub(r"\D", "", os.getenv("P2P_CARD_NUMBER", "").strip())
+PAYMENT_CARDHOLDER = os.getenv("PAYMENT_CARDHOLDER", "").strip()
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
     return bool(status and "PRO" in status and premium_until and int(time.time()) <= premium_until)
@@ -2615,6 +2630,24 @@ def read_root(request: Request):
     })
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+@app.get("/api/tariff-config")
+def get_tariff_config():
+    """Mini App uchun Railway'dagi joriy tariflar va ommaga ko'rsatiladigan karta raqami."""
+    return {
+        "tariffs": {
+            key: {
+                "price": item["price"],
+                "duration": item["duration"],
+                "duration_value": item["duration_value"],
+                "duration_unit": item["duration_unit"],
+                "names": item["names"],
+            }
+            for key, item in TARIFFS.items()
+        },
+        "card_number": P2P_CARD_NUMBER,
+    }
 
 
 @app.post("/api/payment-intent")
