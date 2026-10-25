@@ -1356,127 +1356,20 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
     user_id = message.from_user.id
-    logging.info("/start qabul qilindi | user_id=%s | chat_id=%s", user_id, message.chat.id)
-    try:
-        add_user_to_db(user_id)
-        user_lang = get_user_lang(user_id)
-        if user_lang not in MESSAGES:
-            user_lang = "uz"
+    add_user_to_db(user_id)
+    user_lang = get_user_lang(user_id)
 
-        welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        # Admin menyusi alohida qoladi: foydalanuvchi tugmalari Admin chatiga qo'shilmaydi.
-        if _admin_only(message):
-            markup.row(telebot.types.KeyboardButton(text="/help_admin"))
-            markup.row(telebot.types.KeyboardButton(text="/start"))
-        else:
-            # /start birinchi qatorda alohida, asosiy ilova tugmasi esa uning tagida keng joylashadi.
-            markup.row(telebot.types.KeyboardButton(text="/start"))
-            app_url = os.getenv("WEB_APP_URL", "").strip().rstrip("/")
-            if not app_url:
-                railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
-                if railway_domain:
-                    app_url = railway_domain if railway_domain.startswith(("https://", "http://")) else "https://" + railway_domain
-            if app_url.startswith("https://"):
-                markup.row(telebot.types.KeyboardButton(
-                    text=MESSAGES[user_lang].get("open_app", MESSAGES["uz"]["open_app"]),
-                    web_app=telebot.types.WebAppInfo(url=app_url)
-                ))
-            else:
-                # URL sozlanmagan bo'lsa, tugma noto'g'ri manzil ochmasligi uchun uni qo'shmaymiz.
-                logging.warning("Ilova tugmasi qo'shilmadi: WEB_APP_URL yoki RAILWAY_PUBLIC_DOMAIN sozlanmagan")
-
-            # Foydalanuvchi uchun tarif/limit va yordam tugmalari ikki ustunda.
-            # Mobil Telegram tugmalarida matnlar bir tekis turishi uchun UZ/RU
-            # yorliqlari ixchamlashtirildi; tugmalarning handlerlari eski matnlarni ham qabul qiladi.
-            button_texts = {
-                "uz": ("👑 Tarif va limitlar", "💬 Admin bilan aloqa"),
-                "ru": ("👑 Тариф и лимиты", "💬 Связь с админом"),
-                "en": ("👑 My plan and limits", "💬 Contact Admin"),
-            }
-            tariff_btn_text, support_btn_text = button_texts.get(user_lang, button_texts["uz"])
-            markup.row(
-                telebot.types.KeyboardButton(text=tariff_btn_text),
-                telebot.types.KeyboardButton(text=support_btn_text),
-            )
-        bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
-        logging.info("/start javobi yuborildi | user_id=%s | til=%s", user_id, user_lang)
-    except Exception:
-        logging.exception("/start handler xatosi | user_id=%s | chat_id=%s", user_id, message.chat.id)
-
-
-@bot.message_handler(content_types=["text"], func=lambda message: (message.text or "").strip() in {
-    "👑 Mening tariflarim va limitlarim", "👑 Мой тариф и лимиты", "👑 My plan and limits",
-    "👑 Tarif va limitlar", "👑 Тариф и лимиты"
-})
-def show_user_plan_and_limits(message):
-    """Foydalanuvchining haqiqiy tarif holati va qolgan bepul limitlarini ko'rsatadi."""
-    user_id = message.from_user.id
-    lang = get_user_lang(user_id)
-    conn = None
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=10000")
-        row = conn.execute(
-            "SELECT status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, created_at "
-            "FROM users WHERE user_id = ?", (user_id,)
-        ).fetchone()
-    except Exception as e:
-        logging.error("Tarif va limitlarni olishda xatolik: %s", e)
-        bot.send_message(message.chat.id, {
-            "uz": "⚠️ Tarif ma'lumotlarini hozircha olib bo'lmadi. Iltimos, keyinroq urinib ko'ring.",
-            "ru": "⚠️ Не удалось получить данные о тарифе. Попробуйте позже.",
-            "en": "⚠️ Could not retrieve your plan details. Please try again later."
-        }.get(lang, "⚠️ Tarif ma'lumotlarini hozircha olib bo'lmadi."))
-        return
-    finally:
-        if conn:
-            conn.close()
-
-    if not row:
-        add_user_to_db(user_id)
-        status, plan_key, free_used, public_used, flash_used, premium_until, created_at = "Oddiy foydalanuvchi", "", 0, 0, 0, 0, int(time.time())
-    else:
-        status = row["status"] or "Oddiy foydalanuvchi"
-        plan_key = row["plan_key"] or ""
-        free_used = int(row["free_used"] or 0)
-        public_used = int(row["public_free_used"] or 0)
-        flash_used = int(row["flashcard_free_used"] or 0)
-        premium_until = int(row["premium_until"] or 0)
-        created_at = int(row["created_at"] or int(time.time()))
-
-    active_premium = is_active_paid_status(status, premium_until)
-    if active_premium:
-        plan_name = localized_tariff_name(get_plan_key(status, plan_key), lang)
-        expiry = datetime.fromtimestamp(premium_until, timezone(timedelta(hours=5))).strftime("%d-%m-%Y %H:%M")
-        text_by_lang = {
-            "uz": f"👑 <b>Tarifingiz: Premium faol</b>\n📦 Tarif: {plan_name}\n🕒 Tugash vaqti: {expiry} (O‘zbekiston vaqti)\n\n♾ AI testlar, ommaviy testlar va Flash Kartochkalardan Premium imkoniyatlari doirasida foydalanishingiz mumkin.",
-            "ru": f"👑 <b>Ваш тариф: Premium активен</b>\n📦 Тариф: {plan_name}\n🕒 Истекает: {expiry} (время Узбекистана)\n\n♾ Доступны возможности Premium для AI-тестов, публичных тестов и флеш-карточек.",
-            "en": f"👑 <b>Your plan: Premium active</b>\n📦 Plan: {plan_name}\n🕒 Expires: {expiry} (Uzbekistan time)\n\n♾ Premium access is available for AI quizzes, public quizzes, and flashcards."
-        }
-    else:
-        text_by_lang = {
-            "uz": f"🆓 <b>Tarifingiz: Bepul</b>\n\n🤖 AI testlar: {max(0, FREE_QUIZ_LIMIT-free_used)} / {FREE_QUIZ_LIMIT} ta qoldi\n🌐 Ommaviy testlar: {max(0, FREE_PUBLIC_LIMIT-public_used)} / {FREE_PUBLIC_LIMIT} ta qoldi\n🗂 Flash Kartochkalar: {max(0, FREE_FLASHCARD_LIMIT-flash_used)} / {FREE_FLASHCARD_LIMIT} ta qoldi\n\n👑 Cheksiz foydalanish uchun Premium tarifni faollashtirishingiz mumkin.",
-            "ru": f"🆓 <b>Ваш тариф: Бесплатный</b>\n\n🤖 AI-тесты: осталось {max(0, FREE_QUIZ_LIMIT-free_used)} из {FREE_QUIZ_LIMIT}\n🌐 Публичные тесты: осталось {max(0, FREE_PUBLIC_LIMIT-public_used)} из {FREE_PUBLIC_LIMIT}\n🗂 Флеш-карточки: осталось {max(0, FREE_FLASHCARD_LIMIT-flash_used)} из {FREE_FLASHCARD_LIMIT}\n\n👑 Для доступа без ограничений можно активировать Premium.",
-            "en": f"🆓 <b>Your plan: Free</b>\n\n🤖 AI quizzes: {max(0, FREE_QUIZ_LIMIT-free_used)} of {FREE_QUIZ_LIMIT} left\n🌐 Public quizzes: {max(0, FREE_PUBLIC_LIMIT-public_used)} of {FREE_PUBLIC_LIMIT} left\n🗂 Flashcards: {max(0, FREE_FLASHCARD_LIMIT-flash_used)} of {FREE_FLASHCARD_LIMIT} left\n\n👑 Activate Premium for unlimited access."
-        }
-    bot.send_message(message.chat.id, text_by_lang.get(lang, text_by_lang["uz"]), parse_mode="HTML")
-
-
-@bot.message_handler(content_types=["text"], func=lambda message: (message.text or "").strip() in {
-    "💬 Admin bilan bog'lanish", "💬 Связаться с администратором", "💬 Contact Admin",
-    "💬 Admin bilan aloqa", "💬 Связь с админом"
-})
-def start_support_from_keyboard(message):
-    user_id = message.from_user.id
-    lang = get_user_lang(user_id)
-    if not ADMIN_ID:
-        bot.send_message(message.chat.id, MESSAGES[lang]["support_config_error"])
-        return
-    support_waiting_users.add(user_id)
-    bot.send_message(message.chat.id, MESSAGES[lang]["support_prompt"])
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
+    # Oddiy foydalanuvchilarning menyusi avvalgidek faqat /start bo'lib qoladi.
+    if _admin_only(message):
+        btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
+        markup.row(btn_help_admin)
+    btn_start = telebot.types.KeyboardButton(text="/start")
+    markup.row(btn_start)
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 
 @bot.message_handler(content_types=["web_app_data"])
@@ -4007,49 +3900,16 @@ def toggle_public(quiz_id: str, user_id: int, is_public: int):
 
 
 @app.post("/api/set-language")
-async def set_language(request: Request, user_id: Optional[int] = Query(None), lang: Optional[str] = Query(None)):
-    # Mini App turli versiyalarida parametrlar query yoki JSON body orqali kelishi mumkin.
-    # Ikkala ko'rinishni ham qabul qilamiz; tilni DB'ga saqlash bot /start xabari
-    # va ReplyKeyboard tugmalari uchun yagona manba bo'lib qoladi.
-    body = {}
-    try:
-        content_type = (request.headers.get("content-type") or "").lower()
-        if "application/json" in content_type:
-            parsed = await request.json()
-            if isinstance(parsed, dict):
-                body = parsed
-    except Exception as body_error:
-        logging.warning("Til sozlamasi JSON body o'qilmadi; query parametrlar tekshiriladi: %s", body_error)
-
-    raw_user_id = user_id if user_id is not None else body.get("user_id")
-    raw_lang = lang if lang is not None else body.get("lang", body.get("language"))
-    try:
-        user_id = int(raw_user_id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="user_id majburiy va raqam bo'lishi kerak")
-
-    lang = str(raw_lang or "").strip().lower()
-    if lang not in MESSAGES:
-        raise HTTPException(status_code=400, detail="Til qo'llab-quvvatlanmaydi")
-
-    # Mini App tilni botdagi /start dan oldin yuborsa ham foydalanuvchini yaratamiz.
-    add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA busy_timeout=10000;")
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
-        conn.commit()
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=500, detail="Foydalanuvchi tilini saqlab bo'lmadi")
-        # Saqlangan qiymatni qayta o'qib, log va javobda haqiqiy natijani tasdiqlaymiz.
-        saved = conn.execute("SELECT language FROM users WHERE user_id = ?", (user_id,)).fetchone()
-        saved_lang = saved[0] if saved and saved[0] in MESSAGES else "uz"
-    finally:
-        conn.close()
-
-    logging.info("Foydalanuvchi tili yangilandi | user_id=%s | til=%s | DB=%s", user_id, saved_lang, DB_PATH)
-    return {"status": "ok", "language": saved_lang}
+def set_language(user_id: int, lang: str):
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute(
+        "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
+    )
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
 
 
 # --- O'QITUVCHI PROFESSIONAL VOSITALARI ---
