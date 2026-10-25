@@ -4007,29 +4007,49 @@ def toggle_public(quiz_id: str, user_id: int, is_public: int):
 
 
 @app.post("/api/set-language")
-def set_language(user_id: int, lang: str):
-    # Faqat qo'llab-quvvatlanadigan tillarni saqlaymiz; bot /start paytida
-    # aynan shu qiymatni o'qib, xabar va klaviaturani bir xil tilda chiqaradi.
-    lang = (lang or "").strip().lower()
+async def set_language(request: Request, user_id: Optional[int] = Query(None), lang: Optional[str] = Query(None)):
+    # Mini App turli versiyalarida parametrlar query yoki JSON body orqali kelishi mumkin.
+    # Ikkala ko'rinishni ham qabul qilamiz; tilni DB'ga saqlash bot /start xabari
+    # va ReplyKeyboard tugmalari uchun yagona manba bo'lib qoladi.
+    body = {}
+    try:
+        content_type = (request.headers.get("content-type") or "").lower()
+        if "application/json" in content_type:
+            parsed = await request.json()
+            if isinstance(parsed, dict):
+                body = parsed
+    except Exception as body_error:
+        logging.warning("Til sozlamasi JSON body o'qilmadi; query parametrlar tekshiriladi: %s", body_error)
+
+    raw_user_id = user_id if user_id is not None else body.get("user_id")
+    raw_lang = lang if lang is not None else body.get("lang", body.get("language"))
+    try:
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="user_id majburiy va raqam bo'lishi kerak")
+
+    lang = str(raw_lang or "").strip().lower()
     if lang not in MESSAGES:
         raise HTTPException(status_code=400, detail="Til qo'llab-quvvatlanmaydi")
-    user_id = int(user_id)
+
     # Mini App tilni botdagi /start dan oldin yuborsa ham foydalanuvchini yaratamiz.
     add_user_to_db(user_id)
     conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     try:
         conn.execute("PRAGMA busy_timeout=10000;")
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
-        )
+        cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
         conn.commit()
         if cursor.rowcount == 0:
             raise HTTPException(status_code=500, detail="Foydalanuvchi tilini saqlab bo'lmadi")
+        # Saqlangan qiymatni qayta o'qib, log va javobda haqiqiy natijani tasdiqlaymiz.
+        saved = conn.execute("SELECT language FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        saved_lang = saved[0] if saved and saved[0] in MESSAGES else "uz"
     finally:
         conn.close()
-    logging.info("Foydalanuvchi tili yangilandi | user_id=%s | til=%s", user_id, lang)
-    return {"status": "ok", "language": lang}
+
+    logging.info("Foydalanuvchi tili yangilandi | user_id=%s | til=%s | DB=%s", user_id, saved_lang, DB_PATH)
+    return {"status": "ok", "language": saved_lang}
 
 
 # --- O'QITUVCHI PROFESSIONAL VOSITALARI ---
