@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import docx
 import asyncio
+from contextlib import asynccontextmanager
 import re
 from io import BytesIO
 from docx import Document
@@ -46,7 +47,7 @@ from pathlib import Path
 from deep_translator import GoogleTranslator
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from fastapi import Depends, Query
 
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
@@ -59,6 +60,9 @@ logging.basicConfig(
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
+
+# Mini App manzili Railway Variables orqali boshqariladi (Test va Production alohida).
+MINI_APP_URL = os.getenv("MINI_APP_URL", "").strip()
 templates = Jinja2Templates(directory="templates")
 
 raw_admin_id = os.getenv("ADMIN_ID")
@@ -68,9 +72,66 @@ except Exception as e:
     logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
     ADMIN_ID = None
 
+
+# --- ADMIN ERROR ALERTS ---
+# ERROR/CRITICAL log yozuvlarini administratorga Telegram orqali yuboradi.
+# Xabarlar ko'payib ketmasligi uchun 60 soniyada ko'pi bilan bitta alert yuboriladi.
+class AdminTelegramErrorHandler(logging.Handler):
+    def __init__(self, cooldown_seconds=60):
+        super().__init__(level=logging.ERROR)
+        self.cooldown_seconds = cooldown_seconds
+        self._alert_lock = threading.Lock()
+        self._last_alert_at = 0.0
+        self._suppressed_count = 0
+        self._sending_alert = False
+
+    def emit(self, record):
+        if not ADMIN_ID or getattr(self, "_sending_alert", False):
+            return
+
+        now = time.monotonic()
+        with self._alert_lock:
+            if now - self._last_alert_at < self.cooldown_seconds:
+                self._suppressed_count += 1
+                return
+            suppressed = self._suppressed_count
+            self._suppressed_count = 0
+            self._last_alert_at = now
+
+        try:
+            details = self.format(record)
+            # Telegram xabar uzunligi va maxfiy ma'lumotlar xavfini kamaytirish uchun qisqartiramiz.
+            details = details[:2500]
+            message = (
+                "🚨 <b>Quiz AI — Server xatoligi</b>\n"
+                f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n"
+                f"📍 Modul: <code>{record.name[:120]}</code>\n\n"
+                f"<pre>{details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')[:2500]}</pre>"
+            )
+            if suppressed:
+                message += f"\n\nℹ️ Oxirgi xabardan beri yana {suppressed} ta xatolik logi birlashtirildi."
+            self._sending_alert = True
+            bot.send_message(ADMIN_ID, message, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            # Telegram ogohlantirishining o'zi muvaffaqiyatsiz bo'lsa, cheksiz log aylanishini boshlamaymiz.
+            pass
+        finally:
+            self._sending_alert = False
+
+
+_admin_error_handler = AdminTelegramErrorHandler()
+_admin_error_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+logging.getLogger().addHandler(_admin_error_handler)
+
 # --- ADMIN SUPPORT ---
 support_waiting_users = set()
 support_reply_targets = {}
+
+# Ommaviy xabar yuborish holati (faqat administrator uchun).
+broadcast_waiting_content = set()
+broadcast_pending_messages = {}
+broadcast_active = False
+broadcast_lock = threading.Lock()
 
 # Test yaratish API kalitlari:
 # 1) Eski usul saqlanadi: GOOGLE_API_KEYS=key1,key2,key3
@@ -179,6 +240,17 @@ MAX_TEXT_INPUT_CHARS = max(1, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
+
+# AI navbati va API kalitlari bo'yicha joriy jarayon statistikasi.
+_ai_monitor_lock = threading.Lock()
+_ai_monitor_state = {
+    "waiting_for_queue": 0,
+    "accepted_requests": 0,
+    "key_attempts": {},
+    "key_success": {},
+    "key_failures": {},
+    "last_errors": [],
+}
 logging.info(
     "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
@@ -231,29 +303,43 @@ DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
 
-# --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
+# --- TARIFLAR: Railway Variables yagona manba ---
+def _env_positive_int(name, default, minimum=1):
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+        return value if value >= minimum else default
+    except (TypeError, ValueError):
+        logging.warning("Railway sozlamasi noto'g'ri | o'zgaruvchi=%s | standart qiymat ishlatiladi", name)
+        return default
+
+def _format_price(amount):
+    return f"{amount:,}".replace(",", " ") + " so'm"
+
+_daily_price = _env_positive_int("TARIFF_DAILY_PRICE", 10000)
+_weekly_price = _env_positive_int("TARIFF_WEEKLY_PRICE", 35000)
+_monthly_price = _env_positive_int("TARIFF_MONTHLY_PRICE", 65000)
+_teachers_price = _env_positive_int("TARIFF_TEACHERS_PRICE", 95000)
+_daily_hours = _env_positive_int("TARIFF_DAILY_HOURS", 24)
+_weekly_days = _env_positive_int("TARIFF_WEEKLY_DAYS", 7)
+_monthly_days = _env_positive_int("TARIFF_MONTHLY_DAYS", 30)
+_teachers_days = _env_positive_int("TARIFF_TEACHERS_DAYS", 30)
 TARIFFS = {
-    "daily": {
-        "price": "10 000 so'm",
-        "duration": 24 * 3600,
-        "names": {"uz": "Kunlik Cheksiz (24 soat)", "ru": "Суточный Безлимит (24 ч)", "en": "Daily Unlimited (24h)"},
-    },
-    "weekly": {
-        "price": "35 000 so'm",
-        "duration": 7 * 24 * 3600,
-        "names": {"uz": "Haftalik Cheksiz (7 kun)", "ru": "Недельный Безлимит (7 дн)", "en": "Weekly Unlimited (7d)"},
-    },
-    "monthly": {
-        "price": "65 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "Oylik Cheksiz (30 kun)", "ru": "Месячный Безлимит (30 дн)", "en": "Monthly Unlimited (30d)"},
-    },
-    "teachers": {
-        "price": "95 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
-    },
+    "daily": {"price": _format_price(_daily_price), "price_amount": _daily_price, "duration": _daily_hours * 3600,
+              "duration_value": _daily_hours, "duration_unit": "hours",
+              "names": {"uz": f"Kunlik Cheksiz ({_daily_hours} soat)", "ru": f"Суточный Безлимит ({_daily_hours} ч)", "en": f"Daily Unlimited ({_daily_hours}h)"}},
+    "weekly": {"price": _format_price(_weekly_price), "price_amount": _weekly_price, "duration": _weekly_days * 86400,
+               "duration_value": _weekly_days, "duration_unit": "days",
+               "names": {"uz": f"Haftalik Cheksiz ({_weekly_days} kun)", "ru": f"Недельный Безлимит ({_weekly_days} дн)", "en": f"Weekly Unlimited ({_weekly_days}d)"}},
+    "monthly": {"price": _format_price(_monthly_price), "price_amount": _monthly_price, "duration": _monthly_days * 86400,
+                "duration_value": _monthly_days, "duration_unit": "days",
+                "names": {"uz": f"Oylik Cheksiz ({_monthly_days} kun)", "ru": f"Месячный Безлимит ({_monthly_days} дн)", "en": f"Monthly Unlimited ({_monthly_days}d)"}},
+    "teachers": {"price": _format_price(_teachers_price), "price_amount": _teachers_price, "duration": _teachers_days * 86400,
+                 "duration_value": _teachers_days, "duration_unit": "days",
+                 "names": {"uz": f"O'qituvchilar Uchun ({_teachers_days} kun)", "ru": f"Для Учителей ({_teachers_days} дн)", "en": f"For Teachers ({_teachers_days}d)"}},
 }
+logging.info("Tariflar Railway'dan yuklandi | kunlik=%s/%s soat | haftalik=%s/%s kun | oylik=%s/%s kun | o'qituvchilar=%s/%s kun",
+             TARIFFS['daily']['price'], _daily_hours, TARIFFS['weekly']['price'], _weekly_days,
+             TARIFFS['monthly']['price'], _monthly_days, TARIFFS['teachers']['price'], _teachers_days)
 # Bepul foydalanuvchi limitlari Railway Variables orqali boshqariladi.
 FREE_QUIZ_LIMIT = max(0, int(os.getenv("FREE_QUIZ_LIMIT", "3")))
 FREE_PUBLIC_LIMIT = max(0, int(os.getenv("FREE_PUBLIC_LIMIT", "3")))
@@ -262,7 +348,8 @@ logging.info(
     "Bepul limitlar sozlamasi | AI_test=%s | ommaviy_test=%s | flash_kartochka=%s",
     FREE_QUIZ_LIMIT, FREE_PUBLIC_LIMIT, FREE_FLASHCARD_LIMIT
 )
-P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
+P2P_CARD_NUMBER = re.sub(r"\D", "", os.getenv("P2P_CARD_NUMBER", "").strip())
+PAYMENT_CARDHOLDER = os.getenv("PAYMENT_CARDHOLDER", "").strip()
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
     return bool(status and "PRO" in status and premium_until and int(time.time()) <= premium_until)
@@ -304,7 +391,8 @@ MESSAGES = {
             "🆓 *Bepul:* har 30 kunda {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
-            "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat) 📌 Ilovada test yaratish va Premium olish usullari guruhimizda video shaklida joylashtirilgan tanishib chiqing.\n\n"
+            "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
+            "📌 *Ilovada test yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan tanishib chiqing.\n\n"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -353,7 +441,8 @@ MESSAGES = {
             "🆓 *Бесплатно:* {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
-            "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat) 📌 Способы создания теста в приложении и получения Premium смотрите в видео в нашей группе.\n\n"
+            "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
+            "📌 *Способы создания и получения премиум теста в приложении размещены в виде видео в нашей группе ознакомьтесь.\n\n"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -401,7 +490,8 @@ MESSAGES = {
             "🆓 *Free:* {quiz_limit} AI quizzes, {public_limit} public quizzes and {flashcard_limit} flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
-            "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat) 📌 Ways to create tests in the application and get Premium get acquainted in our group, arranged in the form of videos.\n\n"
+            "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
+            "📌 *Check out our group of methods for creating tests and obtaining Premium in the application, arranged in the form of videos.\n\n"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
@@ -844,8 +934,30 @@ def init_news_master_db():
 init_news_master_db()
 
 
+# --- FASTAPI ISHGA TUSHISHI (zamonaviy lifespan usuli) ---
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    # P2P OCR alohida fon tizimi; ishga tushmasa ham asosiy ilova ishlashda davom etadi.
+    try:
+        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
+        p2p_payment_ai.start()
+    except Exception as p2p_error:
+        logging.exception(
+            "P2P to'lov AI tizimini ishga tushirib bo'lmadi; asosiy ilova ishlashda davom etadi: %s",
+            p2p_error,
+        )
+    threading.Thread(target=start_bot_polling, daemon=True).start()
+    threading.Thread(target=limit_notification_worker, daemon=True).start()
+    try:
+        yield
+    finally:
+        # Hozirgi versiyada fon oqimlari daemon sifatida ishlaydi; mavjud to'xtatish
+        # mexanizmi o'zgartirilmaydi.
+        pass
+
+
 # --- FASTAPI ENDPOINTS ---
-app = FastAPI()
+app = FastAPI(lifespan=app_lifespan)
 
 class NewsCreateSchema(BaseModel):
     title_uz: str = Field(min_length=1, max_length=255)
@@ -1253,9 +1365,18 @@ def send_welcome(message):
     welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    # Admin uchun /start tugmasi tepada, /help_admin esa uning ostida ko'rsatiladi.
+    # Oddiy foydalanuvchilarning menyusi avvalgidek faqat /start bo'lib qoladi.
     btn_start = telebot.types.KeyboardButton(text="/start")
-
     markup.row(btn_start)
+    if MINI_APP_URL:
+        btn_open_app = telebot.types.KeyboardButton(
+            text="OPEN", web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
+        )
+        markup.row(btn_open_app)
+    if _admin_only(message):
+        btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
+        markup.row(btn_help_admin)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 
@@ -1296,7 +1417,7 @@ def support_continue_markup(lang: str):
     return markup
 
 # --- ADMIN SUPPORT: murojaat va javob ---
-@bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
+@bot.message_handler(content_types=["text"], func=lambda message: (message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets) and message.from_user.id not in broadcast_waiting_content)
 def handle_support_text(message):
     user_id = message.from_user.id
     if ADMIN_ID and user_id == ADMIN_ID and user_id in support_reply_targets:
@@ -1375,9 +1496,734 @@ def handle_support_reply_callback(call):
         logging.error(f"Admin reply callback xatosi: {e}")
         bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
-# --- ADMIN BONUS PREMIUM ---
+# --- ADMIN STATISTICS ---
 def _admin_only(message):
     return bool(ADMIN_ID and int(message.from_user.id) == int(ADMIN_ID))
+
+
+@bot.message_handler(commands=["test_error_alert"])
+def admin_test_error_alert_command(message):
+    """Administrator-only, controlled test for the Telegram error alert handler."""
+    if not _admin_only(message):
+        return
+
+    # Send confirmation first, then emit one controlled ERROR log.
+    # The installed AdminTelegramErrorHandler should deliver this log to ADMIN_ID.
+    try:
+        bot.send_message(
+            message.chat.id,
+            "🧪 Sinov boshlandi. Agar xatolik xabari tizimi ishlasa, administrator chatiga alohida ogohlantirish keladi."
+        )
+        logging.error(
+            "TEST ALERT: administrator tomonidan avtomatik xatolik xabari tekshirilmoqda."
+        )
+    except Exception as e:
+        logging.exception("Test error alert buyrug'ida xatolik yuz berdi: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Sinov buyrug'ini bajarishda xatolik yuz berdi.")
+        except Exception:
+            pass
+
+
+
+@bot.message_handler(commands=["monitor"])
+def admin_monitor_command(message):
+    """Show a lightweight, administrator-only snapshot of server and AI capacity."""
+    if not _admin_only(message):
+        return
+
+    # Semaphore availability gives a best-effort snapshot; it is not a historical metric.
+    try:
+        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+
+        db_status = "✅ Ulandi"
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5, check_same_thread=False)
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("SELECT 1").fetchone()
+        except Exception as db_error:
+            db_status = "❌ Xato"
+            logging.error("Monitor: SQLite health check xatosi: %s", db_error)
+        finally:
+            if conn is not None:
+                conn.close()
+
+        now_local = datetime.now(timezone(timedelta(hours=5)))
+        report = (
+            "🖥 <b>Quiz AI — Server va AI monitoring</b>\n"
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            f"🗄 SQLite bazasi: <b>{db_status}</b>\n"
+            f"🤖 Asosiy model: <code>{GEMINI_MODEL}</code>\n"
+            f"🔁 Zaxira model: <code>{GEMINI_FALLBACK_MODEL}</code>\n\n"
+            "⚙️ <b>AI parallel so‘rovlar</b>\n"
+            f"Band: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
+            f"Bo‘sh slotlar: <b>{ai_slots_free}</b>\n\n"
+            "⏳ <b>AI navbat sig‘imi</b>\n"
+            f"Band slotlar: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
+            f"Bo‘sh slotlar: <b>{queue_slots_free}</b>\n\n"
+            f"🔑 Generation API kalitlari: <b>{len(GOOGLE_API_KEYS)}</b>\n"
+            f"⏱ Bitta so‘rov limiti: <b>{AI_REQUEST_TIMEOUT} soniya</b>\n"
+            f"⏱ Umumiy vaqt limiti: <b>{AI_TOTAL_TIMEOUT} soniya</b>\n\n"
+            "ℹ️ Bu joriy holatning bir martalik surati; CPU/RAM foizlari va tarixiy grafiklar bu hisobotga kirmaydi."
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.exception("Admin monitoring hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Monitoring ma’lumotlarini olishda xatolik yuz berdi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+
+
+@bot.message_handler(commands=["stats"])
+def admin_stats_command(message):
+    """Show private Quiz AI usage statistics to the configured administrator only."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        # Uzbekistan local day (UTC+5), independent of the server timezone.
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        today_start = int(now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        now_ts = int(time.time())
+        active_since = now_ts - 2 * 60
+
+        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("PRAGMA busy_timeout=30000")
+
+        total_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        new_users_today = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (today_start,)
+        ).fetchone()[0]
+        visitors_today = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (today_start,)
+        ).fetchone()[0]
+        active_now = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (active_since,)
+        ).fetchone()[0]
+
+        total_quizzes = cur.execute("SELECT COUNT(*) FROM quizzes").fetchone()[0]
+        quizzes_today = cur.execute(
+            "SELECT COUNT(*) FROM quizzes WHERE created_at >= ?", (today_start,)
+        ).fetchone()[0]
+        pending_payments = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'pending'"
+        ).fetchone()[0]
+        approved_payments_today = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'approved' AND created_at >= ?",
+            (today_start,),
+        ).fetchone()[0]
+
+        report = (
+            "📊 <b>Quiz AI — Statistika</b>\n"
+            f"📅 Sana: {now_local.strftime('%d-%m-%Y')} (O‘zbekiston)\n\n"
+            f"👥 Jami ro‘yxatdan o‘tganlar: <b>{total_users:,}</b>\n"
+            f"🆕 Bugun ro‘yxatdan o‘tganlar: <b>{new_users_today:,}</b>\n"
+            f"📱 Bugun faol bo‘lgan foydalanuvchilar: <b>{visitors_today:,}</b>\n"
+            f"🟢 Hozir faol (oxirgi 2 daqiqa): <b>{active_now:,}</b>\n\n"
+            f"📝 Jami yaratilgan testlar: <b>{total_quizzes:,}</b>\n"
+            f"✨ Bugun yaratilgan testlar: <b>{quizzes_today:,}</b>\n\n"
+            f"⏳ Kutilayotgan to‘lovlar: <b>{pending_payments:,}</b>\n"
+            f"✅ Bugun yaratilgan va tasdiqlangan to‘lov so‘rovlari: <b>{approved_payments_today:,}</b>"
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Admin statistikasini olishda xato: {e}")
+        bot.send_message(message.chat.id, "❌ Statistikani olishda xatolik yuz berdi. Server loglarini tekshiring.")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+
+# --- ADMIN FOYDALANUVCHILAR HISOBOTI ---
+@bot.message_handler(commands=["users"])
+def admin_users_report_command(message):
+    """Administrator uchun foydalanuvchilar, obunalar va uzoq faollashmaganlar hisoboti."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        now = int(time.time())
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        day_7 = now - 7 * 24 * 3600
+        day_30 = now - 30 * 24 * 3600
+
+        conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=20000")
+        cur = conn.cursor()
+
+        total_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        created_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (day_7,)
+        ).fetchone()[0]
+        created_30_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (day_30,)
+        ).fetchone()[0]
+        active_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (day_7,)
+        ).fetchone()[0]
+        inactive_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(last_active, 0) > 0 AND last_active < ?", (day_7,)
+        ).fetchone()[0]
+        never_active = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(last_active, 0) = 0"
+        ).fetchone()[0]
+        active_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ?", (now,)
+        ).fetchone()[0]
+        expired_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > 0 AND premium_until <= ?", (now,)
+        ).fetchone()[0]
+        ordinary_users = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE NOT (status LIKE '%PRO%' AND premium_until > ?)", (now,)
+        ).fetchone()[0]
+        paid_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ? AND COALESCE(premium_source, 'paid') != 'admin_bonus'", (now,)
+        ).fetchone()[0]
+        bonus_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ? AND premium_source = 'admin_bonus'", (now,)
+        ).fetchone()[0]
+
+        inactive_rows = cur.execute(
+            "SELECT user_id, created_at, last_active, status, plan_key, premium_until "
+            "FROM users WHERE COALESCE(last_active, 0) > 0 AND last_active < ? "
+            "ORDER BY last_active ASC, created_at DESC LIMIT 8", (day_7,)
+        ).fetchall()
+
+        def date_text(timestamp):
+            timestamp = int(timestamp or 0)
+            return time.strftime('%d-%m-%Y %H:%M', time.gmtime(timestamp + 5 * 3600)) if timestamp > 0 else "ma’lumot yo‘q"
+
+        lines = [
+            "👥 <b>Quiz AI — Foydalanuvchilar hisoboti</b>",
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M')} (O‘zbekiston)",
+            "",
+            "📊 <b>Foydalanuvchilar</b>",
+            f"• Jami ro‘yxatdan o‘tganlar: <b>{total_users:,}</b>",
+            f"• Oxirgi 7 kunda qo‘shilganlar: <b>{created_7_days:,}</b>",
+            f"• Oxirgi 30 kunda qo‘shilganlar: <b>{created_30_days:,}</b>",
+            f"• Oxirgi 7 kunda faol bo‘lganlar: <b>{active_7_days:,}</b>",
+            f"• 7 kundan beri faol bo‘lmaganlar: <b>{inactive_7_days:,}</b>",
+            f"• Faollik qaydi yo‘q: <b>{never_active:,}</b>",
+            "",
+            "👑 <b>Obuna holati</b>",
+            f"• Faol Premium obunachilar: <b>{active_premium:,}</b>",
+            f"• Pullik Premium obunachilar: <b>{paid_premium:,}</b>",
+            f"• Admin bonusi orqali Premium: <b>{bonus_premium:,}</b>",
+            f"• Muddati tugagan PRO statuslar: <b>{expired_premium:,}</b>",
+            f"• Hozir faol Premium bo‘lmaganlar: <b>{ordinary_users:,}</b>",
+            "",
+            f"🕰 <b>7 kundan beri faol bo‘lmaganlar (ko‘pi bilan 8 ta):</b>",
+        ]
+        if inactive_rows:
+            for row in inactive_rows:
+                last_seen = date_text(row["last_active"])
+                created = date_text(row["created_at"])
+                status = row["status"] or "Oddiy foydalanuvchi"
+                lines.append(
+                    f"• ID <code>{row['user_id']}</code> — {status}\n"
+                    f"  Oxirgi faollik: {last_seen}\n"
+                    f"  Ro‘yxatdan o‘tgan: {created}"
+                )
+            if inactive_7_days > len(inactive_rows):
+                lines.append(f"… va yana {inactive_7_days - len(inactive_rows)} ta foydalanuvchi.")
+        else:
+            lines.append("• 7 kundan beri faol bo‘lmagan foydalanuvchi yo‘q.")
+
+        report = "\n".join(lines)
+        max_length = 3800
+        while len(report) > max_length:
+            split_at = report.rfind("\n", 0, max_length)
+            if split_at <= 0:
+                split_at = max_length
+            bot.send_message(message.chat.id, report[:split_at], parse_mode="HTML", disable_web_page_preview=True)
+            report = report[split_at:].lstrip("\n")
+        if report:
+            bot.send_message(message.chat.id, report, parse_mode="HTML", disable_web_page_preview=True)
+
+        logging.info(
+            "Foydalanuvchilar hisoboti yuborildi | jami=%s | premium_faol=%s | oxirgi_7_kunda_faol=%s | 7_kun_faol_emas=%s",
+            total_users, active_premium, active_7_days, inactive_7_days
+        )
+    except Exception as e:
+        logging.exception("Foydalanuvchilar hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Foydalanuvchilar hisobotini tayyorlab bo‘lmadi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+# --- ADMIN PAYMENTS & SUBSCRIPTION REPORT ---
+def _payment_price_to_sum(value):
+    """Narx matnidan so'm miqdorini xavfsiz ajratib oladi."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return int(digits) if digits else 0
+
+
+@bot.message_handler(commands=["payments"])
+def admin_payments_report_command(message):
+    """Administrator uchun tushum, tariflar, tugayotgan obunalar va kutilayotgan to'lovlar."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        now = int(time.time())
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        today_start = int(now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        week_end = now + 7 * 24 * 3600
+
+        conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=20000")
+        cur = conn.cursor()
+
+        # Faqat tasdiqlangan to'lovlar tushum hisoblanadi.
+        approved_rows = cur.execute(
+            "SELECT tariff_name, tariff_price, created_at FROM payments WHERE status='approved'"
+        ).fetchall()
+        pending_rows = cur.execute(
+            "SELECT tx_id, user_id, tariff_name, tariff_price, created_at FROM payments "
+            "WHERE status='pending' ORDER BY created_at ASC LIMIT 8"
+        ).fetchall()
+        pending_total = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status='pending'"
+        ).fetchone()[0]
+        approved_today_rows = cur.execute(
+            "SELECT tariff_price FROM payments WHERE status='approved' AND created_at >= ?",
+            (today_start,)
+        ).fetchall()
+
+        # Obuna muddati yaqinlashayotgan PRO foydalanuvchilar; bonuslar alohida hisoblanmaydi.
+        expiring_rows = cur.execute(
+            "SELECT user_id, status, plan_key, premium_until, premium_source FROM users "
+            "WHERE premium_until > ? AND premium_until <= ? AND status LIKE '%PRO%' "
+            "ORDER BY premium_until ASC LIMIT 8",
+            (now, week_end)
+        ).fetchall()
+        expiring_total = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE premium_until > ? AND premium_until <= ? "
+            "AND status LIKE '%PRO%'",
+            (now, week_end)
+        ).fetchone()[0]
+
+        total_revenue = sum(_payment_price_to_sum(row["tariff_price"]) for row in approved_rows)
+        today_revenue = sum(_payment_price_to_sum(row["tariff_price"]) for row in approved_today_rows)
+
+        tariff_stats = {key: {"count": 0, "revenue": 0} for key in TARIFFS}
+        for row in approved_rows:
+            plan_key = get_plan_key(row["tariff_name"] or "")
+            if plan_key in tariff_stats:
+                tariff_stats[plan_key]["count"] += 1
+                tariff_stats[plan_key]["revenue"] += _payment_price_to_sum(row["tariff_price"])
+
+        def money(amount):
+            return f"{amount:,}".replace(",", " ") + " so‘m"
+
+        report_lines = [
+            "💳 <b>Quiz AI — Daromad va obunalar hisoboti</b>",
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M')} (O‘zbekiston)",
+            "",
+            "💰 <b>Tushum</b>",
+            f"• Jami tasdiqlangan to‘lovlar: <b>{len(approved_rows):,}</b>",
+            f"• Jami tushum: <b>{money(total_revenue)}</b>",
+            f"• Bugungi tushum: <b>{money(today_revenue)}</b>",
+            "",
+            "📊 <b>Tariflar savdosi</b>",
+        ]
+        for key, tariff in TARIFFS.items():
+            stats = tariff_stats[key]
+            report_lines.append(
+                f"• {tariff['names']['uz']}: <b>{stats['count']}</b> ta — {money(stats['revenue'])}"
+            )
+
+        most_sold = max(tariff_stats.items(), key=lambda item: item[1]["count"]) if approved_rows else None
+        if most_sold and most_sold[1]["count"] > 0:
+            report_lines.extend([
+                "",
+                f"🏆 Eng ko‘p sotilgan tarif: <b>{TARIFFS[most_sold[0]]['names']['uz']}</b> "
+                f"({most_sold[1]['count']} ta)"
+            ])
+        else:
+            report_lines.extend(["", "🏆 Eng ko‘p sotilgan tarif: hozircha tasdiqlangan savdo yo‘q."])
+
+        report_lines.extend([
+            "",
+            f"⏳ <b>Tasdiqlanmagan to‘lovlar: {pending_total}</b>",
+        ])
+        if pending_rows:
+            for row in pending_rows:
+                created = time.strftime("%d-%m-%Y %H:%M", time.gmtime(int(row["created_at"] or 0) + 5 * 3600))
+                report_lines.append(
+                    f"• <code>{str(row['tx_id'])[:40]}</code> — ID <code>{row['user_id']}</code>\n"
+                    f"  {row['tariff_name'] or 'Tarif noma’lum'} | {row['tariff_price'] or 'Narx noma’lum'} | {created}"
+                )
+            if pending_total > len(pending_rows):
+                report_lines.append(f"… va yana {pending_total - len(pending_rows)} ta to‘lov.")
+        else:
+            report_lines.append("• Kutilayotgan to‘lov yo‘q.")
+
+        report_lines.extend([
+            "",
+            f"📅 <b>7 kun ichida muddati tugaydigan obunalar: {expiring_total}</b>",
+        ])
+        if expiring_rows:
+            for row in expiring_rows:
+                expiry = time.strftime("%d-%m-%Y %H:%M", time.gmtime(int(row["premium_until"]) + 5 * 3600))
+                plan_name = localized_tariff_name(row["plan_key"], "uz") if row["plan_key"] in TARIFFS else (row["status"] or "PRO")
+                source_note = " (bonus)" if row["premium_source"] == "admin_bonus" else ""
+                report_lines.append(
+                    f"• ID <code>{row['user_id']}</code> — {plan_name}{source_note}\n"
+                    f"  Tugash vaqti: {expiry}"
+                )
+            if expiring_total > len(expiring_rows):
+                report_lines.append(f"… va yana {expiring_total - len(expiring_rows)} ta obuna.")
+        else:
+            report_lines.append("• Yaqin 7 kunda muddati tugaydigan obuna yo‘q.")
+
+        # Telegram xabar limiti oshmasligi uchun hisobot bo'laklarga ajratiladi.
+        full_report = "\n".join(report_lines)
+        max_length = 3800
+        chunks = []
+        while len(full_report) > max_length:
+            split_at = full_report.rfind("\n", 0, max_length)
+            if split_at <= 0:
+                split_at = max_length
+            chunks.append(full_report[:split_at])
+            full_report = full_report[split_at:].lstrip("\n")
+        if full_report:
+            chunks.append(full_report)
+        for chunk in chunks:
+            bot.send_message(message.chat.id, chunk, parse_mode="HTML", disable_web_page_preview=True)
+
+        logging.info(
+            "Daromad va obunalar hisoboti yuborildi | tasdiqlangan_to'lov=%s | tushum=%s | kutilayotgan=%s | tugayotgan_obuna=%s",
+            len(approved_rows), total_revenue, pending_total, expiring_total
+        )
+    except Exception as e:
+        logging.exception("Daromad va obunalar hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Daromad va obunalar hisobotini tayyorlab bo‘lmadi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+@bot.message_handler(commands=["db_health"])
+def admin_database_health_command(message):
+    """Administrator uchun SQLite bazasining yengil holat tekshiruvi."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout=10000")
+        cur = conn.cursor()
+
+        # quick_check yengil tekshiruv; bazani o'zgartirmaydi.
+        check_row = cur.execute("PRAGMA quick_check").fetchone()
+        integrity_status = "✅ Sog‘lom" if check_row and check_row[0] == "ok" else "⚠️ Tekshirish kerak"
+
+        table_counts = {}
+        for table_name, label in (
+            ("users", "foydalanuvchilar"),
+            ("quizzes", "testlar"),
+            ("payments", "to‘lovlar"),
+            ("flashcards", "flash-kartochkalar"),
+        ):
+            try:
+                table_counts[label] = int(
+                    cur.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                )
+            except sqlite3.Error:
+                table_counts[label] = None
+
+        db_size = os.path.getsize(DB_PATH) if os.path.isfile(DB_PATH) else 0
+        wal_path = DB_PATH + "-wal"
+        wal_size = os.path.getsize(wal_path) if os.path.isfile(wal_path) else 0
+
+        def _format_bytes(size):
+            if size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            return f"{size / (1024 * 1024):.2f} MB"
+
+        def _count_text(value):
+            return f"{value:,}" if value is not None else "Jadval topilmadi"
+
+        now_local = datetime.now(timezone(timedelta(hours=5)))
+        report = (
+            "🗄 <b>Quiz AI — Ma’lumotlar bazasi holati</b>\n"
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            f"🔎 Bazaning yaxlitligi: <b>{integrity_status}</b>\n"
+            f"📦 SQLite fayli: <b>{_format_bytes(db_size)}</b>\n"
+            f"🧾 WAL jurnali: <b>{_format_bytes(wal_size)}</b>\n\n"
+            "📊 <b>Jadval yozuvlari</b>\n"
+            f"👥 Foydalanuvchilar: <b>{_count_text(table_counts['foydalanuvchilar'])}</b>\n"
+            f"📝 Testlar: <b>{_count_text(table_counts['testlar'])}</b>\n"
+            f"💳 To‘lovlar: <b>{_count_text(table_counts['to‘lovlar'])}</b>\n"
+            f"🗂 Flash-kartochkalar: <b>{_count_text(table_counts['flash-kartochkalar'])}</b>\n\n"
+            "ℹ️ Bu tekshiruv bazani o‘zgartirmaydi va zaxira nusxa yaratilganini anglatmaydi."
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+        logging.info("Ma’lumotlar bazasi holati tekshirildi | yaxlitlik=%s | SQLite_hajmi=%s_bayt | WAL_hajmi=%s_bayt",
+                     integrity_status, db_size, wal_size)
+    except Exception as e:
+        logging.exception("Ma’lumotlar bazasi holatini tekshirishda xatolik yuz berdi: %s", e)
+        try:
+            bot.send_message(
+                message.chat.id,
+                "❌ Ma’lumotlar bazasi holatini tekshirib bo‘lmadi. Railway loglarini tekshiring."
+            )
+        except Exception:
+            logging.exception("Baza tekshiruvi xatosi haqida Telegram xabarini yuborib bo‘lmadi.")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+# --- ADMIN SQLITE BACKUP: BROWSER DOWNLOAD LINK ---
+# Har bir havola tasodifiy, 10 daqiqalik va bir martalik bo'ladi.
+SQLITE_BACKUP_TOKEN_TTL = 10 * 60
+_sqlite_backup_tokens = {}
+_sqlite_backup_tokens_lock = threading.Lock()
+BACKUP_PUBLIC_BASE_URL = os.getenv("BACKUP_PUBLIC_BASE_URL", "").strip().rstrip("/")
+if not BACKUP_PUBLIC_BASE_URL:
+    _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
+    if _railway_domain:
+        BACKUP_PUBLIC_BASE_URL = (
+            _railway_domain if _railway_domain.startswith(("http://", "https://"))
+            else "https://" + _railway_domain
+        )
+
+
+def _issue_sqlite_backup_token():
+    now = time.time()
+    token = secrets.token_urlsafe(32)
+    with _sqlite_backup_tokens_lock:
+        expired = [key for key, expires_at in _sqlite_backup_tokens.items() if expires_at <= now]
+        for key in expired:
+            _sqlite_backup_tokens.pop(key, None)
+        _sqlite_backup_tokens[token] = now + SQLITE_BACKUP_TOKEN_TTL
+    return token
+
+
+def _consume_sqlite_backup_token(token: str) -> bool:
+    now = time.time()
+    with _sqlite_backup_tokens_lock:
+        expires_at = _sqlite_backup_tokens.pop(token, None)
+    return bool(expires_at and expires_at > now)
+
+
+@bot.message_handler(commands=["db_backup"])
+def admin_database_backup_command(message):
+    """Administrator-only: create a short-lived browser download link."""
+    if not _admin_only(message):
+        return
+
+    if not os.path.isfile(DB_PATH):
+        bot.send_message(message.chat.id, "❌ SQLite bazasi fayli topilmadi.")
+        return
+
+    if not BACKUP_PUBLIC_BASE_URL:
+        bot.send_message(
+            message.chat.id,
+            "⚠️ Yuklab olish havolasini yaratib bo‘lmadi. Railway Variables bo‘limida "
+            "RAILWAY_PUBLIC_DOMAIN mavjudligini tekshiring yoki BACKUP_PUBLIC_BASE_URL "
+            "o‘zgaruvchisiga ilovaning to‘liq HTTPS manzilini kiriting."
+        )
+        logging.error("DB backup link yaratilmadi: public base URL sozlanmagan.")
+        return
+
+    try:
+        token = _issue_sqlite_backup_token()
+        download_url = f"{BACKUP_PUBLIC_BASE_URL}/admin/sqlite-backup?token={token}"
+        bot.send_message(
+            message.chat.id,
+            "🗄 <b>Quiz AI — Baza zaxira nusxasi</b>\n\n"
+            "Havola 10 daqiqa davomida amal qiladi va faqat bir marta ishlatiladi.\n"
+            "Havolani Chrome yoki Yandex Browser orqali oching — zaxira fayli yuklanadi.\n\n"
+            f'⬇️ <a href="{download_url}">Zaxira nusxasini yuklab olish</a>\n\n'
+            "🔐 Havolani boshqa odamlarga yubormang.",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        logging.info("Administrator uchun bir martalik SQLite backup havolasi yaratildi.")
+    except Exception:
+        logging.exception("SQLite backup havolasini yaratishda xatolik yuz berdi.")
+        bot.send_message(message.chat.id, "❌ Zaxira havolasini yaratishda xatolik yuz berdi.")
+
+
+# --- ADMIN OMMAVIY XABAR YUBORISH ---
+@bot.message_handler(commands=["broadcast"])
+def admin_broadcast_command(message):
+    """Administrator matnini oldindan ko'rsatib, tasdiqdan keyin foydalanuvchilarga yuboradi."""
+    if not _admin_only(message):
+        return
+    if broadcast_active:
+        bot.send_message(message.chat.id, "⏳ Hozir boshqa ommaviy xabar yuborilmoqda. Tugashini kuting.")
+        return
+    broadcast_waiting_content.add(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "📣 <b>Ommaviy xabar yuborish</b>\n\n"
+        "Barcha ro‘yxatdan o‘tgan foydalanuvchilarga yuboriladigan matnni yuboring.\n"
+        "Yuborishdan oldin xabarni ko‘rib chiqib, alohida tasdiqlaysiz.\n\n"
+        "Bekor qilish uchun /broadcast_cancel buyrug‘ini yuboring.",
+        parse_mode="HTML",
+    )
+    logging.info("Administrator ommaviy xabar matnini kiritish jarayonini boshladi.")
+
+
+@bot.message_handler(commands=["broadcast_cancel"])
+def admin_broadcast_cancel_command(message):
+    if not _admin_only(message):
+        return
+    broadcast_waiting_content.discard(message.from_user.id)
+    broadcast_pending_messages.pop(message.from_user.id, None)
+    bot.send_message(message.chat.id, "❎ Ommaviy xabar tayyorlash bekor qilindi.")
+    logging.info("Administrator ommaviy xabar tayyorlashni bekor qildi.")
+
+
+@bot.message_handler(content_types=["text"], func=lambda message: bool(ADMIN_ID and message.from_user.id == ADMIN_ID and message.from_user.id in broadcast_waiting_content))
+def admin_broadcast_receive_text(message):
+    if not _admin_only(message):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        bot.send_message(message.chat.id, "⚠️ Xabar bo‘sh. Iltimos, matn yuboring.")
+        return
+    if len(text) > 4000:
+        bot.send_message(message.chat.id, "⚠️ Xabar 4 000 belgidan oshmasligi kerak. Qisqaroq matn yuboring.")
+        return
+
+    broadcast_waiting_content.discard(message.from_user.id)
+    broadcast_pending_messages[message.from_user.id] = text
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.row(
+        telebot.types.InlineKeyboardButton("✅ Yuborishni tasdiqlash", callback_data="broadcast_confirm"),
+        telebot.types.InlineKeyboardButton("❎ Bekor qilish", callback_data="broadcast_cancel"),
+    )
+    try:
+        bot.send_message(
+            message.chat.id,
+            "👁 Ommaviy xabar — ko‘rib chiqish\n\n"
+            + text
+            + "\n\n⚠️ Bu xabar ro‘yxatdan o‘tgan foydalanuvchilarga yuboriladi. Yuborishni boshlash uchun tasdiqlang.",
+            parse_mode=None,
+            reply_markup=markup,
+        )
+        logging.info("Ommaviy xabar matni tayyorlandi; administrator tasdig‘i kutilmoqda.")
+    except Exception as e:
+        broadcast_pending_messages.pop(message.from_user.id, None)
+        logging.error("Ommaviy xabarni ko‘rib chiqish xabarini yuborishda xatolik: %s", e)
+        bot.send_message(message.chat.id, "❌ Ko‘rib chiqish xabarini yuborishda xatolik yuz berdi.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data in ("broadcast_confirm", "broadcast_cancel"))
+def admin_broadcast_callback(call):
+    global broadcast_active
+    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "Bu amal faqat administrator uchun.", show_alert=True)
+        return
+
+    if call.data == "broadcast_cancel":
+        broadcast_pending_messages.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "Ommaviy xabar bekor qilindi.")
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            bot.send_message(call.message.chat.id, "❎ Ommaviy xabar yuborilmadi.")
+        except Exception as e:
+            logging.warning("Ommaviy xabarni bekor qilish xabarini yangilashda xatolik: %s", e)
+        logging.info("Administrator tasdiqlash bosqichida ommaviy xabarni bekor qildi.")
+        return
+
+    text = broadcast_pending_messages.pop(call.from_user.id, None)
+    if not text:
+        bot.answer_callback_query(call.id, "Tasdiqlash uchun xabar topilmadi.", show_alert=True)
+        return
+    with broadcast_lock:
+        if broadcast_active:
+            broadcast_pending_messages[call.from_user.id] = text
+            bot.answer_callback_query(call.id, "Boshqa ommaviy xabar yuborilmoqda.", show_alert=True)
+            return
+        broadcast_active = True
+
+    bot.answer_callback_query(call.id, "Yuborish boshlandi.")
+    try:
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except Exception as e:
+        logging.warning("Tasdiqlash tugmasini olib tashlashda xatolik: %s", e)
+
+    def _send_broadcast():
+        global broadcast_active
+        sent_count = 0
+        failed_count = 0
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+            conn.execute("PRAGMA busy_timeout=30000")
+            rows = conn.execute("SELECT user_id FROM users ORDER BY user_id").fetchall()
+            user_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+            total = len(user_ids)
+            bot.send_message(
+                ADMIN_ID,
+                f"📣 Ommaviy xabar yuborish boshlandi.\n👥 Qabul qiluvchilar: {total:,}\n⏱ Tezlik cheklovi: taxminan 10 ta xabar/soniya."
+            )
+            logging.info("Ommaviy xabar yuborish boshlandi | qabul_qiluvchilar=%s", total)
+            for user_id in user_ids:
+                try:
+                    bot.send_message(user_id, text, disable_web_page_preview=True)
+                    sent_count += 1
+                except Exception as send_error:
+                    failed_count += 1
+                    logging.warning("Ommaviy xabar yuborilmadi | user_id=%s | sabab=%s", user_id, str(send_error)[:300])
+                time.sleep(0.1)  # Telegram API yukini cheklash: taxminan 10 xabar/soniya.
+
+            summary = (
+                "📣 <b>Ommaviy xabar yuborish yakunlandi</b>\n\n"
+                f"👥 Jami qabul qiluvchilar: <b>{total:,}</b>\n"
+                f"✅ Muvaffaqiyatli yuborildi: <b>{sent_count:,}</b>\n"
+                f"❌ Yuborilmadi: <b>{failed_count:,}</b>\n\n"
+                "Xatolar tafsilotlari Railway loglarida qayd etildi."
+            )
+            bot.send_message(ADMIN_ID, summary, parse_mode="HTML")
+            logging.info("Ommaviy xabar yuborish yakunlandi | jami=%s | yuborildi=%s | xato=%s", total, sent_count, failed_count)
+        except Exception as e:
+            logging.exception("Ommaviy xabar yuborish jarayonida umumiy xatolik: %s", e)
+            try:
+                bot.send_message(ADMIN_ID, "❌ Ommaviy xabar jarayonida umumiy xatolik yuz berdi. Railway loglarini tekshiring.")
+            except Exception:
+                pass
+        finally:
+            if conn is not None:
+                conn.close()
+            with broadcast_lock:
+                broadcast_active = False
+
+    threading.Thread(target=_send_broadcast, daemon=True, name="admin-broadcast-worker").start()
+
 
 
 @bot.message_handler(commands=["bonus"])
@@ -1707,49 +2553,54 @@ def hybrid_db_check(
         raise HTTPException(status_code=500, detail=f"Hybrid DB diagnostic failed: {e}")
 
 
-# --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
-# Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
-# The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
-# so the live /data database is never moved, renamed or modified.
-SQLITE_BACKUP_TOKEN = os.getenv("SQLITE_BACKUP_TOKEN", "").strip()
+# --- SQLITE BACKUP DOWNLOAD ENDPOINT ---
+# Faqat botdagi administrator buyrug'i bergan, 10 daqiqalik bir martalik token qabul qilinadi.
 BACKUP_DIR = "/tmp/quiz_pilot_backups"
+
 
 def _remove_temp_backup(path: str):
     try:
         if os.path.exists(path):
             os.remove(path)
     except Exception:
-        logging.exception("Temporary SQLite backup cleanup failed")
+        logging.exception("Vaqtinchalik SQLite backup faylini o'chirishda xatolik.")
+
 
 @app.get("/admin/sqlite-backup")
 def download_sqlite_backup(
-    token: str = Query(..., min_length=16),
+    token: str = Query(..., min_length=32, max_length=128),
     background_tasks: BackgroundTasks = None,
 ):
-    if not SQLITE_BACKUP_TOKEN:
-        raise HTTPException(status_code=503, detail="SQLite backup endpoint is not configured")
-    if not secrets.compare_digest(token, SQLITE_BACKUP_TOKEN):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not os.path.exists(DB_PATH):
-        raise HTTPException(status_code=404, detail="SQLite database file was not found")
+    if not _consume_sqlite_backup_token(token):
+        raise HTTPException(
+            status_code=403,
+            detail="Havola yaroqsiz, muddati tugagan yoki avval ishlatilgan. Botdan /db_backup buyrug'ini qayta yuboring.",
+        )
+    if not os.path.isfile(DB_PATH):
+        raise HTTPException(status_code=404, detail="SQLite baza fayli topilmadi.")
 
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"quiz_pilot_sqlite_backup_{stamp}.db")
+    stamp = datetime.now(timezone(timedelta(hours=5))).strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(BACKUP_DIR, f"quiz_ai_sqlite_backup_{stamp}.db")
 
     try:
-        # sqlite3 backup API creates a consistent snapshot while the app is live.
-        src_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        dst_conn = sqlite3.connect(backup_path, check_same_thread=False)
+        # SQLite backup API jonli bazaning izchil nusxasini yaratadi;
+        # asosiy DB fayli ko'chirilmaydi va o'zgartirilmaydi.
+        src_conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        dst_conn = sqlite3.connect(backup_path, timeout=30, check_same_thread=False)
         try:
+            src_conn.execute("PRAGMA busy_timeout=30000")
             src_conn.backup(dst_conn)
+            check_result = dst_conn.execute("PRAGMA quick_check").fetchone()
+            if not check_result or check_result[0] != "ok":
+                raise sqlite3.DatabaseError("Zaxira nusxasi quick_check tekshiruvidan o'tmadi.")
         finally:
             dst_conn.close()
             src_conn.close()
     except Exception:
         _remove_temp_backup(backup_path)
-        logging.exception("SQLite backup creation failed")
-        raise HTTPException(status_code=500, detail="SQLite backup creation failed")
+        logging.exception("SQLite backup yaratishda xatolik yuz berdi.")
+        raise HTTPException(status_code=500, detail="Zaxira nusxasini yaratib bo'lmadi.")
 
     tasks = background_tasks or BackgroundTasks()
     tasks.add_task(_remove_temp_backup, backup_path)
@@ -1758,6 +2609,7 @@ def download_sqlite_backup(
         media_type="application/octet-stream",
         filename=os.path.basename(backup_path),
         background=tasks,
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1790,6 +2642,24 @@ def read_root(request: Request):
     })
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+@app.get("/api/tariff-config")
+def get_tariff_config():
+    """Mini App uchun Railway'dagi joriy tariflar va ommaga ko'rsatiladigan karta raqami."""
+    return {
+        "tariffs": {
+            key: {
+                "price": item["price"],
+                "duration": item["duration"],
+                "duration_value": item["duration_value"],
+                "duration_unit": item["duration_unit"],
+                "names": item["names"],
+            }
+            for key, item in TARIFFS.items()
+        },
+        "card_number": P2P_CARD_NUMBER,
+    }
 
 
 @app.post("/api/payment-intent")
@@ -2388,7 +3258,51 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def generate_quiz_from_gemini(extracted_text):
+# --- AI NAVBATI YUKLAMASI BO'YICHA AVTOMATIK ADMIN OGOHLANTIRISHI ---
+# Navbat sig'imining 80% yoki undan ko'pi band bo'lsa, adminga xabar yuboradi.
+# Takroriy xabarlar 5 daqiqalik cooldown bilan cheklanadi.
+_AI_QUEUE_ALERT_THRESHOLD = max(1, int(AI_MAX_QUEUE * 0.80))
+_ai_queue_alert_lock = threading.Lock()
+_ai_queue_last_alert_at = 0.0
+
+
+def _maybe_alert_ai_queue_load():
+    """Send a rate-limited admin alert when AI queue capacity is nearly exhausted."""
+    global _ai_queue_last_alert_at
+
+    if not ADMIN_ID:
+        return
+
+    try:
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+        if queue_slots_used < _AI_QUEUE_ALERT_THRESHOLD:
+            return
+
+        now = time.monotonic()
+        with _ai_queue_alert_lock:
+            if now - _ai_queue_last_alert_at < 300:
+                return
+            _ai_queue_last_alert_at = now
+
+        percent = min(100.0, queue_slots_used * 100.0 / max(1, AI_MAX_QUEUE))
+        alert = (
+            "⚠️ <b>Quiz AI — AI navbati band</b>\\n"
+            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\\n"
+            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\\n"
+            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /monitor buyrug'idan foydalaning."
+        )
+        bot.send_message(ADMIN_ID, alert, parse_mode="HTML", disable_web_page_preview=True)
+        logging.warning(
+            "AI navbati yuqori yuklamada | band=%s | limit=%s | foiz=%.1f",
+            queue_slots_used, AI_MAX_QUEUE, percent
+        )
+    except Exception:
+        # Monitoring xatosi test yaratish jarayoniga xalaqit bermasligi kerak.
+        logging.exception("AI navbati bo'yicha admin ogohlantirishini yuborishda xatolik")
+
+
+def _generate_quiz_from_gemini_impl(extracted_text):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
     Timeout + Concurrency Protection.
@@ -2447,10 +3361,21 @@ MUHIM QOIDALAR:
 
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
     queue_wait_started = time.monotonic()
-    if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] += 1
+    queue_acquired = ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT)
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
+        if queue_acquired:
+            _ai_monitor_state["accepted_requests"] += 1
+        else:
+            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": "AI navbatida kutish muddati tugadi"})
+            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
+    if not queue_acquired:
         logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
+    _maybe_alert_ai_queue_load()
     if queue_wait_seconds >= 1.0:
         logging.info("AI NAVBATI | So'rov navbat joyini kutdi | kutish=%.2f soniya", queue_wait_seconds)
 
@@ -2494,6 +3419,8 @@ MUHIM QOIDALAR:
                         logging.info("GEMINI PARALLELLIGI | Bo'sh so'rov o'rnini kutish yakunlandi | kutish=%.2f soniya", semaphore_wait_seconds)
 
                     started = time.monotonic()
+                    with _ai_monitor_lock:
+                        _ai_monitor_state["key_attempts"][key_idx] = _ai_monitor_state["key_attempts"].get(key_idx, 0) + 1
                     try:
                         client = genai.Client(api_key=api_key)
                         response = client.models.generate_content(
@@ -2563,12 +3490,22 @@ MUHIM QOIDALAR:
                                 "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN",
                                 time.monotonic() - queue_wait_started
                             )
+                            with _ai_monitor_lock:
+                                _ai_monitor_state["key_success"][key_idx] = _ai_monitor_state["key_success"].get(key_idx, 0) + 1
                             return response.text
 
                         last_error = f"{model_name}: Gemini bo'sh javob qaytardi"
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_idx] = _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
+                            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": f"{model_name}, Kalit #{key_idx + 1}: Gemini bo'sh javob qaytardi"})
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
 
                     except Exception as e:
                         last_error = str(e)
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_idx] = _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
+                            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": f"{model_name}, Kalit #{key_idx + 1}: {str(e)[:180]}"})
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
                         logging.warning(
                             "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_tafsiloti=%s",
                             model_name, key_idx, retry_round + 1, e
@@ -2586,6 +3523,185 @@ MUHIM QOIDALAR:
         return None
     finally:
         ai_queue_slots.release()
+
+
+# --- AI GENERATION OUTCOME STATISTICS (in-memory, since process start) ---
+_ai_stats_lock = threading.Lock()
+_ai_generation_stats = {
+    "success": 0,
+    "failed": 0,
+    "total_seconds": 0.0,
+    "last_success_at": 0.0,
+    "last_failure_at": 0.0,
+}
+
+
+def generate_quiz_from_gemini(extracted_text):
+    """Track each top-level generation attempt without changing generation logic."""
+    started_at = time.monotonic()
+    succeeded = False
+    try:
+        result = _generate_quiz_from_gemini_impl(extracted_text)
+        succeeded = bool(result)
+        return result
+    except Exception:
+        # Preserve the existing exception behavior while counting the failed attempt.
+        raise
+    finally:
+        elapsed = max(0.0, time.monotonic() - started_at)
+        with _ai_stats_lock:
+            if succeeded:
+                _ai_generation_stats["success"] += 1
+                _ai_generation_stats["last_success_at"] = time.time()
+            else:
+                _ai_generation_stats["failed"] += 1
+                _ai_generation_stats["last_failure_at"] = time.time()
+            _ai_generation_stats["total_seconds"] += elapsed
+
+
+@bot.message_handler(commands=["ai_monitor"])
+def admin_ai_monitor_command(message):
+    """Administrator uchun AI navbati, xatolar va API kalitlar statistikasini yuboradi."""
+    if not _admin_only(message):
+        return
+
+    try:
+        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+
+        with _ai_monitor_lock:
+            waiting = _ai_monitor_state["waiting_for_queue"]
+            accepted = _ai_monitor_state["accepted_requests"]
+            key_attempts = dict(_ai_monitor_state["key_attempts"])
+            key_success = dict(_ai_monitor_state["key_success"])
+            key_failures = dict(_ai_monitor_state["key_failures"])
+            recent_errors = list(_ai_monitor_state["last_errors"])
+
+        with _ai_stats_lock:
+            successful_generations = _ai_generation_stats["success"]
+            failed_generations = _ai_generation_stats["failed"]
+
+        report = (
+            "🤖 <b>Quiz AI — AI navbati va API nazorati</b>\n"
+            f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            "⚙️ <b>Joriy yuklama</b>\n"
+            f"🔄 Ishlayotgan AI so‘rovlari: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
+            f"⏳ Navbat slotlari band: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
+            f"🕰 Navbat joyini kutayotgan so‘rovlar: <b>{waiting}</b>\n"
+            f"🟢 Bo‘sh navbat slotlari: <b>{queue_slots_free}</b>\n\n"
+            "📊 <b>Test yaratish natijalari (server ishga tushganidan beri)</b>\n"
+            f"✅ Muvaffaqiyatli: <b>{successful_generations}</b>\n"
+            f"❌ Muvaffaqiyatsiz: <b>{failed_generations}</b>\n"
+            f"📥 Navbatga qabul qilingan jami so‘rovlar: <b>{accepted}</b>\n\n"
+            "🔑 <b>API kalitlari statistikasi</b>\n"
+            f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
+        )
+
+        # Telegram bitta xabar uchun taxminan 4096 belgi cheklaydi.
+        # Kalitlar ro'yxatini kichik bo'laklarga ajratib yuboramiz.
+        messages = [report]
+        if GOOGLE_API_KEYS:
+            key_lines = []
+            for key_idx in range(len(GOOGLE_API_KEYS)):
+                attempts = key_attempts.get(key_idx, 0)
+                successes = key_success.get(key_idx, 0)
+                failures = key_failures.get(key_idx, 0)
+                key_lines.append(
+                    f"• Kalit #{key_idx + 1}: urinish <b>{attempts}</b>, "
+                    f"muvaffaqiyat <b>{successes}</b>, xato <b>{failures}</b>"
+                )
+            chunk = "🔑 <b>API kalitlari (davomi bo‘lishi mumkin)</b>\n"
+            for line in key_lines:
+                addition = line + "\n"
+                if len(chunk) + len(addition) > 3000:
+                    messages.append(chunk.rstrip())
+                    chunk = "🔑 <b>API kalitlari (davomi)</b>\n"
+                chunk += addition
+            if chunk.strip():
+                messages.append(chunk.rstrip())
+        else:
+            messages.append("⚠️ AI test yaratish API kalitlari topilmadi.")
+
+        if recent_errors:
+            error_chunk = "⚠️ <b>Oxirgi AI xatolari</b>\n"
+            for item in recent_errors[-3:]:
+                error_time = datetime.fromtimestamp(
+                    item["time"], timezone(timedelta(hours=5))
+                ).strftime("%d-%m %H:%M:%S")
+                safe_message = (str(item["message"]).replace("&", "&amp;")
+                                .replace("<", "&lt;").replace(">", "&gt;"))
+                line = f"• <code>{error_time}</code> — {safe_message[:180]}\n"
+                if len(error_chunk) + len(line) > 3000:
+                    messages.append(error_chunk.rstrip())
+                    error_chunk = "⚠️ <b>Oxirgi AI xatolari (davomi)</b>\n"
+                error_chunk += line
+            messages.append(error_chunk.rstrip())
+        else:
+            messages.append("✅ Hozircha qayd etilgan AI API xatolari yo‘q.")
+
+        messages.append(
+            "ℹ️ Hisoblagichlar xotirada saqlanadi va server qayta ishga tushganda "
+            "noldan boshlanadi. API kalitlarining maxfiy qiymatlari ko‘rsatilmaydi."
+        )
+
+        for part in messages:
+            if part:
+                bot.send_message(message.chat.id, part, parse_mode="HTML")
+        logging.info("AI navbati va API nazorati hisoboti administratorga yuborildi.")
+    except Exception as e:
+        logging.exception("AI navbati va API nazorati hisobotini yuborishda xatolik: %s", e)
+        try:
+            bot.send_message(
+                message.chat.id,
+                "❌ AI nazorati hisobotini yuborishda xatolik yuz berdi. Batafsil ma’lumot Railway loglarida."
+            )
+        except Exception:
+            pass
+
+
+
+@bot.message_handler(commands=["ai_stats"])
+def admin_ai_generation_stats_command(message):
+    """Show generation success/failure counts since this process started."""
+    if not _admin_only(message):
+        return
+
+    with _ai_stats_lock:
+        success = _ai_generation_stats["success"]
+        failed = _ai_generation_stats["failed"]
+        total_seconds = _ai_generation_stats["total_seconds"]
+        last_success_at = _ai_generation_stats["last_success_at"]
+        last_failure_at = _ai_generation_stats["last_failure_at"]
+
+    total = success + failed
+    avg_seconds = total_seconds / total if total else 0.0
+    success_rate = (success * 100.0 / total) if total else 0.0
+
+    def _format_stat_time(timestamp):
+        if not timestamp:
+            return "Hali yo‘q"
+        return datetime.fromtimestamp(
+            timestamp, timezone(timedelta(hours=5))
+        ).strftime("%d-%m-%Y %H:%M:%S")
+
+    report = (
+        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\n"
+        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\n"
+        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\n"
+        f"📦 Jami urinishlar: <b>{total}</b>\n"
+        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\n"
+        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\n\n"
+        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\n"
+        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\n\n"
+        "ℹ️ Hisob server qayta ishga tushguncha saqlanadi; bu tarixiy DB hisoboti emas."
+    )
+    try:
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.exception("AI statistikasi yuborilmadi: %s", e)
 
 
 @app.post("/api/contact-admin")
@@ -4322,17 +5438,140 @@ async def api_exception_handler(request: Request, exc: Exception):
     raise exc
 
 
-@app.on_event("startup")
-async def startup_event():
-    # P2P OCR is an isolated background subsystem. It never blocks the bot/event loop.
-    try:
-        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
-        p2p_payment_ai.start()
-    except Exception as p2p_error:
-        # Payment OCR failure must never stop Quiz Pilot startup.
-        logging.exception("P2P Payment AI could not start; normal app continues: %s", p2p_error)
-    threading.Thread(target=start_bot_polling, daemon=True).start()
-    threading.Thread(target=limit_notification_worker, daemon=True).start()
+
+
+
+# ==================================================================
+# QUIZ AI ADMIN PANEL — barcha mavjud admin amallarini bitta menyuga jamlash
+# ==================================================================
+def _admin_panel_main_markup():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("📊 Umumiy statistika", callback_data="adminpanel:run:stats"),
+        telebot.types.InlineKeyboardButton("👥 Foydalanuvchilar", callback_data="adminpanel:run:users"),
+        telebot.types.InlineKeyboardButton("💳 Daromad va obunalar", callback_data="adminpanel:run:payments"),
+        telebot.types.InlineKeyboardButton("🖥 Server monitoring", callback_data="adminpanel:run:monitor"),
+        telebot.types.InlineKeyboardButton("🤖 AI test statistikasi", callback_data="adminpanel:run:ai_stats"),
+        telebot.types.InlineKeyboardButton("🔎 AI navbati va API nazorati", callback_data="adminpanel:run:ai_monitor"),
+        telebot.types.InlineKeyboardButton("🧾 To‘lov AI holati", callback_data="adminpanel:run:payment_ai_status"),
+        telebot.types.InlineKeyboardButton("🗄 Baza holati", callback_data="adminpanel:run:db_health"),
+        telebot.types.InlineKeyboardButton("📥 Baza backup", callback_data="adminpanel:run:db_backup"),
+        telebot.types.InlineKeyboardButton("📢 Ommaviy xabar", callback_data="adminpanel:run:broadcast"),
+        telebot.types.InlineKeyboardButton("🎁 Bonuslar", callback_data="adminpanel:submenu:bonuses"),
+        telebot.types.InlineKeyboardButton("🛠 Xatolik ogohlantirish sinovi", callback_data="adminpanel:run:test_error_alert"),
+    )
+    return markup
+
+
+def _admin_panel_bonus_markup():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
+        telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
+        telebot.types.InlineKeyboardButton("🗑 Bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
+        telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
+    )
+    return markup
+
+
+@bot.message_handler(commands=["help_admin"])
+def admin_help_panel_command(message):
+    """Administrator uchun tugmali boshqaruv markazi."""
+    if not _admin_only(message):
+        return
+    text = (
+        "🛡 <b>Quiz AI — Admin Panel</b>\n\n"
+        "Kerakli bo‘limni tanlang. Hisobotlar shu yerning o‘zida ochiladi.\n\n"
+        "📊 Statistika — foydalanuvchilar, testlar va bugungi faollik.\n"
+        "👥 Foydalanuvchilar — yangi, faol va Premium foydalanuvchilar.\n"
+        "💳 Daromad — tushum, tariflar va to‘lovlar.\n"
+        "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
+        "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
+        "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
+        "🎁 Bonuslar — buyruq formati bo‘yicha yordam.\n\n"
+        "🔐 Ushbu menyu faqat administrator uchun ochiq."
+    )
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
+    logging.info("Admin Panel ochildi.")
+
+
+@bot.callback_query_handler(func=lambda call: (call.data or "").startswith("adminpanel:"))
+def admin_help_panel_callback(call):
+    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "Bu menyu faqat administrator uchun.", show_alert=True)
+        return
+
+    action = call.data.split(":", 2)
+    kind = action[1] if len(action) > 1 else "home"
+    value = action[2] if len(action) > 2 else ""
+
+    if kind == "home":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text(
+                "🛡 <b>Quiz AI — Admin Panel</b>\n\nKerakli funksiyani tanlang:",
+                call.message.chat.id, call.message.message_id,
+                parse_mode="HTML", reply_markup=_admin_panel_main_markup()
+            )
+        except Exception:
+            bot.send_message(call.message.chat.id, "🛡 <b>Quiz AI — Admin Panel</b>\n\nKerakli funksiyani tanlang:", parse_mode="HTML", reply_markup=_admin_panel_main_markup())
+        return
+
+    if kind == "submenu" and value == "bonuses":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text("🎁 <b>Bonuslarni boshqarish</b>\n\nKerakli amalni tanlang:", call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=_admin_panel_bonus_markup())
+        except Exception:
+            bot.send_message(call.message.chat.id, "🎁 <b>Bonuslarni boshqarish</b>\n\nKerakli amalni tanlang:", parse_mode="HTML", reply_markup=_admin_panel_bonus_markup())
+        return
+
+    if kind == "guide":
+        guide_texts = {
+            "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
+            "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
+            "bonus_revoke": "🗑 <b>Bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
+        }
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, guide_texts.get(value, "Buyruq topilmadi."), parse_mode="HTML", reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("⬅️ Admin Panel", callback_data="adminpanel:home")))
+        return
+
+    if kind == "run":
+        handlers = {
+            "stats": admin_stats_command,
+            "users": admin_users_report_command,
+            "payments": admin_payments_report_command,
+            "monitor": admin_monitor_command,
+            "ai_stats": admin_ai_generation_stats_command,
+            "ai_monitor": admin_ai_monitor_command,
+            "payment_ai_status": admin_payment_ai_status,
+            "db_health": admin_database_health_command,
+            "db_backup": admin_database_backup_command,
+            "broadcast": admin_broadcast_command,
+            "test_error_alert": admin_test_error_alert_command,
+        }
+        handler = handlers.get(value)
+        if not handler:
+            bot.answer_callback_query(call.id, "Bu funksiya ushbu faylda mavjud emas.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "Funksiya ishga tushirilmoqda…")
+        # Mavjud handlerlarni qayta ishlatamiz; ularning asosiy funksional kodi o‘zgarmaydi.
+        from types import SimpleNamespace
+        synthetic_message = SimpleNamespace(
+            chat=call.message.chat,
+            from_user=call.from_user,
+            text="/" + value,
+            message_id=call.message.message_id,
+        )
+        try:
+            handler(synthetic_message)
+            logging.info("Admin Panel orqali funksiya ishga tushirildi | funksiya=%s", value)
+        except Exception:
+            logging.exception("Admin Panel funksiyasini ishga tushirishda xatolik | funksiya=%s", value)
+            bot.send_message(call.message.chat.id, "❌ Funksiyani ishga tushirishda xatolik yuz berdi. Railway loglarini tekshiring.")
+        return
+
+    bot.answer_callback_query(call.id, "Noma’lum menyu amali.", show_alert=True)
+
 
 
 
