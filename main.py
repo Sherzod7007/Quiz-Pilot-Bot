@@ -1362,13 +1362,13 @@ def send_welcome(message):
     welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # Admin uchun /start tugmasi tepada, /help_admin esa uning ostida ko'rsatiladi.
+    # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
     # Oddiy foydalanuvchilarning menyusi avvalgidek faqat /start bo'lib qoladi.
-    btn_start = telebot.types.KeyboardButton(text="/start")
-    markup.row(btn_start)
     if _admin_only(message):
         btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
         markup.row(btn_help_admin)
+    btn_start = telebot.types.KeyboardButton(text="/start")
+    markup.row(btn_start)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 
