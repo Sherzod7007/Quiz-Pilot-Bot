@@ -389,7 +389,7 @@ MESSAGES = {
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Ilovada test yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan tanishib chiqing.\n\n"
+            "📌 *Ilovada test yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan tanishib chiqing.*\n\n"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -439,7 +439,7 @@ MESSAGES = {
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Способы создания и получения премиум теста в приложении размещены в виде видео в нашей группе ознакомьтесь.\n\n"
+            "📌 *Способы создания и получения премиум теста в приложении размещены в виде видео в нашей группе ознакомьтесь.*\n\n"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -488,7 +488,7 @@ MESSAGES = {
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Check out our group of methods for creating tests and obtaining Premium in the application, arranged in the form of videos.\n\n"
+            "📌 *Check out our group of methods for creating tests and obtaining Premium in the application, arranged in the form of videos.*\n\n"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
