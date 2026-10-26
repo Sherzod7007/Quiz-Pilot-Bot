@@ -60,6 +60,9 @@ logging.basicConfig(
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
+
+# Mini App manzili Railway Variables orqali boshqariladi (Test va Production alohida).
+MINI_APP_URL = os.getenv("MINI_APP_URL", "").strip()
 templates = Jinja2Templates(directory="templates")
 
 raw_admin_id = os.getenv("ADMIN_ID")
@@ -388,8 +391,7 @@ MESSAGES = {
             "🆓 *Bepul:* har 30 kunda {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochka.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
-            "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "🚀 Boshlash uchun quyidagi tugmani bosing va Quiz AI imkoniyatlaridan foydalaning!"
+            "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat) 📌 Ilovada test yaratish va Premium olish usullari guruhimizda video shaklida joylashtirilgan tanishib chiqing.\n\n"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -438,8 +440,7 @@ MESSAGES = {
             "🆓 *Бесплатно:* {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек каждые 30 дней.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
-            "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
-            "🚀 Нажмите кнопку ниже и начните пользоваться возможностями Quiz AI!"
+            "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat) 📌 Способы создания теста в приложении и получения Premium смотрите в видео в нашей группе.\n\n"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -487,8 +488,7 @@ MESSAGES = {
             "🆓 *Free:* {quiz_limit} AI quizzes, {public_limit} public quizzes and {flashcard_limit} flashcards every 30 days.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
-            "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "🚀 Tap the button below and start using Quiz AI!"
+            "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat) 📌 Ways to create tests in the application and get Premium get acquainted in our group, arranged in the form of videos.\n\n"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
@@ -1362,13 +1362,18 @@ def send_welcome(message):
     welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
+    # Admin uchun /start tugmasi tepada, /help_admin esa uning ostida ko'rsatiladi.
     # Oddiy foydalanuvchilarning menyusi avvalgidek faqat /start bo'lib qoladi.
+    btn_start = telebot.types.KeyboardButton(text="/start")
+    markup.row(btn_start)
+    if MINI_APP_URL:
+        btn_open_app = telebot.types.KeyboardButton(
+            text="OPEN", web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
+        )
+        markup.row(btn_open_app)
     if _admin_only(message):
         btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
         markup.row(btn_help_admin)
-    btn_start = telebot.types.KeyboardButton(text="/start")
-    markup.row(btn_start)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
 
