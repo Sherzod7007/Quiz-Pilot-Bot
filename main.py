@@ -60,9 +60,6 @@ logging.basicConfig(
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
-
-# Mini App manzili Railway Variables orqali boshqariladi (Test va Production alohida).
-MINI_APP_URL = os.getenv("MINI_APP_URL", "").strip()
 templates = Jinja2Templates(directory="templates")
 
 raw_admin_id = os.getenv("ADMIN_ID")
@@ -1369,11 +1366,6 @@ def send_welcome(message):
     # Oddiy foydalanuvchilarning menyusi avvalgidek faqat /start bo'lib qoladi.
     btn_start = telebot.types.KeyboardButton(text="/start")
     markup.row(btn_start)
-    if MINI_APP_URL:
-        btn_open_app = telebot.types.KeyboardButton(
-            text="OPEN", web_app=telebot.types.WebAppInfo(url=MINI_APP_URL)
-        )
-        markup.row(btn_open_app)
     if _admin_only(message):
         btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
         markup.row(btn_help_admin)
