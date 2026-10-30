@@ -15,11 +15,12 @@ import time
 from datetime import datetime, timezone, timedelta
 import hashlib
 import re
+import sqlite3
 
 import telebot
 from google import genai
 from google.genai import types as genai_types
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 UZ_TZ = timezone(timedelta(hours=5))
 
@@ -78,12 +79,15 @@ PAYMENT_OCR_OUTPUT_USD_PER_1M = max(0.0, float(os.getenv("PAYMENT_OCR_OUTPUT_USD
 _queue = queue.Queue(maxsize=PAYMENT_OCR_QUEUE_MAX)
 _semaphore = threading.BoundedSemaphore(PAYMENT_OCR_MAX_CONCURRENT)
 _started = False
+_stop_event = threading.Event()
+_worker_threads = []
 _start_lock = threading.Lock()
 _key_lock = threading.Lock()
 _key_index = 0
 _db_path = None
 _bot = None
 _admin_id = None
+_admin_ids = set()
 
 
 class TemporaryAIError(RuntimeError):
@@ -110,11 +114,21 @@ class ReceiptAIResult(BaseModel):
     reason: str = ""
 
 
-def configure(db_path, bot, admin_id):
-    global _db_path, _bot, _admin_id
+def configure(db_path, bot, admin_id, admin_ids=None):
+    global _db_path, _bot, _admin_id, _admin_ids
     _db_path = db_path
     _bot = bot
     _admin_id = admin_id
+    _admin_ids = set()
+    if admin_id:
+        _admin_ids.add(int(admin_id))
+    for value in (admin_ids or []):
+        try:
+            parsed = int(value)
+            if parsed > 0:
+                _admin_ids.add(parsed)
+        except (TypeError, ValueError):
+            continue
 
 
 def _now():
@@ -154,7 +168,6 @@ def _parse_receipt_date(value):
 
 
 def _connect():
-    import sqlite3
     conn = sqlite3.connect(_db_path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
@@ -211,10 +224,47 @@ def init_db():
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN next_retry_at INTEGER DEFAULT 0")
     if "image_sha256" not in cols:
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN image_sha256 TEXT DEFAULT ''")
+    if "processing_started_at" not in cols:
+        conn.execute("ALTER TABLE p2p_receipts ADD COLUMN processing_started_at INTEGER DEFAULT 0")
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_status ON p2p_receipts(status, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_retry ON p2p_receipts(status, next_retry_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_tx ON p2p_receipts(transaction_id)")
+    # A separate unique-claim table makes transaction-ID reservation atomic across
+    # concurrent OCR workers and manual/admin approval paths.
+    conn.execute("""CREATE TABLE IF NOT EXISTS p2p_transaction_claims (
+        transaction_key TEXT PRIMARY KEY,
+        transaction_id TEXT NOT NULL,
+        tx_id TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        claimed_at INTEGER NOT NULL
+    )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_transaction_claims_tx ON p2p_transaction_claims(tx_id)")
+    # Backfill historical analyzed/review/approved receipts in stable order.
+    # INSERT OR IGNORE preserves the earliest existing receipt as the owner of a key.
+    legacy_rows = conn.execute(
+        "SELECT receipt_id, tx_id, user_id, transaction_id, created_at "
+        "FROM p2p_receipts WHERE status IN ('analyzed','review','approved') "
+        "AND COALESCE(transaction_id,'')<>'' ORDER BY receipt_id ASC"
+    ).fetchall()
+    legacy_duplicates = 0
+    for legacy in legacy_rows:
+        transaction_key = _normalize_transaction_id(legacy[3])
+        if not transaction_key:
+            continue
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO p2p_transaction_claims "
+            "(transaction_key,transaction_id,tx_id,user_id,claimed_at) VALUES (?,?,?,?,?)",
+            (transaction_key, str(legacy[3]).strip(), legacy[1], int(legacy[2]), int(legacy[4] or _now()))
+        )
+        if cur.rowcount == 0:
+            legacy_duplicates += 1
+    if legacy_duplicates:
+        logging.warning(
+            "P2P: eski bazada takroriy tranzaksiya ID yozuvlari aniqlandi | soni=%s | "
+            "tarixiy yozuvlar avtomatik o'zgartirilmadi",
+            legacy_duplicates
+        )
     conn.commit()
     conn.close()
 
@@ -225,7 +275,10 @@ def _budget_reserve():
     try:
         cur = conn.cursor()
         cur.execute("BEGIN IMMEDIATE")
-        row = cur.execute("SELECT * FROM p2p_ai_budget WHERE id=1").fetchone()
+        row = cur.execute(
+            "SELECT day_key, month_key, daily_requests, monthly_requests, monthly_spend_usd "
+            "FROM p2p_ai_budget WHERE id=1"
+        ).fetchone()
         if not row:
             cur.execute("INSERT INTO p2p_ai_budget (id,day_key,month_key) VALUES (1,?,?)", (day, month))
             daily = monthly = 0
@@ -277,7 +330,10 @@ def budget_status():
     day, month = _periods()
     conn = _connect()
     try:
-        row = conn.execute("SELECT * FROM p2p_ai_budget WHERE id=1").fetchone()
+        row = conn.execute(
+            "SELECT day_key, month_key, daily_requests, monthly_requests, monthly_spend_usd "
+            "FROM p2p_ai_budget WHERE id=1"
+        ).fetchone()
         if not row:
             return {"daily_requests": 0, "monthly_requests": 0, "monthly_spend_usd": 0.0}
         daily = row["daily_requests"] or 0
@@ -300,30 +356,92 @@ def budget_status():
         conn.close()
 
 
-def enqueue_receipt(tx_id, user_id, file_id):
-    """Persist a receipt before queueing it; rejected pending orders may submit a new image."""
+def _normalize_transaction_id(value):
+    """Normalize bank transaction references for case/separator-insensitive matching."""
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _claim_transaction_id(conn, tx_id, user_id, transaction_id):
+    """Atomically reserve a transaction ID; caller must hold a write transaction."""
+    transaction_id = str(transaction_id or "").strip()
+    key = _normalize_transaction_id(transaction_id)
+    if not key:
+        return True, ""
+    existing = conn.execute(
+        "SELECT tx_id FROM p2p_transaction_claims WHERE transaction_key=?", (key,)
+    ).fetchone()
+    if existing and existing["tx_id"] != tx_id:
+        return False, existing["tx_id"]
+    conn.execute(
+        "INSERT OR IGNORE INTO p2p_transaction_claims "
+        "(transaction_key,transaction_id,tx_id,user_id,claimed_at) VALUES (?,?,?,?,?)",
+        (key, transaction_id, tx_id, int(user_id), _now())
+    )
+    return True, ""
+
+
+def _mark_review_with_transaction_claim(tx_id, user_id, reason):
+    """Move a receipt to admin review and reserve its bank transaction ID atomically."""
     conn = _connect()
     try:
-        row = conn.execute("SELECT status FROM p2p_receipts WHERE tx_id=?", (tx_id,)).fetchone()
-        if row and row["status"] in ("analyzed", "approved", "review"):
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT transaction_id FROM p2p_receipts WHERE tx_id=? AND user_id=?",
+            (tx_id, int(user_id))
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            return False, "receipt_not_found"
+        claimed, previous_tx = _claim_transaction_id(conn, tx_id, user_id, row["transaction_id"])
+        if not claimed:
+            conn.execute(
+                "UPDATE p2p_receipts SET status='rejected', reason=?, processed_at=?, "
+                "next_retry_at=0, processing_started_at=0 WHERE tx_id=? AND user_id=?",
+                ("Transaction ID avval ishlatilgan", _now(), tx_id, int(user_id))
+            )
+            conn.commit()
+            return False, previous_tx
+        conn.execute(
+            "UPDATE p2p_receipts SET status='review', reason=?, processing_started_at=0 "
+            "WHERE tx_id=? AND user_id=?",
+            (reason, tx_id, int(user_id))
+        )
+        conn.commit()
+        return True, ""
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def enqueue_receipt(tx_id, user_id, file_id):
+    """Persist a receipt before queueing it; pending orders may replace rejected/failed images."""
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT status FROM p2p_receipts WHERE tx_id=? AND user_id=?", (tx_id, int(user_id))).fetchone()
+        if row and row["status"] in ("analyzed", "approved", "review", "processing", "queued", "waiting_capacity", "retry_wait", "budget_blocked", "error"):
             return False, "already_processed"
-        if row and row["status"] == "rejected":
+        if row:
             payment = conn.execute(
                 "SELECT status FROM payments WHERE tx_id=? AND user_id=?", (tx_id, int(user_id))
             ).fetchone()
-            # A rejected receipt can be replaced only while its payment order is still pending.
             if not payment or payment["status"] != "pending":
                 return False, "already_processed"
             conn.execute(
-                "UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='', "
-                "next_retry_at=0, processed_at=0, image_sha256='', attempts=0 WHERE tx_id=? AND user_id=?",
+                "UPDATE p2p_receipts SET telegram_file_id=?, status='queued', amount=0, currency='', "
+                "transaction_id='', transaction_date='', transaction_time='', recipient_card_last4='', "
+                "recipient_name='', bank_or_app='', confidence=0, reason='', ai_key_index=-1, "
+                "ai_input_tokens=0, ai_output_tokens=0, estimated_cost_usd=0, processed_at=0, "
+                "next_retry_at=0, image_sha256='', attempts=0, last_error='', processing_started_at=0 "
+                "WHERE tx_id=? AND user_id=?",
                 (file_id, tx_id, int(user_id))
             )
         else:
-            conn.execute("INSERT OR IGNORE INTO p2p_receipts (tx_id,user_id,telegram_file_id,status,created_at,next_retry_at) VALUES (?,?,?,?,?,0)",
-                         (tx_id, user_id, file_id, "queued", _now()))
-            conn.execute("UPDATE p2p_receipts SET telegram_file_id=?, status='queued', reason='', last_error='', next_retry_at=0 WHERE tx_id=? AND status IN ('waiting_capacity','error','retry_wait','budget_blocked')",
-                         (file_id, tx_id))
+            conn.execute(
+                "INSERT INTO p2p_receipts (tx_id,user_id,telegram_file_id,status,created_at,next_retry_at) "
+                "VALUES (?,?,?,?,?,0)", (tx_id, int(user_id), file_id, "queued", _now())
+            )
         conn.commit()
     finally:
         conn.close()
@@ -333,7 +451,7 @@ def enqueue_receipt(tx_id, user_id, file_id):
     except queue.Full:
         conn = _connect()
         try:
-            conn.execute("UPDATE p2p_receipts SET status='waiting_capacity', reason=? WHERE tx_id=?", ("OCR queue is full", tx_id))
+            conn.execute("UPDATE p2p_receipts SET status='waiting_capacity', reason=? WHERE tx_id=? AND user_id=? AND status='queued'", ("OCR queue is full", tx_id, int(user_id)))
             conn.commit()
         finally:
             conn.close()
@@ -703,30 +821,33 @@ def _notify_user(user_id, text):
 
 
 def _notify_admin(text):
-    try:
-        if _bot and _admin_id:
-            _bot.send_message(_admin_id, text)
-    except Exception as exc:
-        logging.warning("P2P: administratorga xabar yuborilmadi | sabab=%s", exc)
+    if not _bot or not _admin_ids:
+        return
+    for admin_id in sorted(_admin_ids):
+        try:
+            _bot.send_message(admin_id, text)
+        except Exception as exc:
+            logging.warning("P2P: administratorga xabar yuborilmadi | sabab=%s", exc)
 
 
 def _notify_admin_review(text, file_id, tx_id, user_id):
     """Send the original receipt image with admin decision buttons."""
-    if not _bot or not _admin_id:
+    if not _bot or not _admin_ids:
         return
     markup = telebot.types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         telebot.types.InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"p2p_approve|{tx_id}|{int(user_id)}"),
         telebot.types.InlineKeyboardButton("❌ Rad etish", callback_data=f"p2p_reject|{tx_id}|{int(user_id)}"),
     )
-    try:
-        _bot.send_photo(_admin_id, file_id, caption=text[:1000], reply_markup=markup)
-    except Exception as exc:
-        logging.warning("P2P: chek rasmini administratorga yuborishda xato | buyurtma=%s | sabab=%s", tx_id, exc)
+    for admin_id in sorted(_admin_ids):
         try:
-            _bot.send_message(_admin_id, text[:4000], reply_markup=markup)
-        except Exception:
-            logging.exception("P2P: administratorga zaxira xabar yuborishda xato | buyurtma=%s", tx_id)
+            _bot.send_photo(admin_id, file_id, caption=text[:1000], reply_markup=markup)
+        except Exception as exc:
+            logging.warning("P2P: chek rasmini administratorga yuborishda xato | buyurtma=%s | sabab=%s", tx_id, exc)
+            try:
+                _bot.send_message(admin_id, text[:4000], reply_markup=markup)
+            except Exception:
+                logging.exception("P2P: administratorga zaxira xabar yuborishda xato | buyurtma=%s", tx_id)
 
 
 def handle_admin_decision(call):
@@ -738,7 +859,7 @@ def handle_admin_decision(call):
         _bot.answer_callback_query(call.id, "Noto'g'ri to'lov so'rovi.", show_alert=True)
         return
 
-    if not _admin_id or int(call.from_user.id) != int(_admin_id):
+    if int(call.from_user.id) not in _admin_ids:
         _bot.answer_callback_query(call.id, "Bu amal faqat administrator uchun.", show_alert=True)
         return
 
@@ -758,7 +879,6 @@ def handle_admin_decision(call):
         if not ok:
             _bot.answer_callback_query(call.id, "To'lov tasdiqlanmadi: holat o'zgargan.", show_alert=True)
             return
-        _mark_by_tx(tx_id, status="approved", reason="Admin tomonidan tasdiqlandi", processed_at=_now(), next_retry_at=0)
         messages = {
             "uz": "🎉 Admin to'lovingizni tasdiqladi. Premium/PRO faollashtirildi! 👑",
             "ru": "🎉 Администратор подтвердил платёж. Premium/PRO активирован! 👑",
@@ -807,15 +927,36 @@ def handle_admin_decision(call):
 
 
 def _approve(tx_id, user_id):
-    """Reuse the same Premium semantics as existing manual approval, but atomically."""
-    import sqlite3
+    """Atomically approve payment, extend Premium, reserve bank TX ID and close receipt."""
     conn = _connect()
     try:
         cur = conn.cursor()
         cur.execute("BEGIN IMMEDIATE")
-        pay = cur.execute("SELECT status, tariff_name FROM payments WHERE tx_id=? AND user_id=?", (tx_id, user_id)).fetchone()
+        pay = cur.execute(
+            "SELECT status, tariff_name FROM payments WHERE tx_id=? AND user_id=?",
+            (tx_id, int(user_id))
+        ).fetchone()
         if not pay or pay["status"] != "pending":
+            conn.rollback()
             return False, "payment_not_pending"
+
+        receipt = cur.execute(
+            "SELECT transaction_id FROM p2p_receipts WHERE tx_id=? AND user_id=?",
+            (tx_id, int(user_id))
+        ).fetchone()
+        if receipt:
+            claimed, previous_tx = _claim_transaction_id(
+                conn, tx_id, user_id, receipt["transaction_id"]
+            )
+            if not claimed:
+                conn.execute(
+                    "UPDATE p2p_receipts SET status='rejected', reason=?, processed_at=?, "
+                    "next_retry_at=0, processing_started_at=0 WHERE tx_id=? AND user_id=?",
+                    ("Transaction ID avval ishlatilgan", _now(), tx_id, int(user_id))
+                )
+                conn.commit()
+                return False, "duplicate_transaction"
+
         tariff_name = pay["tariff_name"] or ""
         low = tariff_name.lower()
         if "o'qit" in low or "учител" in low or "teacher" in low:
@@ -826,12 +967,14 @@ def _approve(tx_id, user_id):
             plan = "monthly"
         else:
             plan = "daily"
+
         def _duration_seconds(env_name, default):
             try:
                 value = int(os.getenv(env_name, str(default)))
                 return value if value > 0 else default
             except (TypeError, ValueError):
                 return default
+
         durations = {
             "daily": _duration_seconds("TARIFF_DAILY_HOURS", 24) * 3600,
             "weekly": _duration_seconds("TARIFF_WEEKLY_DAYS", 7) * 86400,
@@ -839,15 +982,35 @@ def _approve(tx_id, user_id):
             "teachers": _duration_seconds("TARIFF_TEACHERS_DAYS", 30) * 86400,
         }
         now = _now()
-        old = cur.execute("SELECT premium_until FROM users WHERE user_id=?", (user_id,)).fetchone()
+        old = cur.execute(
+            "SELECT premium_until FROM users WHERE user_id=?", (int(user_id),)
+        ).fetchone()
         old_until = int(old[0] or 0) if old else 0
         until = max(now, old_until) + durations[plan]
-        cur.execute("UPDATE payments SET status='approved' WHERE tx_id=? AND status='pending'", (tx_id,))
+
+        cur.execute(
+            "UPDATE payments SET status='approved' "
+            "WHERE tx_id=? AND user_id=? AND status='pending'",
+            (tx_id, int(user_id))
+        )
         if cur.rowcount != 1:
+            conn.rollback()
             return False, "payment_race"
-        # Localized display is handled by the existing status endpoint. Store canonical plan.
-        cur.execute("UPDATE users SET status=?, plan_key=?, premium_until=?, premium_source=? WHERE user_id=?",
-                    (f"PRO ✨ ({plan})", plan, until, "paid", user_id))
+
+        cur.execute(
+            "UPDATE users SET status=?, plan_key=?, premium_until=?, premium_source=? WHERE user_id=?",
+            (f"PRO ✨ ({plan})", plan, until, "paid", int(user_id))
+        )
+        if cur.rowcount != 1:
+            conn.rollback()
+            return False, "user_not_found"
+        if receipt:
+            cur.execute(
+                "UPDATE p2p_receipts SET status='approved', reason='To‘lov tasdiqlandi', "
+                "processed_at=?, next_retry_at=0, processing_started_at=0 "
+                "WHERE tx_id=? AND user_id=?",
+                (now, tx_id, int(user_id))
+            )
         conn.commit()
         return True, plan
     except Exception:
@@ -866,7 +1029,7 @@ def _claim(tx_id):
         if not row or row["status"] not in ("queued", "waiting_capacity", "error", "retry_wait", "budget_blocked") or int(row["next_retry_at"] or 0) > _now():
             conn.rollback()
             return False
-        cur.execute("UPDATE p2p_receipts SET status='processing', attempts=COALESCE(attempts,0)+1, reason='', last_error='' WHERE tx_id=?", (tx_id,))
+        cur.execute("UPDATE p2p_receipts SET status='processing', processing_started_at=?, attempts=COALESCE(attempts,0)+1, reason='', last_error='' WHERE tx_id=?", (_now(), tx_id))
         conn.commit()
         return True
     except Exception:
@@ -885,7 +1048,7 @@ def _recover_queued(force=False):
         stale_before = now - PAYMENT_OCR_PROCESSING_STALE_SECONDS
         conn.execute(
             "UPDATE p2p_receipts SET status='retry_wait', reason='Worker restart recovery', next_retry_at=? "
-            "WHERE status='processing' AND created_at<=? AND (processed_at IS NULL OR processed_at=0)",
+            "WHERE status='processing' AND CASE WHEN COALESCE(processing_started_at,0)>0 THEN processing_started_at ELSE created_at END<=? AND (processed_at IS NULL OR processed_at=0)",
             (now, stale_before)
         )
         conn.commit()
@@ -904,62 +1067,43 @@ def _recover_queued(force=False):
 
     recovered = 0
     for row in rows:
-        # For periodic retries, atomically mark a row queued only when we are about
-        # to put it into the in-memory queue. This prevents duplicate enqueueing.
-        if not force:
-            conn = _connect()
+        # Both startup and periodic recovery use the same atomic transition.
+        # `force` only changes which statuses are selected above; the claim/update
+        # sequence must remain identical to avoid two recovery paths drifting.
+        conn = _connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                "UPDATE p2p_receipts SET status='queued', next_retry_at=0 "
+                "WHERE receipt_id=? AND status=? "
+                "AND (next_retry_at IS NULL OR next_retry_at<=?)",
+                (row["receipt_id"], row["status"], now)
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                continue
             try:
-                cur = conn.cursor()
-                cur.execute("BEGIN IMMEDIATE")
-                cur.execute(
-                    "UPDATE p2p_receipts SET status='queued', next_retry_at=0 WHERE receipt_id=? AND status=? AND (next_retry_at IS NULL OR next_retry_at<=?)",
-                    (row["receipt_id"], row["status"], now)
-                )
-                if cur.rowcount != 1:
-                    conn.rollback()
-                    continue
-                try:
-                    _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
-                except queue.Full:
-                    conn.rollback()
-                    break
-                conn.commit()
-                recovered += 1
-            finally:
-                conn.close()
-        else:
-            conn = _connect()
-            try:
-                cur = conn.cursor()
-                cur.execute("BEGIN IMMEDIATE")
-                cur.execute(
-                    "UPDATE p2p_receipts SET status='queued', next_retry_at=0 WHERE receipt_id=? AND status=? AND (next_retry_at IS NULL OR next_retry_at<=?)",
-                    (row["receipt_id"], row["status"], now)
-                )
-                if cur.rowcount != 1:
-                    conn.rollback()
-                    continue
-                try:
-                    _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
-                except queue.Full:
-                    conn.rollback()
-                    break
-                conn.commit()
-                recovered += 1
-            finally:
-                conn.close()
+                _queue.put_nowait((row["tx_id"], int(row["user_id"]), row["telegram_file_id"]))
+            except queue.Full:
+                conn.rollback()
+                break
+            conn.commit()
+            recovered += 1
+        finally:
+            conn.close()
     if recovered:
         logging.info("P2P OCR: %s ta chek qayta ishlash navbatiga qaytarildi", recovered)
     return recovered
 
 
 def _retry_scheduler():
-    while True:
+    while not _stop_event.is_set():
         try:
             _recover_queued(force=False)
         except Exception:
             logging.exception("P2P OCR: qayta urinish jadvalida xatolik")
-        time.sleep(PAYMENT_OCR_RETRY_SCAN_SECONDS)
+        _stop_event.wait(PAYMENT_OCR_RETRY_SCAN_SECONDS)
 
 
 def _user_identity(user_id):
@@ -1040,41 +1184,15 @@ def _process(item):
         result, key_idx, inp, out, used_model = _vision(data, mime, current_attempt)
         cost = _estimate_cost(inp, out)
         _budget_add_cost(cost)
-        _mark_by_tx(tx_id, status="analyzed", amount=result.amount, currency=result.currency,
+        # OCR ma'lumotlari hozircha processing holatida saqlanadi. Tranzaksiya ID
+        # faqat chek review yoki approval bosqichiga o'tayotganda atomar band qilinadi.
+        _mark_by_tx(tx_id, amount=result.amount, currency=result.currency,
                      transaction_id=result.transaction_id, transaction_date=result.transaction_date,
                      transaction_time=result.transaction_time, recipient_card_last4=result.recipient_card_last4,
                      recipient_name=result.recipient_name, bank_or_app=result.bank_or_app,
                      confidence=result.confidence, reason=result.reason, ai_key_index=key_idx,
                      ai_input_tokens=inp, ai_output_tokens=out, estimated_cost_usd=cost,
                      processed_at=_now(), next_retry_at=0)
-
-        # Bir tranzaksiya ID qayta ishlatilmasin: bu tekshiruv admin-review qaroridan
-        # oldin bajariladi, shunda avval ko‘rilgan chek qayta yuborilsa admin navbatiga tushmaydi.
-        transaction_id = (result.transaction_id or "").strip()
-        if transaction_id:
-            conn = _connect()
-            try:
-                duplicate = conn.execute(
-                    "SELECT tx_id FROM p2p_receipts "
-                    "WHERE transaction_id=? AND tx_id<>? "
-                    "AND status IN ('analyzed','approved','review') LIMIT 1",
-                    (transaction_id, tx_id)
-                ).fetchone()
-            finally:
-                conn.close()
-            if duplicate:
-                _mark_by_tx(
-                    tx_id, status="rejected",
-                    reason="Transaction ID avval ishlatilgan",
-                    processed_at=_now(), next_retry_at=0
-                )
-                logging.warning(
-                    "P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | "
-                    "buyurtma=%s | transaction_id=%s | avvalgi_buyurtma=%s",
-                    tx_id, transaction_id, duplicate["tx_id"]
-                )
-                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
-                return
 
         expected = _expected_amount(pay["tariff_price"])
         amount_ok = abs(_parse_amount(result.amount) - expected) < 0.01
@@ -1120,10 +1238,10 @@ def _process(item):
         # Har bir chek bo‘yicha OCR natijasi va qaror mezonlarini logda ko‘rsatish.
         logging.info(
              "P2P CHEK TAHLILI | buyurtma=%s | aniqlash_ishonchliligi=%.2f | tahrir_alomati=%s | "
-            "tranzaksiya_raqami=%s | chek_sanasi=%s | summa_mos=%s | karta_mos=%s | sana_mos=%s",
+            "tranzaksiya_raqami=%s | chek_sanasi=%s | valyuta=%s | summa_mos=%s | karta_mos=%s | sana_mos=%s",
             tx_id, result.confidence, suspicious_edits,
             (result.transaction_id or "aniqlanmadi"),
-            (result.transaction_date or "aniqlanmadi"),
+            (result.transaction_date or "aniqlanmadi"), (result.currency or "aniqlanmadi"),
             amount_ok, card_ok, date_ok
         )
 
@@ -1131,7 +1249,11 @@ def _process(item):
             # Qabul qiluvchi karta konfiguratsiyasi yo‘q bo‘lsa, foydalanuvchini ayblamasdan
             # sozlama muammosini administratorga chiqaramiz.
             reason_text = "P2P_CARD_NUMBER sozlanmagan; qabul qiluvchi kartani tekshirib bo‘lmaydi"
-            _mark_by_tx(tx_id, status="review", reason=reason_text)
+            review_ok, duplicate_tx = _mark_review_with_transaction_claim(tx_id, user_id, reason_text)
+            if not review_ok:
+                logging.warning("P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | buyurtma=%s | avvalgi_buyurtma=%s", tx_id, duplicate_tx)
+                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
+                return
             logging.error(
                 "P2P TO‘LOV QARORI | qaror=ADMIN_TEKSHIRUVI | buyurtma=%s | "
                 "sabab=qabul_qiluvchi_karta_sozlanmagan",
@@ -1162,7 +1284,11 @@ def _process(item):
                 result.transaction_id or "aniqlanmadi",
                 result.transaction_date or "aniqlanmadi", reason_text
             )
-            _mark_by_tx(tx_id, status="review", reason=reason_text)
+            review_ok, duplicate_tx = _mark_review_with_transaction_claim(tx_id, user_id, reason_text)
+            if not review_ok:
+                logging.warning("P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | buyurtma=%s | avvalgi_buyurtma=%s", tx_id, duplicate_tx)
+                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
+                return
             display_name, username = _user_identity(user_id)
             _notify_user(user_id, _p2p_review_message(user_id, ["review_suspicious"]))
             _notify_admin_review(
@@ -1185,6 +1311,30 @@ def _process(item):
             )
             return
 
+        # Valyuta aniq UZS bo‘lmasa, avtomatik tasdiqlash taqiqlanadi.
+        # Noma’lum OCR qiymatini foydalanuvchi xatosi deb hisoblamaymiz: admin tekshiradi.
+        if not _currency_is_uzs(result.currency):
+            reason_text = "Chek valyutasi UZS sifatida aniq tasdiqlanmadi"
+            review_ok, duplicate_tx = _mark_review_with_transaction_claim(tx_id, user_id, reason_text)
+            if not review_ok:
+                logging.warning("P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | buyurtma=%s | avvalgi_buyurtma=%s", tx_id, duplicate_tx)
+                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
+                return
+            logging.warning(
+                "P2P TO‘LOV QARORI | qaror=ADMIN_TEKSHIRUVI | buyurtma=%s | sabab=UZS_VALYUTA_TASDIQLANMADI",
+                tx_id
+            )
+            _notify_user(user_id, _p2p_review_message(user_id, ["review_confidence"]))
+            display_name, username = _user_identity(user_id)
+            _notify_admin_review(
+                f"⚠️ P2P TO‘LOV — VALYUTA TEKSHIRUVI KERAK\n\n"
+                f"🧾 Buyurtma: {tx_id}\n👤 Foydalanuvchi: {display_name}\n🆔 Telegram ID: {user_id}\n"
+                f"\n💱 Aniqlangan valyuta: {result.currency or 'aniqlanmadi'}\n"
+                f"🔎 Sabab: {reason_text}\nℹ️ Premium avtomatik faollashtirilmadi.",
+                file_id, tx_id, user_id
+            )
+            return
+
         # Karta egasi ismi: to'liq ism va ism/familiya bosh harfi variantlari
         # _name_matches() orqali tekshiriladi. Aniqlangan boshqa ism — aniq xato:
         # mijozga xabar beriladi, administratorga yuborilmaydi.
@@ -1202,7 +1352,11 @@ def _process(item):
         # qolgan tekshiruvlar muvaffaqiyatli bo'lsa, xavfsiz ravishda admin ko'rib chiqadi.
         if name_check_enabled and not actual_name:
             reason_text = "Chekdagi karta egasi ismi OCR orqali aniqlanmadi"
-            _mark_by_tx(tx_id, status="review", reason=reason_text)
+            review_ok, duplicate_tx = _mark_review_with_transaction_claim(tx_id, user_id, reason_text)
+            if not review_ok:
+                logging.warning("P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | buyurtma=%s | avvalgi_buyurtma=%s", tx_id, duplicate_tx)
+                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
+                return
             logging.warning("P2P TO‘LOV QARORI | qaror=ADMIN_TEKSHIRUVI | buyurtma=%s | sabab=karta_egasi_ismi_aniqlanmadi", tx_id)
             _notify_user(user_id, _p2p_review_message(user_id, ["review_confidence"]))
             display_name, username = _user_identity(user_id)
@@ -1253,7 +1407,6 @@ def _process(item):
 
         ok, info = _approve(tx_id, user_id)
         if ok:
-            _mark_by_tx(tx_id, status="approved", reason="AI rules passed", processed_at=_now(), next_retry_at=0)
             _notify_user(user_id, _p2p_message(user_id, "approved"))
             logging.info(
                  "P2P TO‘LOV QARORI | qaror=AVTOMATIK_TASDIQLANDI | buyurtma=%s | "
@@ -1264,7 +1417,11 @@ def _process(item):
                 (result.transaction_date or "aniqlanmadi"), used_model, cost
             )
         else:
-            _mark_by_tx(tx_id, status="review", reason=info)
+            if info == "duplicate_transaction":
+                logging.warning("P2P TO‘LOV QARORI | qaror=TAKRORIY_CHEK_RAD_ETILDI | buyurtma=%s", tx_id)
+                _notify_user(user_id, _p2p_message(user_id, "duplicate_tx"))
+            else:
+                _mark_by_tx(tx_id, status="review", reason=info)
     except BudgetBlockedError as exc:
         attempts = _get_attempts(tx_id)
         _mark_by_tx(tx_id, status="budget_blocked", reason=str(exc), last_error=str(exc), next_retry_at=_now() + 3600)
@@ -1275,12 +1432,25 @@ def _process(item):
         attempts = _get_attempts(tx_id)
         transient = _is_transient_error(exc) or isinstance(exc, TemporaryAIError)
         if transient:
-            delay = _retry_delay(min(attempts, PAYMENT_OCR_MAX_RETRIES))
-            _mark_by_tx(tx_id, status="retry_wait", reason="Vaqtinchalik AI xatosi; avtomatik qayta uriniladi", last_error=str(exc), next_retry_at=_now() + delay)
-            logging.warning("P2P OCR: vaqtinchalik xatolik | buyurtma=%s | urinish=%s | qayta_urinish=%s soniyadan keyin | sabab=%s", tx_id, attempts, delay, exc)
-            if attempts == 1:
-                _notify_user(user_id, _p2p_message(user_id, "received"))
-            # Do not spam the admin for every transient 503. The receipt remains durable.
+            if attempts > PAYMENT_OCR_MAX_RETRIES:
+                final_reason = "AI tekshiruvi belgilangan qayta urinishlar soniga yetdi"
+                _mark_by_tx(tx_id, status="failed", reason=final_reason, last_error=str(exc)[:2000], next_retry_at=0, processed_at=_now())
+                logging.error("P2P OCR: qayta urinishlar chegarasi tugadi | buyurtma=%s | urinishlar=%s | sabab=%s", tx_id, attempts, exc)
+                _notify_user(user_id, _p2p_message(user_id, "technical_error"))
+                _notify_admin(
+                    f"⚠️ P2P TO‘LOV — OCR QAYTA URINISHLARI TUGADI\n\n"
+                    f"🧾 TX: {tx_id}\n🆔 Telegram ID: {user_id}\n"
+                    f"🔢 Urinishlar: {attempts}\n"
+                    f"🔴 Sabab: {_friendly_ai_error(exc)}\n"
+                    f"ℹ️ To‘lov avtomatik tasdiqlanmadi. Administrator qo‘lda tekshirishi kerak."
+                )
+            else:
+                delay = _retry_delay(attempts)
+                _mark_by_tx(tx_id, status="retry_wait", reason="Vaqtinchalik AI xatosi; avtomatik qayta uriniladi", last_error=str(exc)[:2000], next_retry_at=_now() + delay)
+                logging.warning("P2P OCR: vaqtinchalik xatolik | buyurtma=%s | urinish=%s/%s | qayta_urinish=%s soniyadan keyin | sabab=%s", tx_id, attempts, PAYMENT_OCR_MAX_RETRIES, delay, exc)
+                if attempts == 1:
+                    _notify_user(user_id, _p2p_message(user_id, "received"))
+            # Transient failures are bounded; exhausted items remain terminal until a new receipt is submitted.
         else:
             delay = PAYMENT_OCR_RETRY_MAX_SECONDS
             _mark_by_tx(tx_id, status="error", reason=str(exc)[:1000], last_error=str(exc)[:2000], next_retry_at=_now() + delay)
@@ -1310,6 +1480,12 @@ def _get_attempts(tx_id):
         conn.close()
 
 
+
+def _currency_is_uzs(value):
+    """Recognize common OCR spellings of Uzbek soum without guessing unknown currencies."""
+    token = re.sub(r"[^A-ZА-ЯЁЎҚҒҲ]", "", str(value or "").upper())
+    return token in {"UZS", "SUM", "SO M", "SOM", "UZBEKISTANSUM", "UZBEKISTANSO M"}
+
 def _last4(value):
     digits = re.sub(r"\D", "", str(value or ""))
     return digits[-4:] if len(digits) >= 4 else ""
@@ -1318,6 +1494,8 @@ def _last4(value):
 def _mark_by_tx(tx_id, **fields):
     conn = _connect()
     try:
+        if fields.get("status") and fields["status"] != "processing":
+            fields.setdefault("processing_started_at", 0)
         sets = ", ".join(f"{k}=?" for k in fields)
         conn.execute(f"UPDATE p2p_receipts SET {sets} WHERE tx_id=?", list(fields.values()) + [tx_id])
         conn.commit()
@@ -1326,29 +1504,29 @@ def _mark_by_tx(tx_id, **fields):
 
 
 def _normalize_person_name(value):
-    """Ismni OCR taqqoslash uchun harflar va bo'shliqlarga normallashtiradi."""
+    """Normalize Uzbek/Russian/Latin names; Uzbek Sh and Ş share one digraph token."""
     value = str(value or "").upper().replace("ʻ", "'").replace("’", "'")
+    # Ş is the planned/alternate spelling of Uzbek Sh; plain S remains distinct.
+    value = value.replace("Ş", "SH")
     value = re.sub(r"[^A-ZА-ЯЁЎҚҒҲ'\s-]", " ", value)
     return [part for part in re.split(r"[\s-]+", value) if part]
 
 
 def _name_matches(expected, actual):
-    """To'liq ismni yoki xavfsiz bosh-harf variantlarini, tartibdan qat'i nazar, solishtiradi."""
+    """Match full names or safe initials in either order, keeping SH distinct from S."""
     expected_parts = _normalize_person_name(expected)
     actual_parts = _normalize_person_name(actual)
     if not expected_parts or not actual_parts or len(expected_parts) != len(actual_parts):
         return False
 
-    # Har bir chekdagi qism alohida kutilgan qismga mos tushishi shart.
-    # Masalan, Sherzod Kabulov uchun: KABULOV SH, SH KABULOV,
-    # SHERZOD K va K SHERZOD qabul qilinadi; boshqa ism qabul qilinmaydi.
     def compatible(receipt_part, expected_part):
         if receipt_part == expected_part:
             return True
-        # O'zbekcha ism bosh harfi "Sh" ikki harf bilan yozilishi mumkin.
-        return len(receipt_part) == 1 and expected_part.startswith(receipt_part) or (
-            receipt_part == "SH" and expected_part.startswith("SH")
-        )
+        # Sherzod -> SH (or Ş, normalized to SH), never plain S.
+        if expected_part.startswith("SH"):
+            return receipt_part == "SH"
+        # Other given-name/surname initials remain their exact first letter.
+        return len(receipt_part) == 1 and expected_part.startswith(receipt_part)
 
     def assign(index, used):
         if index == len(actual_parts):
@@ -1367,8 +1545,11 @@ def _worker():
     logging.info("P2P OCR ishchisi ishga tushdi | asosiy_model=%s | zaxira_modellar=%s | parallel_ish=%s | navbat_hajmi=%s | kalitlar_soni=%s",
                  PAYMENT_GEMINI_MODEL, ",".join(PAYMENT_GEMINI_FALLBACK_MODELS) or "sozlanmagan",
                  PAYMENT_OCR_MAX_CONCURRENT, PAYMENT_OCR_QUEUE_MAX, len(PAYMENT_GEMINI_API_KEYS))
-    while True:
-        item = _queue.get()
+    while not _stop_event.is_set():
+        try:
+            item = _queue.get(timeout=1)
+        except queue.Empty:
+            continue
         try:
             _process(item)
         except Exception:
@@ -1378,7 +1559,7 @@ def _worker():
 
 
 def start():
-    global _started
+    global _started, _worker_threads
     if _started:
         return
     if not _db_path:
@@ -1387,11 +1568,35 @@ def start():
     with _start_lock:
         if _started:
             return
-        for idx in range(PAYMENT_OCR_MAX_CONCURRENT):
-            threading.Thread(target=_worker, name=f"p2p-ocr-{idx+1}", daemon=True).start()
-        _started = True
+        _stop_event.clear()
+        _worker_threads = []
         _recover_queued(force=True)
-        threading.Thread(target=_retry_scheduler, name="p2p-ocr-retry-scheduler", daemon=True).start()
+        for idx in range(PAYMENT_OCR_MAX_CONCURRENT):
+            worker_thread = threading.Thread(target=_worker, name=f"p2p-ocr-{idx+1}", daemon=True)
+            worker_thread.start()
+            _worker_threads.append(worker_thread)
+        retry_thread = threading.Thread(target=_retry_scheduler, name="p2p-ocr-retry-scheduler", daemon=True)
+        retry_thread.start()
+        _worker_threads.append(retry_thread)
+        _started = True
+
+
+def stop(timeout=8):
+    """OCR workerlarini tartibli to'xtatadi; tugallanmagan chek DB orqali qayta tiklanadi."""
+    global _started
+    if not _started:
+        return
+    _stop_event.set()
+    deadline = time.monotonic() + max(0, float(timeout))
+    for worker_thread in list(_worker_threads):
+        remaining = max(0, deadline - time.monotonic())
+        worker_thread.join(timeout=remaining)
+    alive = [thread.name for thread in _worker_threads if thread.is_alive()]
+    if alive:
+        logging.warning("P2P OCR ishchilari shutdown vaqtida hali ishlayapti: %s", ", ".join(alive))
+    else:
+        logging.info("P2P OCR ishchilari tartibli to'xtatildi.")
+    _started = False
 
 
 def get_status():
