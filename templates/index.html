@@ -13124,7 +13124,6 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
         <div class="header create-header" style="display: flex; justify-content: space-between; align-items: center;">
   <div class="create-heading-stack">
     <h1 data-lang="nav_create">Yangi Test</h1>
-    <div class="create-user-name-line" aria-live="polite"><span class="user-name-caption">👤</span><span id="create-telegram-user-name"></span></div>
   </div>
 
   <!-- O'ng tomondagi Qo'ng'iroqcha -->
@@ -15217,19 +15216,6 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
         }
         // HTML atributi ichidagi inline JavaScript argumentini xavfsiz kodlaydi.
         function escapeJsArg(v){return escapeHtml(JSON.stringify(String(v??'')));}
-        function renderTelegramUserName(){
-            const targets=[
-                document.getElementById('create-telegram-user-name')
-            ].filter(Boolean);
-            if(!targets.length)return;
-            const u=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user?tg.initDataUnsafe.user:{};
-            const displayName=[u.first_name,u.last_name].filter(Boolean).join(' ').trim()
-                || (u.username?('@'+u.username):'Foydalanuvchi');
-            targets.forEach(target=>{
-                target.textContent=displayName;
-                target.title=displayName;
-            });
-        }
         function teacherVariantLabel(code){ return code ? (langPack[currentLang].teacher_variant_label || 'Variant') + ' ' + code : langPack[currentLang].teacher_assign_variant; }
         function getTelegramUserInfo(){
             const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : {};
@@ -15534,7 +15520,6 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             } catch(e) {}
 
 window.onload = function() {
-            renderTelegramUserName();
             applyLocalization();
             initCreatePromoCarousel();
             setupVibration();
@@ -15631,9 +15616,6 @@ window.onload = function() {
         #create-screen .create-header{align-items:flex-start!important;}
         #create-screen .create-heading-stack{display:flex;flex-direction:column;align-items:flex-start;min-width:0;}
         #create-screen .create-heading-stack h1{margin:0;}
-        #create-screen .create-user-name-line{display:flex;align-items:center;justify-content:flex-start;gap:7px;margin:5px 0 0;color:#9fe8c0;font-size:24px;font-weight:700;line-height:1.2;max-width:75vw;}
-        #create-screen .create-user-name-line #create-telegram-user-name{display:inline-block;max-width:calc(75vw - 30px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fe8c0;}
-        #create-screen .create-user-name-line .user-name-caption{font-size:20px;opacity:.85;}
         #create-screen #text-input{height:62px!important;min-height:62px!important;padding:10px 14px!important;line-height:1.35;overflow-y:auto;}
 
         html[data-quiz-theme="quantum-aurora"] #library-screen .btn-public.is-active,
