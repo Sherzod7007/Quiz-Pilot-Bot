@@ -13130,6 +13130,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
     <span class="news-badge" id="newsBadge"></span>
   </div>
 </div>
+<div class="user-name-line create-user-name-line" aria-live="polite"><span class="user-name-caption">👤</span><span id="create-telegram-user-name"></span></div>
 <!-- Yangiliklar Oynasi (Modal) -->
 <div class="modal-overlay" id="newsModal" aria-hidden="true">
   <div class="news-modal-card" role="dialog" aria-modal="true" aria-labelledby="newsModalTitle">
@@ -13357,7 +13358,6 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 <div class="teacher-section-title"><span>👥 <span data-lang="teacher_groups">Guruhlar</span></span><button class="teacher-mini-btn" onclick="loadTeacherGroups()" data-lang="teacher_refresh">Yangilash</button></div>
                 <div class="teacher-form-grid"><input id="teacher-group-name" class="input-card" data-placeholder="teacher_group_name"><input id="teacher-group-desc" class="input-card" data-placeholder="teacher_group_desc"></div>
                 <button class="submit-btn" onclick="createTeacherGroup()" data-lang="teacher_create_group">➕ Guruh yaratish</button>
-                <div id="teacher-groups-list" style="margin-top:12px;"></div>
 
                 <div class="teacher-subsection">
                     <div class="teacher-section-title"><span data-lang="teacher_session_title">🚀 Guruh testini boshlash</span></div>
@@ -13374,6 +13374,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     <button class="submit-btn" onclick="createTeacherSessionPro()" data-lang="teacher_create_btn">🚀 Guruh testini boshlash</button>
                     <div class="teacher-note" data-lang="teacher_session_note">Sessiya yaratilgach o‘quvchilar “Guruhga qo‘shilish” bo‘limidan testga kirishadi. Natijalar avtomatik yig‘iladi.</div>
                 </div>
+                <div id="teacher-groups-list" style="margin-top:12px;"></div>
             </div>
 
             <div id="teacher-feature-assignments" class="teacher-section glass-panel teacher-feature-panel" style="display:none;">
@@ -13400,12 +13401,12 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
 
             <div id="teacher-feature-results" class="teacher-section glass-panel teacher-feature-panel" style="display:none;">
                 <div class="teacher-section-title"><span>📊 <span data-lang="teacher_results_title">Natijalar</span></span><button class="teacher-mini-btn" onclick="loadTeacherResultsPanel()" data-lang="teacher_refresh">Yangilash</button></div>
+                <select id="teacher-results-session" class="input-card" style="margin-top:14px;"></select>
+                <button type="button" class="submit-btn" style="margin-top:10px;" onclick="showSelectedTeacherResults()" data-lang="teacher_show_results">📊 Natijalarni ko‘rsatish</button>
                 <div class="teacher-subsection">
                     <div class="teacher-section-title"><span data-lang="teacher_sessions_title">📚 Faol va oldingi sessiyalar</span></div>
                     <div id="teacher-sessions-pro"><div class="teacher-empty" data-lang="teacher_loading">Yuklanmoqda...</div></div>
                 </div>
-                <select id="teacher-results-session" class="input-card" style="margin-top:14px;"></select>
-                <button type="button" class="submit-btn" style="margin-top:10px;" onclick="showSelectedTeacherResults()" data-lang="teacher_show_results">📊 Natijalarni ko‘rsatish</button>
                 <div id="teacher-results-panel-list" style="margin-top:12px;"></div>
             </div>
         </div>
@@ -14276,6 +14277,11 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active','swipe-enter-left','swipe-enter-right'));
             document.querySelectorAll('.bottom-nav .nav-item').forEach(n => n.classList.remove('active'));
             nextScreen.classList.add('active');
+            // Har bir asosiy bo‘lim ochilganda sahifani yuqoridan boshlash.
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            nextScreen.scrollTop = 0;
             if (swipeDirection === 'left' || swipeDirection === 'right') {
                 nextScreen.classList.add(swipeDirection === 'left' ? 'swipe-enter-left' : 'swipe-enter-right');
                 setTimeout(()=>nextScreen.classList.remove('swipe-enter-left','swipe-enter-right'),260);
@@ -14351,6 +14357,11 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             if(tabName !== 'group_join') stopStudentGroupPolling();
             currentTab = tabName;
             setLibraryActiveButton(tabName);
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            const libraryScreen=document.getElementById('library-screen');
+            if(libraryScreen) libraryScreen.scrollTop = 0;
             const panel=document.getElementById('group-join-panel');
             if(panel) { panel.classList.remove('open'); panel.setAttribute('aria-hidden','true'); }
             if(tabName === 'personal') {
@@ -15206,12 +15217,18 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
         // HTML atributi ichidagi inline JavaScript argumentini xavfsiz kodlaydi.
         function escapeJsArg(v){return escapeHtml(JSON.stringify(String(v??'')));}
         function renderTelegramUserName(){
-            const target=document.getElementById('telegram-user-name');
-            if(!target)return;
+            const targets=[
+                document.getElementById('telegram-user-name'),
+                document.getElementById('create-telegram-user-name')
+            ].filter(Boolean);
+            if(!targets.length)return;
             const u=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user?tg.initDataUnsafe.user:{};
-            const fullName=[u.first_name,u.last_name].filter(Boolean).join(' ').trim();
-            target.textContent=fullName|| (u.username?('@'+u.username):'Foydalanuvchi');
-            target.title=target.textContent;
+            const displayName=[u.first_name,u.last_name].filter(Boolean).join(' ').trim()
+                || (u.username?('@'+u.username):'Foydalanuvchi');
+            targets.forEach(target=>{
+                target.textContent=displayName;
+                target.title=displayName;
+            });
         }
         function teacherVariantLabel(code){ return code ? (langPack[currentLang].teacher_variant_label || 'Variant') + ' ' + code : langPack[currentLang].teacher_assign_variant; }
         function getTelegramUserInfo(){
@@ -15611,9 +15628,12 @@ window.onload = function() {
 
     <!-- Faqat Quantum Aurora va Nebula temalarida ommaviyga chiqarilgan test belgisi. -->
     <style id="public-indicator-theme-fix">
-        #library-screen .user-name-line{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin:-11px 2px 12px;color:var(--text-hint);font-size:11px;font-weight:600;line-height:1.25;opacity:.9;}
-        #library-screen .user-name-line #telegram-user-name{display:inline-block;max-width:min(62vw,260px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fe8c0;}
-        #library-screen .user-name-caption{font-size:11px;opacity:.8;}
+        #library-screen .user-name-line,
+        #create-screen .user-name-line{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin:-11px 2px 12px;color:var(--text-hint);font-size:11px;font-weight:600;line-height:1.25;opacity:.9;}
+        #library-screen .user-name-line #telegram-user-name,
+        #create-screen .user-name-line #create-telegram-user-name{display:inline-block;max-width:min(62vw,260px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fe8c0;}
+        #library-screen .user-name-caption,
+        #create-screen .user-name-caption{font-size:11px;opacity:.8;}
 
         html[data-quiz-theme="quantum-aurora"] #library-screen .btn-public.is-active,
         html[data-quiz-theme="nebula"] #library-screen .btn-public.is-active {
