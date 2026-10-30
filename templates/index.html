@@ -13121,16 +13121,18 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
 <body>
 
     <div id="create-screen" class="screen active">
-        <div class="header" style="display: flex; justify-content: space-between; align-items: center;">
-  <h1 data-lang="nav_create">Yangi Test</h1>
-  
+        <div class="header create-header" style="display: flex; justify-content: space-between; align-items: center;">
+  <div class="create-heading-stack">
+    <h1 data-lang="nav_create">Yangi Test</h1>
+    <div class="create-user-name-line" aria-live="polite"><span class="user-name-caption">👤</span><span id="create-telegram-user-name"></span></div>
+  </div>
+
   <!-- O'ng tomondagi Qo'ng'iroqcha -->
   <div class="bell-wrapper" id="bellBtn">
     <span class="bell-icon">🔔</span>
     <span class="news-badge" id="newsBadge"></span>
   </div>
 </div>
-<div class="user-name-line create-user-name-line" aria-live="polite"><span class="user-name-caption">👤</span><span id="create-telegram-user-name"></span></div>
 <!-- Yangiliklar Oynasi (Modal) -->
 <div class="modal-overlay" id="newsModal" aria-hidden="true">
   <div class="news-modal-card" role="dialog" aria-modal="true" aria-labelledby="newsModalTitle">
@@ -13192,7 +13194,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
             </div>
             <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
-            <textarea id="text-input" class="input-text" rows="5" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
+            <textarea id="text-input" class="input-text" rows="2" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
             <div class="create-action-wrap">
                 <button id="generate-btn" class="submit-btn" onclick="startGeneration()" data-lang="btn_generate">AI yordamida yaratish 🚀</button>
             </div>
@@ -13213,7 +13215,6 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             <h1 id="lib-title" data-lang="nav_library">Kutubxona</h1>
             <span id="user-count-badge" class="user-badge">...</span>
         </div>
-        <div class="user-name-line" aria-live="polite"><span class="user-name-caption">👤</span><span id="telegram-user-name"></span></div>
         <div class="tabs">
             <button id="tab-personal" class="tab active" onclick="switchLibTab('personal')" data-lang="tab_tests">❓ Testlar</button>
             <button id="tab-public" class="tab" onclick="switchLibTab('public')" data-lang="tab_public">🌐 Ommaviy</button>
@@ -15218,7 +15219,6 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
         function escapeJsArg(v){return escapeHtml(JSON.stringify(String(v??'')));}
         function renderTelegramUserName(){
             const targets=[
-                document.getElementById('telegram-user-name'),
                 document.getElementById('create-telegram-user-name')
             ].filter(Boolean);
             if(!targets.length)return;
@@ -15628,12 +15628,13 @@ window.onload = function() {
 
     <!-- Faqat Quantum Aurora va Nebula temalarida ommaviyga chiqarilgan test belgisi. -->
     <style id="public-indicator-theme-fix">
-        #library-screen .user-name-line,
-        #create-screen .user-name-line{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin:-11px 2px 12px;color:var(--text-hint);font-size:11px;font-weight:600;line-height:1.25;opacity:.9;}
-        #library-screen .user-name-line #telegram-user-name,
-        #create-screen .user-name-line #create-telegram-user-name{display:inline-block;max-width:min(62vw,260px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fe8c0;}
-        #library-screen .user-name-caption,
-        #create-screen .user-name-caption{font-size:11px;opacity:.8;}
+        #create-screen .create-header{align-items:flex-start!important;}
+        #create-screen .create-heading-stack{display:flex;flex-direction:column;align-items:flex-start;min-width:0;}
+        #create-screen .create-heading-stack h1{margin:0;}
+        #create-screen .create-user-name-line{display:flex;align-items:center;justify-content:flex-start;gap:7px;margin:5px 0 0;color:#9fe8c0;font-size:24px;font-weight:700;line-height:1.2;max-width:75vw;}
+        #create-screen .create-user-name-line #create-telegram-user-name{display:inline-block;max-width:calc(75vw - 30px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fe8c0;}
+        #create-screen .create-user-name-line .user-name-caption{font-size:20px;opacity:.85;}
+        #create-screen #text-input{height:62px!important;min-height:62px!important;padding:10px 14px!important;line-height:1.35;overflow-y:auto;}
 
         html[data-quiz-theme="quantum-aurora"] #library-screen .btn-public.is-active,
         html[data-quiz-theme="nebula"] #library-screen .btn-public.is-active {
