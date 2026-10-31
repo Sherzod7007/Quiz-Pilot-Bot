@@ -174,8 +174,16 @@
             position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
             background: var(--aero-bg); z-index: 1000; padding: 20px; display: none; overflow-y: auto; 
         }
-        .game-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 25px; gap: 12px; }
-        .game-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .game-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 25px; gap: 12px; min-width: 0; }
+        .game-header > #game-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .game-header-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; white-space: nowrap; }
+        .game-exit-btn { flex: 0 0 auto; white-space: nowrap; font-size: 14px; }
+        @media (max-width: 420px) {
+            .game-header { gap: 7px; }
+            .game-header-right { gap: 5px; }
+            .game-exit-btn { font-size: 12px; }
+            .random-btn { width: 36px; }
+        }
         .random-btn {
             width: 40px; height: 36px; padding: 0; border-radius: 9px;
             border: 1px solid rgba(160, 190, 225, 0.32);
@@ -13117,23 +13125,6 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(3) { 
 html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(4) { background-image: linear-gradient(90deg,rgba(4,18,40,.94) 0%,rgba(4,18,40,.72) 46%,rgba(4,18,40,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWMzYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMWI0MCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI2MCIgcj0iMjQwIiBmaWxsPSIjMDBiOGZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjI1MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjEzMCIgcng9IjgiIGZpbGw9IiMzOWI3ZmYiLz48cmVjdCB4PSI4MDUiIHk9IjE5MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjE5MCIgcng9IjgiIGZpbGw9IiM2MmQ4YjUiLz48cmVjdCB4PSI4OTAiIHk9IjEwNSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjI3NSIgcng9IjgiIGZpbGw9IiNmZmQzNGQiLz48cGF0aCBkPSJNNzAwIDE0MGM4MCA1MCAxNTAtNDUgMjcwIDEwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3Y2U5ZmYiIHN0cm9rZS13aWR0aD0iOCIvPjwvc3ZnPg==") !important; }
 html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { background-image: linear-gradient(90deg,rgba(25,11,48,.94) 0%,rgba(25,11,48,.72) 46%,rgba(25,11,48,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzIwMTA0NCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzQwMTU2YiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI1MCIgcj0iMjQwIiBmaWxsPSIjYjA2Y2ZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MDAiIHk9IjEyMCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjZDk1NzdjIiBzdHJva2U9IiNmZmIyYzUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDE1NSkiLz48cmVjdCB4PSI3MDAiIHk9IjE5MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjNGY4ZmU4IiBzdHJva2U9IiNhOWQ0ZmYiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDIyNSkiLz48cmVjdCB4PSI3MTUiIHk9IjI2MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjMzZiODhmIiBzdHJva2U9IiNhOGZmZTUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODQ1IDI5NSkiLz48L3N2Zz4=") !important; }
 </style>
-
-    <style>
-        /* Katta ekranlarda uzun test nomi Chiqish tugmasini siqib chiqarmasin. */
-        #game-screen .game-header { min-width: 0; }
-        #game-screen .game-header > span:first-child {
-            flex: 1 1 auto;
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        #game-screen .game-header-right {
-            flex: 0 0 auto;
-            white-space: nowrap;
-        }
-    </style>
-
 </head>
 <body>
 
@@ -13420,11 +13411,11 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 <div class="teacher-section-title"><span>📊 <span data-lang="teacher_results_title">Natijalar</span></span><button class="teacher-mini-btn" onclick="loadTeacherResultsPanel()" data-lang="teacher_refresh">Yangilash</button></div>
                 <select id="teacher-results-session" class="input-card" style="margin-top:14px;"></select>
                 <button type="button" class="submit-btn" style="margin-top:10px;" onclick="showSelectedTeacherResults()" data-lang="teacher_show_results">📊 Natijalarni ko‘rsatish</button>
+                <div id="teacher-results-panel-list" style="margin-top:12px;"></div>
                 <div class="teacher-subsection">
                     <div class="teacher-section-title"><span data-lang="teacher_sessions_title">📚 Faol va oldingi sessiyalar</span></div>
                     <div id="teacher-sessions-pro"><div class="teacher-empty" data-lang="teacher_loading">Yuklanmoqda...</div></div>
                 </div>
-                <div id="teacher-results-panel-list" style="margin-top:12px;"></div>
             </div>
         </div>
     </div>
@@ -13542,7 +13533,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             <span id="game-title">Test</span>
             <div class="game-header-right">
                 <button type="button" class="random-btn" onclick="randomizeQuiz()" aria-label="Random" title="Random">🔀</button>
-                <span style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
+                <span class="game-exit-btn" style="color: var(--accent-red); cursor: pointer;" onclick="closeGame()" data-lang="btn_exit">✖ Chiqish</span>
             </div>
         </div>
         <div id="game-session-bar" class="game-session-bar" style="display:none;">
@@ -15180,38 +15171,48 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function copyTeacherLink(link){ try{await navigator.clipboard.writeText(link);showAppAlert('🔗',link);}catch(e){showAppAlert('🔗',link);} }
 
-        async function downloadTeacherExport(sessionId, format) {
-            const url=`${BASE_URL}/api/teacher-export?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&format=${format}`;
+        async function downloadTeacherFile(url, fallbackName) {
             try {
-                // window.open autentifikatsiya sarlavhasini yubora olmaydi.
-                // fetch esa umumiy Telegram initData sarlavhasini avtomatik qo‘shadi.
-                const response = await fetch(url);
+                // Oddiy window.open Telegram initData sarlavhasini yubormaydi.
+                // fetch esa yuqoridagi umumiy API wrapper orqali autentifikatsiya oladi.
+                const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
                 if (!response.ok) {
-                    let message = langPack[currentLang].teacher_server_error;
+                    let message = '';
                     try {
                         const errorData = await response.json();
-                        message = errorData.detail || message;
+                        message = errorData.detail || errorData.message || '';
                     } catch (_) {}
-                    throw new Error(message);
+                    showAppAlert('❌', message || langPack[currentLang].teacher_server_error);
+                    return;
                 }
 
                 const blob = await response.blob();
+                const disposition = response.headers.get('Content-Disposition') || '';
+                let filename = fallbackName;
+                const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+                try {
+                    if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
+                    else if (plainMatch) filename = plainMatch[1];
+                } catch (_) {}
+
                 const objectUrl = URL.createObjectURL(blob);
                 const link = document.createElement('a');
-                const disposition = response.headers.get('Content-Disposition') || '';
-                const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
-                const filename = filenameMatch
-                    ? decodeURIComponent(filenameMatch[1] || filenameMatch[2])
-                    : `Quiz_AI_Natijalar.${format === 'docx' ? 'docx' : 'pdf'}`;
                 link.href = objectUrl;
                 link.download = filename;
+                link.style.display = 'none';
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
-                setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
             } catch (error) {
-                showAppAlert('❌', error.message || langPack[currentLang].teacher_server_error);
+                showAppAlert('❌', langPack[currentLang].teacher_server_error);
             }
+        }
+
+        function downloadTeacherExport(sessionId, format) {
+            const url=`${BASE_URL}/api/teacher-export?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&format=${format}`;
+            downloadTeacherFile(url, `teacher_results_${sessionId}.${format === 'docx' ? 'docx' : 'pdf'}`);
         }
 
         async function showTeacherResults(sessionId) {
@@ -15442,7 +15443,10 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
             }catch(e){showAppAlert('❌',e.message||langPack[currentLang].teacher_server_error);}
         }
         async function deleteTeacherAssignment(id){try{await teacherFetchJson(`${BASE_URL}/api/teacher/assignments/${encodeURIComponent(id)}?user_id=${userId}`,{method:'DELETE'});loadTeacherAssignments();}catch(e){showAppAlert('❌',e.message||langPack[currentLang].teacher_server_error);}}
-        function exportAssignment(id,fmt){window.open(`${BASE_URL}/api/teacher/export-assignment?assignment_id=${encodeURIComponent(id)}&user_id=${userId}&format=${fmt}`,'_blank');}
+        function exportAssignment(id,fmt){
+            const url=`${BASE_URL}/api/teacher/export-assignment?assignment_id=${encodeURIComponent(id)}&user_id=${userId}&format=${fmt}`;
+            downloadTeacherFile(url, `teacher_assignment_${id}.${fmt === 'docx' ? 'docx' : 'pdf'}`);
+        }
         function toggleVariantCode(code,btn){btn.classList.toggle('active');}
         async function loadTeacherVariantQuizList(){await loadTeacherAssignmentQuizzes();}
         async function generateTeacherVariants(){
@@ -15467,7 +15471,7 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                 variant:active[0],
                 all_variants:allSelected?'1':'0'
             });
-            window.open(`${BASE_URL}/api/teacher/export-quiz?${params.toString()}`,'_blank');
+            downloadTeacherFile(`${BASE_URL}/api/teacher/export-quiz?${params.toString()}`, `teacher_variants.${fmt === 'docx' ? 'docx' : 'pdf'}`);
         }
         async function loadTeacherResultsPanel(){
             const sel=document.getElementById('teacher-results-session'),box=document.getElementById('teacher-results-panel-list');
