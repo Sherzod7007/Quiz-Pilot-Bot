@@ -15173,61 +15173,24 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function downloadTeacherFile(url, fallbackName) {
             try {
-                // Avval himoyalangan Teacher API orqali bir martalik yuklash havolasini olamiz.
-                // Umumiy fetch wrapper Telegram initData sarlavhasini avtomatik qo'shadi.
-                const sourceUrl = new URL(url, BASE_URL);
-                const params = sourceUrl.searchParams;
-                let kind = '';
-                let resourceId = '';
-
-                if (sourceUrl.pathname === '/api/teacher-export') {
-                    kind = 'session';
-                    resourceId = params.get('session_id') || '';
-                } else if (sourceUrl.pathname === '/api/teacher/export-assignment') {
-                    kind = 'assignment';
-                    resourceId = params.get('assignment_id') || '';
-                } else if (sourceUrl.pathname === '/api/teacher/export-quiz') {
-                    kind = 'quiz';
-                    resourceId = params.get('quiz_id') || '';
-                } else {
-                    throw new Error('Noto‘g‘ri Teacher fayl manzili.');
-                }
-
-                const ticketResponse = await fetch(`${BASE_URL}/api/teacher/download-ticket`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({
-                        kind,
-                        resource_id: resourceId,
-                        format: params.get('format') || 'pdf',
-                        variant: params.get('variant') || 'A',
-                        all_variants: Number(params.get('all_variants') || 0)
-                    })
-                });
-
+                // Avval autentifikatsiyalangan API orqali qisqa muddatli yuklash havolasini olamiz.
+                // Faylning o'zi oddiy attachment navigatsiyasi bilan ochiladi: Telegram WebView
+                // asinxron fetch'dan keyingi Blob URL va sun'iy click'ni bloklashi mumkin.
+                const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
                 let ticketData = {};
-                try { ticketData = await ticketResponse.json(); } catch (_) {}
-                if (!ticketResponse.ok || !ticketData.url) {
-                    showAppAlert('❌', ticketData.detail || ticketData.message || langPack[currentLang].teacher_server_error);
+                try { ticketData = await response.json(); } catch (_) {}
+
+                if (!response.ok || !ticketData.url) {
+                    const message = ticketData.detail || ticketData.message || '';
+                    showAppAlert('❌', message || langPack[currentLang].teacher_server_error);
                     return;
                 }
 
-                // Himoyalangan ticket URL orqali faylni brauzerning standart yuklash
-                // mexanizmi bilan ochamiz. Telegram downloadFile native bridge ayrim
-                // Android mijozlarida WebAppDownloadFilePopupOpened xatosini qaytargan.
                 const downloadUrl = new URL(ticketData.url, BASE_URL).href;
-                const filename = ticketData.filename || fallbackName;
-
-                const link = document.createElement('a');
-                link.href = downloadUrl;
-                link.download = filename;
-                link.style.display = 'none';
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
+                window.location.assign(downloadUrl);
             } catch (error) {
-                showAppAlert('❌', error.message || langPack[currentLang].teacher_server_error);
+                console.error('Teacher faylini yuklashda xatolik:', error);
+                showAppAlert('❌', langPack[currentLang].teacher_server_error);
             }
         }
 
