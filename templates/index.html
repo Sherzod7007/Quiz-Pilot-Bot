@@ -15173,26 +15173,38 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function downloadTeacherFile(url, fallbackName) {
             try {
-                // Telegram initData bilan himoyalangan API orqali bir martalik
-                // yuklash havolasini olamiz; faylning o'zi HTTPS URL orqali keladi.
-                const ticketUrl = `${BASE_URL}/api/teacher-download-ticket?user_id=${encodeURIComponent(userId)}&source_url=${encodeURIComponent(url)}`;
-                const response = await fetch(ticketUrl, { method: 'POST', credentials: 'same-origin' });
-                let data = {};
-                try { data = await response.json(); } catch (_) {}
-                if (!response.ok || !data.download_url) {
-                    showAppAlert('❌', data.detail || data.message || langPack[currentLang].teacher_server_error);
+                // Oddiy window.open Telegram initData sarlavhasini yubormaydi.
+                // fetch esa yuqoridagi umumiy API wrapper orqali autentifikatsiya oladi.
+                const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
+                if (!response.ok) {
+                    let message = '';
+                    try {
+                        const errorData = await response.json();
+                        message = errorData.detail || errorData.message || '';
+                    } catch (_) {}
+                    showAppAlert('❌', message || langPack[currentLang].teacher_server_error);
                     return;
                 }
 
-                // Blob URL Telegram Android WebView'da ishonchli saqlanmaydi.
-                // Haqiqiy HTTPS manzili Telegram'ning native yuklash oynasini chaqiradi.
+                const blob = await response.blob();
+                const disposition = response.headers.get('Content-Disposition') || '';
+                let filename = fallbackName;
+                const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+                try {
+                    if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
+                    else if (plainMatch) filename = plainMatch[1];
+                } catch (_) {}
+
+                const objectUrl = URL.createObjectURL(blob);
                 const link = document.createElement('a');
-                link.href = data.download_url;
-                link.rel = 'noopener';
+                link.href = objectUrl;
+                link.download = filename;
                 link.style.display = 'none';
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
             } catch (error) {
                 showAppAlert('❌', langPack[currentLang].teacher_server_error);
             }
