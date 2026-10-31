@@ -1129,8 +1129,9 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     if not path.startswith("/api/") or request.method == "OPTIONS":
         return await call_next(request)
 
-    # Bir martalik Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida ishlaydi.
-    # Chipta endpointda atomar ravishda sarflanadi; muddati o'tgan yoki noma'lum chipta rad etiladi.
+    # Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida va qisqa muddat ishlaydi.
+    # Telegram/Android downloader bir fayl uchun bir nechta GET yuborishi mumkin;
+    # shu sababli chipta birinchi GET'dan keyin bekor qilinmaydi.
     if path.startswith("/api/teacher/download/"):
         download_token = path.rsplit("/", 1)[-1]
         with _TEACHER_DOWNLOAD_TICKETS_LOCK:
@@ -1140,9 +1141,13 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
                 and ticket_data.get("expires_at", 0) >= time.time()
                 and ticket_data.get("download_path") == path
                 and request.method == "GET"
+                and ticket_data.get("uses", 0) < ticket_data.get("max_uses", 10)
             )
+            if ticket_valid:
+                # Takroriy GET/retry'lar uchun cheklangan foydalanish soni.
+                ticket_data["uses"] = ticket_data.get("uses", 0) + 1
         if not ticket_valid:
-            return JSONResponse(status_code=401, content={"detail": "Yuklab olish chiptasi yaroqsiz yoki muddati tugagan."})
+            return JSONResponse(status_code=401, content={"detail": "Yuklab olish chiptasi yaroqsiz, muddati tugagan yoki foydalanish limiti tugagan."})
         return await call_next(request)
 
     # Bu endpointlar maxfiy foydalanuvchi ma'lumotini qaytarmaydi.
@@ -5752,15 +5757,19 @@ def create_teacher_download_ticket(
             "params": params,
             "download_path": download_path,
             "expires_at": now + _TEACHER_DOWNLOAD_TICKET_TTL,
+            "uses": 0,
+            "max_uses": 10,
         }
     return {"status": "ok", "download_url": download_path, "expires_in": _TEACHER_DOWNLOAD_TICKET_TTL}
 
 
 @app.get("/api/teacher/download/{token}")
 def download_teacher_with_ticket(token: str):
-    """Chiptani bir marta sarflab, tegishli mavjud Teacher eksportini bajaradi."""
+    """Qisqa muddatli chiptaga bog'langan Teacher eksportini qayta GET/retry'larda ham yuboradi."""
     with _TEACHER_DOWNLOAD_TICKETS_LOCK:
-        ticket = _TEACHER_DOWNLOAD_TICKETS.pop(token, None)
+        # Middleware URL, muddat va foydalanish sonini tekshiradi.
+        # Ticketni bu yerda o'chirmaymiz: Android/Telegram downloader takroriy GET yuboradi.
+        ticket = _TEACHER_DOWNLOAD_TICKETS.get(token)
     if not ticket or ticket.get("expires_at", 0) < time.time():
         raise HTTPException(status_code=401, detail="Yuklab olish chiptasi yaroqsiz yoki muddati tugagan.")
 
