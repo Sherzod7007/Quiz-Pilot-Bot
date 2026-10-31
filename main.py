@@ -1114,12 +1114,37 @@ def verify_telegram_init_data(init_data: str):
         return None
 
 
+# Telegram downloadFile() custom HTTP header yubora olmaydi.
+# Shu sababli faqat autentifikatsiyadan o'tgan Teacher foydalanuvchiga
+# qisqa muddatli, bir martalik va aniq endpointga bog'langan yuklash chiptasi beriladi.
+_TEACHER_DOWNLOAD_TICKETS = {}
+_TEACHER_DOWNLOAD_TICKETS_LOCK = threading.Lock()
+_TEACHER_DOWNLOAD_TICKET_TTL = 120
+
+
 @app.middleware("http")
 async def telegram_webapp_auth_middleware(request: Request, call_next):
     """API'larda Telegram imzosini tek markazda tekshiradi va user_id soxtalashtirilishini to'sadi."""
     path = request.url.path
     if not path.startswith("/api/") or request.method == "OPTIONS":
         return await call_next(request)
+
+    # Bir martalik Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida ishlaydi.
+    # Chipta endpointda atomar ravishda sarflanadi; muddati o'tgan yoki noma'lum chipta rad etiladi.
+    if path.startswith("/api/teacher/download/"):
+        download_token = path.rsplit("/", 1)[-1]
+        with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+            ticket_data = _TEACHER_DOWNLOAD_TICKETS.get(download_token)
+            ticket_valid = bool(
+                ticket_data
+                and ticket_data.get("expires_at", 0) >= time.time()
+                and ticket_data.get("download_path") == path
+                and request.method == "GET"
+            )
+        if not ticket_valid:
+            return JSONResponse(status_code=401, content={"detail": "Yuklab olish chiptasi yaroqsiz yoki muddati tugagan."})
+        return await call_next(request)
+
     # Bu endpointlar maxfiy foydalanuvchi ma'lumotini qaytarmaydi.
     if request.method == "GET" and path in {"/api/tariff-config", "/api/upload-limits"}:
         return await call_next(request)
@@ -5683,6 +5708,85 @@ def teacher_export(session_id: str, user_id: int, format: str):
                 except OSError: pass
         return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
+
+
+@app.post("/api/teacher/download-ticket")
+def create_teacher_download_ticket(
+    target: str,
+    user_id: int,
+    format: str,
+    quiz_id: Optional[str] = None,
+    assignment_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    variant: str = "A",
+    all_variants: int = 0,
+):
+    """Telegram native downloader uchun qisqa muddatli, bir martalik yuklash URL yaratadi."""
+    require_teacher(user_id)
+    fmt = (format or "").lower().strip()
+    if fmt not in {"pdf", "docx"}:
+        raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
+
+    target = (target or "").lower().strip()
+    params = {"user_id": int(user_id), "format": fmt}
+    if target == "quiz" and quiz_id:
+        params.update({"quiz_id": quiz_id, "variant": (variant or "A").upper(), "all_variants": int(bool(int(all_variants)))})
+    elif target == "assignment" and assignment_id:
+        params.update({"assignment_id": assignment_id})
+    elif target == "session" and session_id:
+        params.update({"session_id": session_id})
+    else:
+        raise HTTPException(status_code=400, detail="Yuklab olish so‘rovi noto‘g‘ri.")
+
+    token = secrets.token_urlsafe(32)
+    download_path = f"/api/teacher/download/{token}"
+    now = time.time()
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        # Eski chiptalarni xotiradan tozalaymiz.
+        for old_token, old_data in list(_TEACHER_DOWNLOAD_TICKETS.items()):
+            if old_data.get("expires_at", 0) < now:
+                _TEACHER_DOWNLOAD_TICKETS.pop(old_token, None)
+        _TEACHER_DOWNLOAD_TICKETS[token] = {
+            "user_id": int(user_id),
+            "target": target,
+            "params": params,
+            "download_path": download_path,
+            "expires_at": now + _TEACHER_DOWNLOAD_TICKET_TTL,
+        }
+    return {"status": "ok", "download_url": download_path, "expires_in": _TEACHER_DOWNLOAD_TICKET_TTL}
+
+
+@app.get("/api/teacher/download/{token}")
+def download_teacher_with_ticket(token: str):
+    """Chiptani bir marta sarflab, tegishli mavjud Teacher eksportini bajaradi."""
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        ticket = _TEACHER_DOWNLOAD_TICKETS.pop(token, None)
+    if not ticket or ticket.get("expires_at", 0) < time.time():
+        raise HTTPException(status_code=401, detail="Yuklab olish chiptasi yaroqsiz yoki muddati tugagan.")
+
+    params = ticket["params"]
+    target = ticket["target"]
+    if target == "quiz":
+        return teacher_export_quiz(
+            quiz_id=params["quiz_id"],
+            user_id=params["user_id"],
+            format=params["format"],
+            variant=params.get("variant", "A"),
+            all_variants=params.get("all_variants", 0),
+        )
+    if target == "assignment":
+        return teacher_export_assignment(
+            assignment_id=params["assignment_id"],
+            user_id=params["user_id"],
+            format=params["format"],
+        )
+    if target == "session":
+        return teacher_export(
+            session_id=params["session_id"],
+            user_id=params["user_id"],
+            format=params["format"],
+        )
+    raise HTTPException(status_code=400, detail="Yuklab olish turi noto‘g‘ri.")
 
 
 @app.get("/api/flashcards")
