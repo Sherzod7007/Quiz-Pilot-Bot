@@ -1121,7 +1121,11 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     if not path.startswith("/api/") or request.method == "OPTIONS":
         return await call_next(request)
     # Bu endpointlar maxfiy foydalanuvchi ma'lumotini qaytarmaydi.
-    if request.method == "GET" and path in {"/api/tariff-config", "/api/upload-limits"}:
+    if request.method == "GET" and path in {
+        "/api/tariff-config",
+        "/api/upload-limits",
+        "/api/teacher/download-file",
+    }:
         return await call_next(request)
 
     init_data = request.headers.get("X-Telegram-Init-Data", "")
@@ -4704,6 +4708,98 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
         doc.build(story)
         return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
+
+
+# --- TEACHER FILE DOWNLOAD: qisqa muddatli, bir martalik yuklash havolasi ---
+# Telegram native downloader maxsus HTTP header yubora olmaydi. Shu sababli
+# avval initData bilan himoyalangan ticket olinadi, so'ng native downloader
+# faqat bir marta ishlatiladigan, muddati qisqa URL orqali faylni oladi.
+class TeacherDownloadTicketRequest(BaseModel):
+    kind: str = Field(min_length=1, max_length=20)
+    resource_id: str = Field(min_length=1, max_length=128)
+    format: str = Field(min_length=3, max_length=4)
+    variant: str = Field(default="A", min_length=1, max_length=1)
+    all_variants: int = Field(default=0, ge=0, le=1)
+
+
+_TEACHER_DOWNLOAD_TICKETS = {}
+_TEACHER_DOWNLOAD_TICKETS_LOCK = threading.Lock()
+_TEACHER_DOWNLOAD_TICKET_TTL = 180
+
+
+@app.post("/api/teacher/download-ticket")
+def teacher_create_download_ticket(req: TeacherDownloadTicketRequest, request: Request):
+    # Foydalanuvchi ID faqat Telegram HMAC middleware tasdiqlagan qiymatdan olinadi.
+    user_id = int(request.state.telegram_user_id)
+    require_teacher(user_id)
+
+    fmt = req.format.lower().strip()
+    if fmt not in {"pdf", "docx"}:
+        raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
+
+    if req.kind == "session":
+        generated_response = teacher_export(req.resource_id, user_id, fmt)
+    elif req.kind == "assignment":
+        generated_response = teacher_export_assignment(req.resource_id, user_id, fmt)
+    elif req.kind == "quiz":
+        generated_response = teacher_export_quiz(
+            req.resource_id, user_id, fmt, req.variant.upper(), req.all_variants
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Noto‘g‘ri Teacher eksport turi.")
+
+    # Fayl yo'li faqat serverdagi mavjud eksport funksiyasidan olinadi.
+    file_path = getattr(generated_response, "path", None)
+    filename = getattr(generated_response, "filename", None) or os.path.basename(file_path or "")
+    media_type = getattr(generated_response, "media_type", None) or "application/octet-stream"
+    if not file_path or not filename or not os.path.isfile(file_path):
+        raise HTTPException(status_code=500, detail="Eksport faylini tayyorlab bo‘lmadi.")
+
+    token = secrets.token_urlsafe(32)
+    expires_at = time.time() + _TEACHER_DOWNLOAD_TICKET_TTL
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        now = time.time()
+        expired = [
+            key for key, value in _TEACHER_DOWNLOAD_TICKETS.items()
+            if value["expires_at"] <= now
+        ]
+        for key in expired:
+            _TEACHER_DOWNLOAD_TICKETS.pop(key, None)
+        _TEACHER_DOWNLOAD_TICKETS[token] = {
+            "path": file_path,
+            "filename": filename,
+            "media_type": media_type,
+            "user_id": user_id,
+            "expires_at": expires_at,
+        }
+
+    return {
+        "status": "ok",
+        "url": f"/api/teacher/download-file?token={token}",
+        "filename": filename,
+        "expires_in": _TEACHER_DOWNLOAD_TICKET_TTL,
+    }
+
+
+@app.get("/api/teacher/download-file")
+def teacher_download_file(token: str = Query(..., min_length=20, max_length=128)):
+    # Token atomar ravishda olinadi: bir marta ishlatilgach darhol bekor bo'ladi.
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        ticket = _TEACHER_DOWNLOAD_TICKETS.pop(token, None)
+
+    if not ticket or ticket["expires_at"] <= time.time():
+        raise HTTPException(status_code=404, detail="Yuklash havolasi eskirgan yoki ishlatilgan.")
+
+    file_path = ticket["path"]
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Yuklanadigan fayl topilmadi.")
+
+    return FileResponse(
+        file_path,
+        filename=ticket["filename"],
+        media_type=ticket["media_type"],
+    )
+
 
 
 # --- O'QITUVCHI GURUH REJIMI ---
