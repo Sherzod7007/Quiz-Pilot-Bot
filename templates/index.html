@@ -15173,55 +15173,72 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function downloadTeacherFile(url, fallbackName) {
             try {
-                // Telegram Mini App ichida faylni native yuklash usuli ishlatiladi.
-                // Bu Android/iOS Telegram WebView'da <a download> cheklovini chetlab o'tadi.
+                // Avval himoyalangan Teacher API orqali bir martalik yuklash havolasini olamiz.
+                // Umumiy fetch wrapper Telegram initData sarlavhasini avtomatik qo'shadi.
+                const sourceUrl = new URL(url, BASE_URL);
+                const params = sourceUrl.searchParams;
+                let kind = '';
+                let resourceId = '';
+
+                if (sourceUrl.pathname === '/api/teacher-export') {
+                    kind = 'session';
+                    resourceId = params.get('session_id') || '';
+                } else if (sourceUrl.pathname === '/api/teacher/export-assignment') {
+                    kind = 'assignment';
+                    resourceId = params.get('assignment_id') || '';
+                } else if (sourceUrl.pathname === '/api/teacher/export-quiz') {
+                    kind = 'quiz';
+                    resourceId = params.get('quiz_id') || '';
+                } else {
+                    throw new Error('Noto‘g‘ri Teacher fayl manzili.');
+                }
+
+                const ticketResponse = await fetch(`${BASE_URL}/api/teacher/download-ticket`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        kind,
+                        resource_id: resourceId,
+                        format: params.get('format') || 'pdf',
+                        variant: params.get('variant') || 'A',
+                        all_variants: Number(params.get('all_variants') || 0)
+                    })
+                });
+
+                let ticketData = {};
+                try { ticketData = await ticketResponse.json(); } catch (_) {}
+                if (!ticketResponse.ok || !ticketData.url) {
+                    showAppAlert('❌', ticketData.detail || ticketData.message || langPack[currentLang].teacher_server_error);
+                    return;
+                }
+
+                // Endi URL bir martalik token bilan himoyalangan. Native Telegram downloader
+                // shu URL'dan haqiqiy PDF/DOCX javobini oladi; Telegram initData talab qilinmaydi.
+                const downloadUrl = new URL(ticketData.url, BASE_URL).href;
+                const filename = ticketData.filename || fallbackName;
                 const telegramWebApp = window.Telegram && window.Telegram.WebApp;
+
                 if (telegramWebApp && typeof telegramWebApp.downloadFile === 'function') {
                     telegramWebApp.downloadFile({
-                        url: new URL(url, window.location.href).href,
-                        file_name: fallbackName
+                        url: downloadUrl,
+                        file_name: filename
                     }, function(accepted) {
-                        if (accepted === false) {
-                            // Foydalanuvchi yuklashni bekor qilgan bo'lsa, qayta yuklashni boshlamaymiz.
-                            return;
-                        }
+                        if (accepted === false) return;
                     });
                     return;
                 }
 
-                // Telegram'dan tashqari brauzerlar uchun mavjud fetch/blob usuli saqlanadi.
-                const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
-                if (!response.ok) {
-                    let message = '';
-                    try {
-                        const errorData = await response.json();
-                        message = errorData.detail || errorData.message || '';
-                    } catch (_) {}
-                    showAppAlert('❌', message || langPack[currentLang].teacher_server_error);
-                    return;
-                }
-
-                const blob = await response.blob();
-                const disposition = response.headers.get('Content-Disposition') || '';
-                let filename = fallbackName;
-                const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-                const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
-                try {
-                    if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
-                    else if (plainMatch) filename = plainMatch[1];
-                } catch (_) {}
-
-                const objectUrl = URL.createObjectURL(blob);
+                // Telegram downloadFile mavjud bo'lmagan brauzerlar uchun oddiy URL yuklash.
                 const link = document.createElement('a');
-                link.href = objectUrl;
+                link.href = downloadUrl;
                 link.download = filename;
                 link.style.display = 'none';
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
-                setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
             } catch (error) {
-                showAppAlert('❌', langPack[currentLang].teacher_server_error);
+                showAppAlert('❌', error.message || langPack[currentLang].teacher_server_error);
             }
         }
 
