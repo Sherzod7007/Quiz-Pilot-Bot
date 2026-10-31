@@ -9,7 +9,7 @@ from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
@@ -18,7 +18,7 @@ import logging
 import os
 import hashlib
 import hmac
-from urllib.parse import parse_qsl, urlparse, parse_qs
+from urllib.parse import parse_qsl
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
@@ -1122,10 +1122,6 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
         return await call_next(request)
     # Bu endpointlar maxfiy foydalanuvchi ma'lumotini qaytarmaydi.
     if request.method == "GET" and path in {"/api/tariff-config", "/api/upload-limits"}:
-        return await call_next(request)
-    # Bir martalik token bilan himoyalangan yuklash GET so'rovi Telegram WebView
-    # tomonidan yuboriladi; bu so'rovda maxsus initData headerini qo'shib bo'lmaydi.
-    if request.method == "GET" and path.startswith("/api/teacher-download/"):
         return await call_next(request)
 
     init_data = request.headers.get("X-Telegram-Init-Data", "")
@@ -4641,6 +4637,22 @@ def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
     return teacher_export_quiz(a["quiz_id"],user_id,format,a["variant_code"] or "A",0)
 
 
+def _teacher_download_response(path: str, media_type: str):
+    """Teacher faylini oqimdagi fayl o'zgarishidan himoyalab, tayyor baytlar sifatida yuboradi."""
+    filename = os.path.basename(path)
+    with open(path, "rb") as file_obj:
+        content = file_obj.read()
+    try:
+        os.remove(path)
+    except OSError:
+        logging.warning("Teacher eksport vaqtinchalik faylini o'chirib bo'lmadi: %s", filename)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/teacher/export-quiz")
 def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = "A", all_variants: int = 0):
     require_teacher(user_id)
@@ -4660,7 +4672,7 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
         return [chr(65 + int(q.get("correct_index", 0))) for q in payload.get("quizzes", [])]
 
     if fmt == "docx":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.docx")
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}_{uuid.uuid4().hex}.docx")
         doc=Document(); doc.add_heading(row["title"], level=1); doc.add_paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes))
         for code,payload in variant_payloads:
             doc.add_heading(f"Variant {code}", level=2)
@@ -4670,10 +4682,10 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 for j in range(4): doc.add_paragraph(f"{chr(65+j)}) {opts[j]}", style=None)
             doc.add_paragraph("Javoblar: " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))))
         doc.save(path)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        return _teacher_download_response(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
     if fmt == "pdf":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.pdf")
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}_{uuid.uuid4().hex}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
@@ -4706,7 +4718,7 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 story.append(Spacer(1,4))
             story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
         doc.build(story)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+        return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
 
@@ -5557,7 +5569,7 @@ def teacher_export(session_id: str, user_id: int, format: str):
         raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
     safe=re.sub(r"[^A-Za-z0-9_-]+", "_", s["title"] or "quiz")[:40]
     if fmt=="docx":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.docx")
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.docx")
         doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
         table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
         for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
@@ -5580,9 +5592,9 @@ def teacher_export(session_id: str, user_id: int, format: str):
             cells=table.add_row().cells
             vals=[i,_mta_word_without_telegram_emoji(r["first_name"]),_mta_word_without_telegram_emoji(r["username"]),r["score"],r["total"],f"{r['percent']}%"]
             for j,v in enumerate(vals): cells[j].text=str(v)
-        doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        doc.save(path); return _teacher_download_response(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     if fmt=="pdf":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         # PDF-only fallback fonts and emoji-to-image support; other export formats stay untouched.
         symbol_font = font
@@ -5669,94 +5681,8 @@ def teacher_export(session_id: str, user_id: int, format: str):
             for _emoji_path in _emoji_images:
                 try: os.remove(_emoji_path)
                 except OSError: pass
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+        return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
-
-
-# Telegram WebView blob URL fayllarini telefonga saqlashda muammo berishi mumkin.
-# Shu sababli autentifikatsiyalangan so'rovdan keyin qisqa muddatli bir martalik URL beriladi.
-_TEACHER_DOWNLOAD_TICKETS = {}
-_TEACHER_DOWNLOAD_TICKETS_LOCK = threading.Lock()
-_TEACHER_DOWNLOAD_TICKET_TTL = 300
-
-
-@app.post("/api/teacher-download-ticket")
-def create_teacher_download_ticket(user_id: int, source_url: str, request: Request):
-    parsed = urlparse(source_url)
-    if parsed.scheme not in {"http", "https"} or parsed.netloc != request.url.netloc:
-        raise HTTPException(status_code=400, detail="Yuklash manzili noto'g'ri.")
-
-    params = parse_qs(parsed.query)
-    allowed_paths = {
-        "/api/teacher-export",
-        "/api/teacher/export-assignment",
-        "/api/teacher/export-quiz",
-    }
-    if parsed.path not in allowed_paths:
-        raise HTTPException(status_code=400, detail="Bu fayl turini yuklashga ruxsat yo'q.")
-
-    try:
-        source_user_id = int((params.get("user_id") or [""])[0])
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Foydalanuvchi ID noto'g'ri.")
-    if source_user_id != user_id:
-        raise HTTPException(status_code=403, detail="Foydalanuvchi ID mos kelmadi.")
-
-    fmt = (params.get("format") or [""])[0].lower().strip()
-    if fmt not in {"pdf", "docx"}:
-        raise HTTPException(status_code=400, detail="Fayl formati noto'g'ri.")
-
-    # Mavjud eksport funksiyalari ishlatiladi; fayl mazmuni o'zgartirilmaydi.
-    if parsed.path == "/api/teacher-export":
-        session_id = (params.get("session_id") or [""])[0]
-        file_response = teacher_export(session_id=session_id, user_id=user_id, format=fmt)
-    elif parsed.path == "/api/teacher/export-assignment":
-        assignment_id = (params.get("assignment_id") or [""])[0]
-        file_response = teacher_export_assignment(assignment_id=assignment_id, user_id=user_id, format=fmt)
-    else:
-        quiz_id = (params.get("quiz_id") or [""])[0]
-        variant = (params.get("variant") or ["A"])[0]
-        try:
-            all_variants = int((params.get("all_variants") or ["0"])[0])
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="Variant parametri noto'g'ri.")
-        file_response = teacher_export_quiz(
-            quiz_id=quiz_id, user_id=user_id, format=fmt,
-            variant=variant, all_variants=all_variants
-        )
-
-    file_path = getattr(file_response, "path", None)
-    if not file_path or not os.path.isfile(file_path):
-        raise HTTPException(status_code=500, detail="Fayl tayyorlanmadi.")
-
-    token = secrets.token_urlsafe(32)
-    now = time.time()
-    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
-        expired = [key for key, value in _TEACHER_DOWNLOAD_TICKETS.items()
-                   if value["expires_at"] <= now]
-        for key in expired:
-            _TEACHER_DOWNLOAD_TICKETS.pop(key, None)
-        _TEACHER_DOWNLOAD_TICKETS[token] = {
-            "path": file_path,
-            "filename": getattr(file_response, "filename", None) or os.path.basename(file_path),
-            "media_type": getattr(file_response, "media_type", None) or "application/octet-stream",
-            "expires_at": now + _TEACHER_DOWNLOAD_TICKET_TTL,
-        }
-
-    return {"status": "ok", "download_url": f"/api/teacher-download/{token}"}
-
-
-@app.get("/api/teacher-download/{token}")
-def download_teacher_ticket_file(token: str):
-    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
-        ticket = _TEACHER_DOWNLOAD_TICKETS.pop(token, None)
-    if not ticket or ticket["expires_at"] <= time.time() or not os.path.isfile(ticket["path"]):
-        raise HTTPException(status_code=404, detail="Yuklash havolasi eskirgan. Qayta urinib ko'ring.")
-    return FileResponse(
-        ticket["path"],
-        filename=ticket["filename"],
-        media_type=ticket["media_type"],
-    )
 
 
 @app.get("/api/flashcards")
