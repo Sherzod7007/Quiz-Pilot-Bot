@@ -4625,20 +4625,8 @@ def teacher_delete_assignment(assignment_id: str, user_id: int):
     teacher_db_write(_write)
     return {"status":"ok"}
 
-@app.get("/api/teacher/export-assignment")
-def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
-    require_teacher(user_id)
-    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("""SELECT a.*,g.name AS group_name,q.title AS quiz_title FROM teacher_assignments a
-                   LEFT JOIN teacher_groups g ON g.id=a.group_id LEFT JOIN quizzes q ON q.id=a.quiz_id
-                   WHERE a.id=? AND a.owner_id=?""",(assignment_id,user_id))
-    a=cur.fetchone(); conn.close()
-    if not a: raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
-    return teacher_export_quiz(a["quiz_id"],user_id,format,a["variant_code"] or "A",0)
-
-
 def _teacher_download_response(path: str, media_type: str):
-    """Teacher faylini oqimdagi fayl o'zgarishidan himoyalab, tayyor baytlar sifatida yuboradi."""
+    """Teacher eksport faylini tayyor baytlar sifatida xavfsiz yuboradi."""
     filename = os.path.basename(path)
     with open(path, "rb") as file_obj:
         content = file_obj.read()
@@ -4651,6 +4639,18 @@ def _teacher_download_response(path: str, media_type: str):
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/teacher/export-assignment")
+def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
+    require_teacher(user_id)
+    conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
+    cur.execute("""SELECT a.*,g.name AS group_name,q.title AS quiz_title FROM teacher_assignments a
+                   LEFT JOIN teacher_groups g ON g.id=a.group_id LEFT JOIN quizzes q ON q.id=a.quiz_id
+                   WHERE a.id=? AND a.owner_id=?""",(assignment_id,user_id))
+    a=cur.fetchone(); conn.close()
+    if not a: raise HTTPException(status_code=404,detail=teacher_text(user_id, "assignment_not_found"))
+    return teacher_export_quiz(a["quiz_id"],user_id,format,a["variant_code"] or "A",0)
 
 
 @app.get("/api/teacher/export-quiz")
