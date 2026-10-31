@@ -15173,23 +15173,27 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function downloadTeacherFile(url, fallbackName) {
             try {
-                // Avval autentifikatsiyalangan API orqali qisqa muddatli yuklash havolasini olamiz.
-                // Faylning o'zi oddiy attachment navigatsiyasi bilan ochiladi: Telegram WebView
-                // asinxron fetch'dan keyingi Blob URL va sun'iy click'ni bloklashi mumkin.
-                const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
-                let ticketData = {};
-                try { ticketData = await response.json(); } catch (_) {}
-
-                if (!response.ok || !ticketData.url) {
-                    const message = ticketData.detail || ticketData.message || '';
-                    showAppAlert('❌', message || langPack[currentLang].teacher_server_error);
+                // Telegram initData bilan himoyalangan API orqali bir martalik
+                // yuklash havolasini olamiz; faylning o'zi HTTPS URL orqali keladi.
+                const ticketUrl = `${BASE_URL}/api/teacher-download-ticket?user_id=${encodeURIComponent(userId)}&source_url=${encodeURIComponent(url)}`;
+                const response = await fetch(ticketUrl, { method: 'POST', credentials: 'same-origin' });
+                let data = {};
+                try { data = await response.json(); } catch (_) {}
+                if (!response.ok || !data.download_url) {
+                    showAppAlert('❌', data.detail || data.message || langPack[currentLang].teacher_server_error);
                     return;
                 }
 
-                const downloadUrl = new URL(ticketData.url, BASE_URL).href;
-                window.location.assign(downloadUrl);
+                // Blob URL Telegram Android WebView'da ishonchli saqlanmaydi.
+                // Haqiqiy HTTPS manzili Telegram'ning native yuklash oynasini chaqiradi.
+                const link = document.createElement('a');
+                link.href = data.download_url;
+                link.rel = 'noopener';
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
             } catch (error) {
-                console.error('Teacher faylini yuklashda xatolik:', error);
                 showAppAlert('❌', langPack[currentLang].teacher_server_error);
             }
         }
