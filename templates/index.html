@@ -15173,8 +15173,23 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function downloadTeacherFile(url, fallbackName) {
             try {
-                // Oddiy window.open Telegram initData sarlavhasini yubormaydi.
-                // fetch esa yuqoridagi umumiy API wrapper orqali autentifikatsiya oladi.
+                // Telegram Mini App ichida faylni native yuklash usuli ishlatiladi.
+                // Bu Android/iOS Telegram WebView'da <a download> cheklovini chetlab o'tadi.
+                const telegramWebApp = window.Telegram && window.Telegram.WebApp;
+                if (telegramWebApp && typeof telegramWebApp.downloadFile === 'function') {
+                    telegramWebApp.downloadFile({
+                        url: new URL(url, window.location.href).href,
+                        file_name: fallbackName
+                    }, function(accepted) {
+                        if (accepted === false) {
+                            // Foydalanuvchi yuklashni bekor qilgan bo'lsa, qayta yuklashni boshlamaymiz.
+                            return;
+                        }
+                    });
+                    return;
+                }
+
+                // Telegram'dan tashqari brauzerlar uchun mavjud fetch/blob usuli saqlanadi.
                 const response = await fetch(url, { method: 'GET', credentials: 'same-origin' });
                 if (!response.ok) {
                     let message = '';
