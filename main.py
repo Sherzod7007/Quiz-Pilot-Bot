@@ -4783,9 +4783,10 @@ def teacher_create_download_ticket(req: TeacherDownloadTicketRequest, request: R
 
 @app.get("/api/teacher/download-file")
 def teacher_download_file(token: str = Query(..., min_length=20, max_length=128)):
-    # Token atomar ravishda olinadi: bir marta ishlatilgach darhol bekor bo'ladi.
+    # Telegram/Android downloader bir fayl uchun takroriy GET so'rovi yuborishi
+    # mumkin. Ticket muddati tugaguncha saqlanadi, shunda takroriy so'rov 404 bermaydi.
     with _TEACHER_DOWNLOAD_TICKETS_LOCK:
-        ticket = _TEACHER_DOWNLOAD_TICKETS.pop(token, None)
+        ticket = _TEACHER_DOWNLOAD_TICKETS.get(token)
 
     if not ticket or ticket["expires_at"] <= time.time():
         raise HTTPException(status_code=404, detail="Yuklash havolasi eskirgan yoki ishlatilgan.")
