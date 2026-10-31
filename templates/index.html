@@ -15213,10 +15213,12 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                     function() {
                         try {
                             if (tg && typeof tg.downloadFile === 'function') {
-                                tg.downloadFile({ url: downloadUrl, file_name: fallbackName }, function(status) {
-                                    if (status === 'cancelled' || status === 'downloaded' || status === 'downloading') return;
-                                    if (status) showAppAlert('❌', langPack[currentLang].teacher_download_failed);
-                                });
+                                // Telegram o'zining yuklash holatini tizim bildirishnomasida ko'rsatadi.
+                                // Ayrim Telegram/WebView versiyalarida callback holati noto'g'ri talqin qilinib,
+                                // fayl muvaffaqiyatli saqlanganidan keyin ham ilova xatolik chiqarishi mumkin.
+                                // Shu sababli yuklashni callback'siz boshlaymiz; xatolik haqida Telegramning
+                                // o'zi xabar beradi.
+                                tg.downloadFile({ url: downloadUrl, file_name: fallbackName });
                                 return;
                             }
                         } catch (error) {
