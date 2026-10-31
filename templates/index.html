@@ -15213,23 +15213,12 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
                     return;
                 }
 
-                // Endi URL bir martalik token bilan himoyalangan. Native Telegram downloader
-                // shu URL'dan haqiqiy PDF/DOCX javobini oladi; Telegram initData talab qilinmaydi.
+                // Himoyalangan ticket URL orqali faylni brauzerning standart yuklash
+                // mexanizmi bilan ochamiz. Telegram downloadFile native bridge ayrim
+                // Android mijozlarida WebAppDownloadFilePopupOpened xatosini qaytargan.
                 const downloadUrl = new URL(ticketData.url, BASE_URL).href;
                 const filename = ticketData.filename || fallbackName;
-                const telegramWebApp = window.Telegram && window.Telegram.WebApp;
 
-                if (telegramWebApp && typeof telegramWebApp.downloadFile === 'function') {
-                    telegramWebApp.downloadFile({
-                        url: downloadUrl,
-                        file_name: filename
-                    }, function(accepted) {
-                        if (accepted === false) return;
-                    });
-                    return;
-                }
-
-                // Telegram downloadFile mavjud bo'lmagan brauzerlar uchun oddiy URL yuklash.
                 const link = document.createElement('a');
                 link.href = downloadUrl;
                 link.download = filename;
