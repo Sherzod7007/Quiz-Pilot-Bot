@@ -13117,6 +13117,23 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(3) { 
 html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(4) { background-image: linear-gradient(90deg,rgba(4,18,40,.94) 0%,rgba(4,18,40,.72) 46%,rgba(4,18,40,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWMzYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMWI0MCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI2MCIgcj0iMjQwIiBmaWxsPSIjMDBiOGZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjI1MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjEzMCIgcng9IjgiIGZpbGw9IiMzOWI3ZmYiLz48cmVjdCB4PSI4MDUiIHk9IjE5MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjE5MCIgcng9IjgiIGZpbGw9IiM2MmQ4YjUiLz48cmVjdCB4PSI4OTAiIHk9IjEwNSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjI3NSIgcng9IjgiIGZpbGw9IiNmZmQzNGQiLz48cGF0aCBkPSJNNzAwIDE0MGM4MCA1MCAxNTAtNDUgMjcwIDEwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3Y2U5ZmYiIHN0cm9rZS13aWR0aD0iOCIvPjwvc3ZnPg==") !important; }
 html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { background-image: linear-gradient(90deg,rgba(25,11,48,.94) 0%,rgba(25,11,48,.72) 46%,rgba(25,11,48,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzIwMTA0NCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzQwMTU2YiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI1MCIgcj0iMjQwIiBmaWxsPSIjYjA2Y2ZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MDAiIHk9IjEyMCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjZDk1NzdjIiBzdHJva2U9IiNmZmIyYzUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDE1NSkiLz48cmVjdCB4PSI3MDAiIHk9IjE5MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjNGY4ZmU4IiBzdHJva2U9IiNhOWQ0ZmYiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDIyNSkiLz48cmVjdCB4PSI3MTUiIHk9IjI2MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjMzZiODhmIiBzdHJva2U9IiNhOGZmZTUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODQ1IDI5NSkiLz48L3N2Zz4=") !important; }
 </style>
+
+    <style>
+        /* Katta ekranlarda uzun test nomi Chiqish tugmasini siqib chiqarmasin. */
+        #game-screen .game-header { min-width: 0; }
+        #game-screen .game-header > span:first-child {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #game-screen .game-header-right {
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+    </style>
+
 </head>
 <body>
 
@@ -15163,9 +15180,38 @@ showAppAlert("⚠️", fileLimitAlerts[currentLang] || fileLimitAlerts.uz);
 
         async function copyTeacherLink(link){ try{await navigator.clipboard.writeText(link);showAppAlert('🔗',link);}catch(e){showAppAlert('🔗',link);} }
 
-        function downloadTeacherExport(sessionId, format) {
+        async function downloadTeacherExport(sessionId, format) {
             const url=`${BASE_URL}/api/teacher-export?session_id=${encodeURIComponent(sessionId)}&user_id=${userId}&format=${format}`;
-            window.open(url, '_blank');
+            try {
+                // window.open autentifikatsiya sarlavhasini yubora olmaydi.
+                // fetch esa umumiy Telegram initData sarlavhasini avtomatik qo‘shadi.
+                const response = await fetch(url);
+                if (!response.ok) {
+                    let message = langPack[currentLang].teacher_server_error;
+                    try {
+                        const errorData = await response.json();
+                        message = errorData.detail || message;
+                    } catch (_) {}
+                    throw new Error(message);
+                }
+
+                const blob = await response.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                const disposition = response.headers.get('Content-Disposition') || '';
+                const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+                const filename = filenameMatch
+                    ? decodeURIComponent(filenameMatch[1] || filenameMatch[2])
+                    : `Quiz_AI_Natijalar.${format === 'docx' ? 'docx' : 'pdf'}`;
+                link.href = objectUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+            } catch (error) {
+                showAppAlert('❌', error.message || langPack[currentLang].teacher_server_error);
+            }
         }
 
         async function showTeacherResults(sessionId) {
