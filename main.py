@@ -1121,11 +1121,7 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     if not path.startswith("/api/") or request.method == "OPTIONS":
         return await call_next(request)
     # Bu endpointlar maxfiy foydalanuvchi ma'lumotini qaytarmaydi.
-    if request.method == "GET" and path in {
-        "/api/tariff-config",
-        "/api/upload-limits",
-        "/api/teacher/download-file",
-    }:
+    if request.method == "GET" and path in {"/api/tariff-config", "/api/upload-limits"}:
         return await call_next(request)
 
     init_data = request.headers.get("X-Telegram-Init-Data", "")
@@ -4629,6 +4625,75 @@ def teacher_delete_assignment(assignment_id: str, user_id: int):
     teacher_db_write(_write)
     return {"status":"ok"}
 
+# --- TEACHER FILE DOWNLOAD TICKETS ---
+# Fayl havolasi alohida, tasodifiy token bilan himoyalanadi.
+# Fayllar har bir so'rov uchun noyob nomda yaratiladi: parallel eksportlar
+# bir-birining faylini ustidan yozib, Content-Length xatosini keltirib chiqarmaydi.
+_TEACHER_DOWNLOAD_TICKETS = {}
+_TEACHER_DOWNLOAD_TICKETS_LOCK = threading.Lock()
+_TEACHER_DOWNLOAD_TICKET_TTL = 300
+
+
+def _create_teacher_download_ticket(path: str, filename: str, media_type: str):
+    now = time.time()
+    token = secrets.token_urlsafe(32)
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        expired = [
+            old_token for old_token, item in _TEACHER_DOWNLOAD_TICKETS.items()
+            if item["expires_at"] <= now
+        ]
+        for old_token in expired:
+            old_item = _TEACHER_DOWNLOAD_TICKETS.pop(old_token, None)
+            if old_item:
+                try:
+                    if os.path.isfile(old_item["path"]):
+                        os.remove(old_item["path"])
+                except OSError:
+                    logging.warning("Muddati tugagan Teacher faylini tozalab bo'lmadi.")
+
+        _TEACHER_DOWNLOAD_TICKETS[token] = {
+            "path": path,
+            "filename": filename,
+            "media_type": media_type,
+            "expires_at": now + _TEACHER_DOWNLOAD_TICKET_TTL,
+        }
+
+    return JSONResponse({
+        "url": f"/teacher-download/{token}",
+        "filename": filename,
+        "expires_in": _TEACHER_DOWNLOAD_TICKET_TTL,
+    })
+
+
+@app.get("/teacher-download/{token}")
+def download_teacher_file_ticket(token: str):
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        ticket = _TEACHER_DOWNLOAD_TICKETS.get(token)
+
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Yuklash havolasi topilmadi yoki muddati tugagan.")
+
+    if ticket["expires_at"] <= time.time():
+        with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+            _TEACHER_DOWNLOAD_TICKETS.pop(token, None)
+        try:
+            if os.path.isfile(ticket["path"]):
+                os.remove(ticket["path"])
+        except OSError:
+            logging.warning("Muddati tugagan Teacher faylini o'chirib bo'lmadi.")
+        raise HTTPException(status_code=410, detail="Yuklash havolasi muddati tugagan. Qayta urinib ko'ring.")
+
+    if not os.path.isfile(ticket["path"]):
+        raise HTTPException(status_code=404, detail="Yuklanadigan fayl topilmadi.")
+
+    return FileResponse(
+        ticket["path"],
+        media_type=ticket["media_type"],
+        filename=ticket["filename"],
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/teacher/export-assignment")
 def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
     require_teacher(user_id)
@@ -4660,7 +4725,7 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
         return [chr(65 + int(q.get("correct_index", 0))) for q in payload.get("quizzes", [])]
 
     if fmt == "docx":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.docx")
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}_{uuid.uuid4().hex}.docx")
         doc=Document(); doc.add_heading(row["title"], level=1); doc.add_paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes))
         for code,payload in variant_payloads:
             doc.add_heading(f"Variant {code}", level=2)
@@ -4670,10 +4735,10 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 for j in range(4): doc.add_paragraph(f"{chr(65+j)}) {opts[j]}", style=None)
             doc.add_paragraph("Javoblar: " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))))
         doc.save(path)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        return _create_teacher_download_ticket(path, f"{safe}_teacher_{'_'.join(codes)}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
     if fmt == "pdf":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.pdf")
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}_{uuid.uuid4().hex}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
@@ -4706,101 +4771,8 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 story.append(Spacer(1,4))
             story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
         doc.build(story)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+        return _create_teacher_download_ticket(path, f"{safe}_teacher_{'_'.join(codes)}.pdf", "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
-
-
-# --- TEACHER FILE DOWNLOAD: qisqa muddatli, bir martalik yuklash havolasi ---
-# Telegram native downloader maxsus HTTP header yubora olmaydi. Shu sababli
-# avval initData bilan himoyalangan ticket olinadi, so'ng native downloader
-# faqat bir marta ishlatiladigan, muddati qisqa URL orqali faylni oladi.
-class TeacherDownloadTicketRequest(BaseModel):
-    kind: str = Field(min_length=1, max_length=20)
-    resource_id: str = Field(min_length=1, max_length=128)
-    format: str = Field(min_length=3, max_length=4)
-    variant: str = Field(default="A", min_length=1, max_length=1)
-    all_variants: int = Field(default=0, ge=0, le=1)
-
-
-_TEACHER_DOWNLOAD_TICKETS = {}
-_TEACHER_DOWNLOAD_TICKETS_LOCK = threading.Lock()
-_TEACHER_DOWNLOAD_TICKET_TTL = 180
-
-
-@app.post("/api/teacher/download-ticket")
-def teacher_create_download_ticket(req: TeacherDownloadTicketRequest, request: Request):
-    # Foydalanuvchi ID faqat Telegram HMAC middleware tasdiqlagan qiymatdan olinadi.
-    user_id = int(request.state.telegram_user_id)
-    require_teacher(user_id)
-
-    fmt = req.format.lower().strip()
-    if fmt not in {"pdf", "docx"}:
-        raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
-
-    if req.kind == "session":
-        generated_response = teacher_export(req.resource_id, user_id, fmt)
-    elif req.kind == "assignment":
-        generated_response = teacher_export_assignment(req.resource_id, user_id, fmt)
-    elif req.kind == "quiz":
-        generated_response = teacher_export_quiz(
-            req.resource_id, user_id, fmt, req.variant.upper(), req.all_variants
-        )
-    else:
-        raise HTTPException(status_code=400, detail="Noto‘g‘ri Teacher eksport turi.")
-
-    # Fayl yo'li faqat serverdagi mavjud eksport funksiyasidan olinadi.
-    file_path = getattr(generated_response, "path", None)
-    filename = getattr(generated_response, "filename", None) or os.path.basename(file_path or "")
-    media_type = getattr(generated_response, "media_type", None) or "application/octet-stream"
-    if not file_path or not filename or not os.path.isfile(file_path):
-        raise HTTPException(status_code=500, detail="Eksport faylini tayyorlab bo‘lmadi.")
-
-    token = secrets.token_urlsafe(32)
-    expires_at = time.time() + _TEACHER_DOWNLOAD_TICKET_TTL
-    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
-        now = time.time()
-        expired = [
-            key for key, value in _TEACHER_DOWNLOAD_TICKETS.items()
-            if value["expires_at"] <= now
-        ]
-        for key in expired:
-            _TEACHER_DOWNLOAD_TICKETS.pop(key, None)
-        _TEACHER_DOWNLOAD_TICKETS[token] = {
-            "path": file_path,
-            "filename": filename,
-            "media_type": media_type,
-            "user_id": user_id,
-            "expires_at": expires_at,
-        }
-
-    return {
-        "status": "ok",
-        "url": f"/api/teacher/download-file?token={token}",
-        "filename": filename,
-        "expires_in": _TEACHER_DOWNLOAD_TICKET_TTL,
-    }
-
-
-@app.get("/api/teacher/download-file")
-def teacher_download_file(token: str = Query(..., min_length=20, max_length=128)):
-    # Telegram/Android downloader bir fayl uchun takroriy GET so'rovi yuborishi
-    # mumkin. Ticket muddati tugaguncha saqlanadi, shunda takroriy so'rov 404 bermaydi.
-    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
-        ticket = _TEACHER_DOWNLOAD_TICKETS.get(token)
-
-    if not ticket or ticket["expires_at"] <= time.time():
-        raise HTTPException(status_code=404, detail="Yuklash havolasi eskirgan yoki ishlatilgan.")
-
-    file_path = ticket["path"]
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="Yuklanadigan fayl topilmadi.")
-
-    return FileResponse(
-        file_path,
-        filename=ticket["filename"],
-        media_type=ticket["media_type"],
-    )
-
 
 
 # --- O'QITUVCHI GURUH REJIMI ---
@@ -5650,7 +5622,7 @@ def teacher_export(session_id: str, user_id: int, format: str):
         raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
     safe=re.sub(r"[^A-Za-z0-9_-]+", "_", s["title"] or "quiz")[:40]
     if fmt=="docx":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.docx")
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.docx")
         doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
         table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
         for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
@@ -5673,9 +5645,9 @@ def teacher_export(session_id: str, user_id: int, format: str):
             cells=table.add_row().cells
             vals=[i,_mta_word_without_telegram_emoji(r["first_name"]),_mta_word_without_telegram_emoji(r["username"]),r["score"],r["total"],f"{r['percent']}%"]
             for j,v in enumerate(vals): cells[j].text=str(v)
-        doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        doc.save(path); return _create_teacher_download_ticket(path, f"{safe}_{s['code']}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     if fmt=="pdf":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         # PDF-only fallback fonts and emoji-to-image support; other export formats stay untouched.
         symbol_font = font
@@ -5762,7 +5734,7 @@ def teacher_export(session_id: str, user_id: int, format: str):
             for _emoji_path in _emoji_images:
                 try: os.remove(_emoji_path)
                 except OSError: pass
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+        return _create_teacher_download_ticket(path, f"{safe}_{s['code']}.pdf", "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
 
