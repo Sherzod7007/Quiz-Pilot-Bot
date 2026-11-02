@@ -865,7 +865,7 @@ def handle_admin_decision(call):
 
     conn = _connect()
     try:
-        pay = conn.execute("SELECT status FROM payments WHERE tx_id=? AND user_id=?", (tx_id, user_id)).fetchone()
+        pay = conn.execute("SELECT status, payment_type FROM payments WHERE tx_id=? AND user_id=?", (tx_id, user_id)).fetchone()
         receipt = conn.execute("SELECT status FROM p2p_receipts WHERE tx_id=? AND user_id=?", (tx_id, user_id)).fetchone()
         if not pay or pay["status"] != "pending" or not receipt or receipt["status"] != "review":
             _bot.answer_callback_query(call.id, "Bu to'lov allaqachon ko'rib chiqilgan yoki ko'rib chiqishga tayyor emas.", show_alert=True)
@@ -875,17 +875,26 @@ def handle_admin_decision(call):
 
     lang = _get_user_lang(user_id)
     if action == "p2p_approve":
-        ok, _plan = _approve(tx_id, user_id)
+        ok, approved_value = _approve(tx_id, user_id)
         if not ok:
             _bot.answer_callback_query(call.id, "To'lov tasdiqlanmadi: holat o'zgargan.", show_alert=True)
             return
-        messages = {
-            "uz": "🎉 Admin to'lovingizni tasdiqladi. Premium/PRO faollashtirildi! 👑",
-            "ru": "🎉 Администратор подтвердил платёж. Premium/PRO активирован! 👑",
-            "en": "🎉 The administrator approved your payment. Premium/PRO is now active! 👑",
-        }
+        if pay["payment_type"] == "credits":
+            messages = {
+                "uz": f"🎉 To'lov tasdiqlandi! Hisobingizga {approved_value} ta kredit qo'shildi. 💎",
+                "ru": f"🎉 Платёж подтверждён! На ваш счёт добавлено кредитов: {approved_value}. 💎",
+                "en": f"🎉 Payment approved! {approved_value} credits have been added to your balance. 💎",
+            }
+            result_text = "🟢 KREDIT TO'LOVI TASDIQLANDI"
+        else:
+            messages = {
+                "uz": "🎉 Admin to'lovingizni tasdiqladi. Premium/PRO faollashtirildi! 👑",
+                "ru": "🎉 Администратор подтвердил платёж. Premium/PRO активирован! 👑",
+                "en": "🎉 The administrator approved your payment. Premium/PRO is now active! 👑",
+            }
+            result_text = "🟢 ADMIN TOMONIDAN TASDIQLANDI"
         _notify_user(user_id, messages.get(lang, messages["uz"]))
-        result_text, answer = "🟢 ADMIN TOMONIDAN TASDIQLANDI", "To'lov tasdiqlandi."
+        answer = "To'lov tasdiqlandi."
     elif action == "p2p_reject":
         conn = _connect()
         try:
@@ -927,13 +936,13 @@ def handle_admin_decision(call):
 
 
 def _approve(tx_id, user_id):
-    """Atomically approve payment, extend Premium, reserve bank TX ID and close receipt."""
+    """Atomically approve Premium or credit payment, reserve bank TX ID and close receipt."""
     conn = _connect()
     try:
         cur = conn.cursor()
         cur.execute("BEGIN IMMEDIATE")
         pay = cur.execute(
-            "SELECT status, tariff_name FROM payments WHERE tx_id=? AND user_id=?",
+            "SELECT status, tariff_name, payment_type, credits_amount FROM payments WHERE tx_id=? AND user_id=?",
             (tx_id, int(user_id))
         ).fetchone()
         if not pay or pay["status"] != "pending":
@@ -945,9 +954,7 @@ def _approve(tx_id, user_id):
             (tx_id, int(user_id))
         ).fetchone()
         if receipt:
-            claimed, previous_tx = _claim_transaction_id(
-                conn, tx_id, user_id, receipt["transaction_id"]
-            )
+            claimed, previous_tx = _claim_transaction_id(conn, tx_id, user_id, receipt["transaction_id"])
             if not claimed:
                 conn.execute(
                     "UPDATE p2p_receipts SET status='rejected', reason=?, processed_at=?, "
@@ -957,6 +964,44 @@ def _approve(tx_id, user_id):
                 conn.commit()
                 return False, "duplicate_transaction"
 
+        now = _now()
+        cur.execute(
+            "UPDATE payments SET status='approved' WHERE tx_id=? AND user_id=? AND status='pending'",
+            (tx_id, int(user_id))
+        )
+        if cur.rowcount != 1:
+            conn.rollback()
+            return False, "payment_race"
+
+        payment_type = pay["payment_type"] or "premium"
+        if payment_type == "credits":
+            credits = int(pay["credits_amount"] or 0)
+            if credits <= 0:
+                conn.rollback()
+                return False, "invalid_credit_amount"
+            cur.execute(
+                "INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) "
+                "ON CONFLICT(user_id) DO NOTHING", (int(user_id), now)
+            )
+            cur.execute(
+                "UPDATE credit_wallets SET balance=balance+?, updated_at=? WHERE user_id=?",
+                (credits, now, int(user_id))
+            )
+            cur.execute(
+                "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) "
+                "VALUES (?,?, 'purchase', ?, ?, ?)",
+                (int(user_id), credits, f"payment:{tx_id}", pay["tariff_name"] or "Kredit xaridi", now)
+            )
+            if receipt:
+                cur.execute(
+                    "UPDATE p2p_receipts SET status='approved', reason='Kredit to‘lovi tasdiqlandi', "
+                    "processed_at=?, next_retry_at=0, processing_started_at=0 WHERE tx_id=? AND user_id=?",
+                    (now, tx_id, int(user_id))
+                )
+            conn.commit()
+            return True, credits
+
+        # Premium approval path — mavjud biznes mantiqini saqlaymiz.
         tariff_name = pay["tariff_name"] or ""
         low = tariff_name.lower()
         if "o'qit" in low or "учител" in low or "teacher" in low:
@@ -981,22 +1026,9 @@ def _approve(tx_id, user_id):
             "monthly": _duration_seconds("TARIFF_MONTHLY_DAYS", 30) * 86400,
             "teachers": _duration_seconds("TARIFF_TEACHERS_DAYS", 30) * 86400,
         }
-        now = _now()
-        old = cur.execute(
-            "SELECT premium_until FROM users WHERE user_id=?", (int(user_id),)
-        ).fetchone()
+        old = cur.execute("SELECT premium_until FROM users WHERE user_id=?", (int(user_id),)).fetchone()
         old_until = int(old[0] or 0) if old else 0
         until = max(now, old_until) + durations[plan]
-
-        cur.execute(
-            "UPDATE payments SET status='approved' "
-            "WHERE tx_id=? AND user_id=? AND status='pending'",
-            (tx_id, int(user_id))
-        )
-        if cur.rowcount != 1:
-            conn.rollback()
-            return False, "payment_race"
-
         cur.execute(
             "UPDATE users SET status=?, plan_key=?, premium_until=?, premium_source=? WHERE user_id=?",
             (f"PRO ✨ ({plan})", plan, until, "paid", int(user_id))
@@ -1007,8 +1039,7 @@ def _approve(tx_id, user_id):
         if receipt:
             cur.execute(
                 "UPDATE p2p_receipts SET status='approved', reason='To‘lov tasdiqlandi', "
-                "processed_at=?, next_retry_at=0, processing_started_at=0 "
-                "WHERE tx_id=? AND user_id=?",
+                "processed_at=?, next_retry_at=0, processing_started_at=0 WHERE tx_id=? AND user_id=?",
                 (now, tx_id, int(user_id))
             )
         conn.commit()
@@ -1018,7 +1049,6 @@ def _approve(tx_id, user_id):
         raise
     finally:
         conn.close()
-
 
 def _claim(tx_id):
     conn = _connect()
@@ -1407,7 +1437,16 @@ def _process(item):
 
         ok, info = _approve(tx_id, user_id)
         if ok:
-            _notify_user(user_id, _p2p_message(user_id, "approved"))
+            if isinstance(info, int):
+                lang = _get_user_lang(user_id)
+                credit_messages = {
+                    "uz": f"🎉 To'lov tasdiqlandi! Hisobingizga {info} ta kredit qo'shildi. 💎",
+                    "ru": f"🎉 Платёж подтверждён! На ваш счёт добавлено кредитов: {info}. 💎",
+                    "en": f"🎉 Payment approved! {info} credits have been added to your balance. 💎",
+                }
+                _notify_user(user_id, credit_messages.get(lang, credit_messages["uz"]))
+            else:
+                _notify_user(user_id, _p2p_message(user_id, "approved"))
             logging.info(
                  "P2P TO‘LOV QARORI | qaror=AVTOMATIK_TASDIQLANDI | buyurtma=%s | "
                 "foydalanuvchi=%s | aniqlash_ishonchliligi=%.2f | tahrir_alomati=%s | "
