@@ -1,20 +1,24 @@
 # -*- coding: utf-8 -*-
 import docx
 import asyncio
+from contextlib import asynccontextmanager
 import re
 from io import BytesIO
 from docx import Document
 from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Depends, Query, BackgroundTasks
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
 import json
 import logging
 import os
+import hashlib
+import hmac
+from urllib.parse import parse_qsl
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
@@ -24,7 +28,6 @@ try:
     import pymupdf
 except ImportError:
     pymupdf = None
-from openpyxl import Workbook
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -44,10 +47,7 @@ import secrets
 from copy import deepcopy
 from pathlib import Path
 from deep_translator import GoogleTranslator
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, BigInteger
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from datetime import datetime
-from fastapi import Depends, Query
+from datetime import datetime, timezone, timedelta
 
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
 import p2p_payment_ai
@@ -61,16 +61,105 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 templates = Jinja2Templates(directory="templates")
 
-raw_admin_id = os.getenv("ADMIN_ID")
+# Jarayon to'xtatilganda fon ishchilarini tartibli yakunlash uchun lifecycle holati.
+_APP_STOP_EVENT = threading.Event()
+_APP_WORKER_THREADS = []
+
+raw_admin_id = os.getenv("ADMIN_ID", "").strip()
 try:
-    ADMIN_ID = int(raw_admin_id.strip()) if raw_admin_id else None
-except Exception as e:
-    logging.error(f"ADMIN_ID ni int ga o'tkazishda xato: {e}")
+    ADMIN_ID = int(raw_admin_id) if raw_admin_id else None
+except (TypeError, ValueError):
+    logging.error("ADMIN_ID noto'g'ri formatda; asosiy admin ID o'chirib qo'yildi.")
     ADMIN_ID = None
+
+# Qo'shimcha administratorlar vergul bilan ajratilgan Telegram ID ro'yxati.
+# ADMIN_ID orqaga moslik uchun asosiy administrator sifatida saqlanadi.
+ADMIN_TELEGRAM_IDS = set()
+for _raw_id in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","):
+    _raw_id = _raw_id.strip()
+    if not _raw_id:
+        continue
+    try:
+        _parsed_id = int(_raw_id)
+        if _parsed_id > 0:
+            ADMIN_TELEGRAM_IDS.add(_parsed_id)
+        else:
+            logging.warning("ADMIN_TELEGRAM_IDS ichida musbat bo'lmagan ID e'tiborsiz qoldirildi.")
+    except ValueError:
+        logging.warning("ADMIN_TELEGRAM_IDS ichida noto'g'ri ID e'tiborsiz qoldirildi.")
+
+ADMIN_IDS = set(ADMIN_TELEGRAM_IDS)
+if ADMIN_ID and ADMIN_ID > 0:
+    ADMIN_IDS.add(ADMIN_ID)
+
+
+def is_admin_id(user_id):
+    """Telegram ID asosida administrator huquqini markaziy tekshirish."""
+    try:
+        return int(user_id) in ADMIN_IDS
+    except (TypeError, ValueError):
+        return False
+
+
+# --- ADMIN ERROR ALERTS ---
+# ERROR/CRITICAL log yozuvlarini administratorga Telegram orqali yuboradi.
+# Xabarlar ko'payib ketmasligi uchun 60 soniyada ko'pi bilan bitta alert yuboriladi.
+class AdminTelegramErrorHandler(logging.Handler):
+    def __init__(self, cooldown_seconds=60):
+        super().__init__(level=logging.ERROR)
+        self.cooldown_seconds = cooldown_seconds
+        self._alert_lock = threading.Lock()
+        self._last_alert_at = 0.0
+        self._suppressed_count = 0
+        self._sending_alert = False
+
+    def emit(self, record):
+        if not ADMIN_ID or getattr(self, "_sending_alert", False):
+            return
+
+        now = time.monotonic()
+        with self._alert_lock:
+            if now - self._last_alert_at < self.cooldown_seconds:
+                self._suppressed_count += 1
+                return
+            suppressed = self._suppressed_count
+            self._suppressed_count = 0
+            self._last_alert_at = now
+
+        try:
+            details = self.format(record)
+            # Telegram xabar uzunligi va maxfiy ma'lumotlar xavfini kamaytirish uchun qisqartiramiz.
+            details = details[:2500]
+            message = (
+                "🚨 <b>Quiz AI — Server xatoligi</b>\n"
+                f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n"
+                f"📍 Modul: <code>{record.name[:120]}</code>\n\n"
+                f"<pre>{details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')[:2500]}</pre>"
+            )
+            if suppressed:
+                message += f"\n\nℹ️ Oxirgi xabardan beri yana {suppressed} ta xatolik logi birlashtirildi."
+            self._sending_alert = True
+            bot.send_message(ADMIN_ID, message, parse_mode="HTML", disable_web_page_preview=True)
+        except Exception:
+            # Telegram ogohlantirishining o'zi muvaffaqiyatsiz bo'lsa, cheksiz log aylanishini boshlamaymiz.
+            pass
+        finally:
+            self._sending_alert = False
+
+
+_admin_error_handler = AdminTelegramErrorHandler()
+_admin_error_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+logging.getLogger().addHandler(_admin_error_handler)
 
 # --- ADMIN SUPPORT ---
 support_waiting_users = set()
 support_reply_targets = {}
+
+# Ommaviy xabar yuborish holati (faqat administrator uchun).
+broadcast_waiting_content = set()
+broadcast_pending_messages = {}
+broadcast_active = False
+broadcast_lock = threading.Lock()
 
 # Test yaratish API kalitlari:
 # 1) Eski usul saqlanadi: GOOGLE_API_KEYS=key1,key2,key3
@@ -179,6 +268,17 @@ MAX_TEXT_INPUT_CHARS = max(1, int(os.getenv("MAX_TEXT_INPUT_CHARS", "80000")))
 # AI so'rovlar sonini cheklaydi. Queue va concurrency mustaqil sozlanadi.
 ai_queue_slots = threading.BoundedSemaphore(AI_MAX_QUEUE)
 gemini_semaphore = threading.BoundedSemaphore(AI_MAX_CONCURRENT)
+
+# AI navbati va API kalitlari bo'yicha joriy jarayon statistikasi.
+_ai_monitor_lock = threading.Lock()
+_ai_monitor_state = {
+    "waiting_for_queue": 0,
+    "accepted_requests": 0,
+    "key_attempts": {},
+    "key_success": {},
+    "key_failures": {},
+    "last_errors": [],
+}
 logging.info(
     "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
@@ -231,38 +331,87 @@ DB_PATH = (
     "/data/quiz_pilot_v2.db" if os.path.exists("/data") else "quiz_pilot_v2.db"
 )
 
-# --- TARIFLAR: yagona manba (narx va nomlar UZ/RU/EN) ---
+# --- TARIFLAR: Railway Variables yagona manba ---
+def _env_positive_int(name, default, minimum=1):
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+        return value if value >= minimum else default
+    except (TypeError, ValueError):
+        logging.warning("Railway sozlamasi noto'g'ri | o'zgaruvchi=%s | standart qiymat ishlatiladi", name)
+        return default
+
+def _format_price(amount):
+    return f"{amount:,}".replace(",", " ") + " so'm"
+
+_daily_price = _env_positive_int("TARIFF_DAILY_PRICE", 10000)
+_weekly_price = _env_positive_int("TARIFF_WEEKLY_PRICE", 35000)
+_monthly_price = _env_positive_int("TARIFF_MONTHLY_PRICE", 65000)
+_teachers_price = _env_positive_int("TARIFF_TEACHERS_PRICE", 95000)
+_daily_hours = _env_positive_int("TARIFF_DAILY_HOURS", 24)
+_weekly_days = _env_positive_int("TARIFF_WEEKLY_DAYS", 7)
+_monthly_days = _env_positive_int("TARIFF_MONTHLY_DAYS", 30)
+_teachers_days = _env_positive_int("TARIFF_TEACHERS_DAYS", 30)
 TARIFFS = {
-    "daily": {
-        "price": "10 000 so'm",
-        "duration": 24 * 3600,
-        "names": {"uz": "Kunlik Cheksiz (24 soat)", "ru": "Суточный Безлимит (24 ч)", "en": "Daily Unlimited (24h)"},
-    },
-    "weekly": {
-        "price": "35 000 so'm",
-        "duration": 7 * 24 * 3600,
-        "names": {"uz": "Haftalik Cheksiz (7 kun)", "ru": "Недельный Безлимит (7 дн)", "en": "Weekly Unlimited (7d)"},
-    },
-    "monthly": {
-        "price": "65 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "Oylik Cheksiz (30 kun)", "ru": "Месячный Безлимит (30 дн)", "en": "Monthly Unlimited (30d)"},
-    },
-    "teachers": {
-        "price": "95 000 so'm",
-        "duration": 30 * 24 * 3600,
-        "names": {"uz": "O'qituvchilar Uchun (30 kun)", "ru": "Для Учителей (30 дн)", "en": "For Teachers (30d)"},
-    },
+    "daily": {"price": _format_price(_daily_price), "price_amount": _daily_price, "duration": _daily_hours * 3600,
+              "duration_value": _daily_hours, "duration_unit": "hours",
+              "names": {"uz": f"Kunlik Cheksiz ({_daily_hours} soat)", "ru": f"Суточный Безлимит ({_daily_hours} ч)", "en": f"Daily Unlimited ({_daily_hours}h)"}},
+    "weekly": {"price": _format_price(_weekly_price), "price_amount": _weekly_price, "duration": _weekly_days * 86400,
+               "duration_value": _weekly_days, "duration_unit": "days",
+               "names": {"uz": f"Haftalik Cheksiz ({_weekly_days} kun)", "ru": f"Недельный Безлимит ({_weekly_days} дн)", "en": f"Weekly Unlimited ({_weekly_days}d)"}},
+    "monthly": {"price": _format_price(_monthly_price), "price_amount": _monthly_price, "duration": _monthly_days * 86400,
+                "duration_value": _monthly_days, "duration_unit": "days",
+                "names": {"uz": f"Oylik Cheksiz ({_monthly_days} kun)", "ru": f"Месячный Безлимит ({_monthly_days} дн)", "en": f"Monthly Unlimited ({_monthly_days}d)"}},
+    "teachers": {"price": _format_price(_teachers_price), "price_amount": _teachers_price, "duration": _teachers_days * 86400,
+                 "duration_value": _teachers_days, "duration_unit": "days",
+                 "names": {"uz": f"O'qituvchilar Uchun ({_teachers_days} kun)", "ru": f"Для Учителей ({_teachers_days} дн)", "en": f"For Teachers ({_teachers_days}d)"}},
 }
-# Bepul foydalanuvchi limitlari Railway Variables orqali boshqariladi.
-FREE_QUIZ_LIMIT = max(0, int(os.getenv("FREE_QUIZ_LIMIT", "3")))
-FREE_PUBLIC_LIMIT = max(0, int(os.getenv("FREE_PUBLIC_LIMIT", "3")))
-FREE_FLASHCARD_LIMIT = max(0, int(os.getenv("FREE_FLASHCARD_LIMIT", "3")))
+logging.info("Tariflar Railway'dan yuklandi | kunlik=%s/%s soat | haftalik=%s/%s kun | oylik=%s/%s kun | o'qituvchilar=%s/%s kun",
+             TARIFFS['daily']['price'], _daily_hours, TARIFFS['weekly']['price'], _weekly_days,
+             TARIFFS['monthly']['price'], _monthly_days, TARIFFS['teachers']['price'], _teachers_days)
+# Bepul limitlar: musbat son = limit, -1 = cheksiz. 0 va boshqa manfiy qiymatlar yaroqsiz.
+def _env_free_limit(name, default=3):
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(str(raw).strip())
+        if value == -1 or value >= 1:
+            return value
+    except (TypeError, ValueError):
+        pass
+    logging.warning("Bepul limit sozlamasi noto'g'ri; standart qiymat ishlatiladi | o'zgaruvchi=%s", name)
+    return default
+
+FREE_QUIZ_LIMIT = _env_free_limit("FREE_QUIZ_LIMIT", 3)
+FREE_PUBLIC_LIMIT = _env_free_limit("FREE_PUBLIC_LIMIT", 3)
+FREE_FLASHCARD_LIMIT = _env_free_limit("FREE_FLASHCARD_LIMIT", 3)
+
+def format_free_limit(limit, lang="uz"):
+    if limit == -1:
+        return {"uz": "Cheksiz", "ru": "Безлимитно", "en": "Unlimited"}.get(lang, "Cheksiz")
+    return str(limit)
+
+def free_limit_remaining(limit, used):
+    return None if limit == -1 else max(0, limit - int(used or 0))
+
+def free_limit_reached(limit, used):
+    return limit != -1 and int(used or 0) >= limit
+
+def tariff_lines(lang="uz"):
+    labels = {
+        "uz": ("Kunlik", "Haftalik", "Oylik", "O'qituvchilar"),
+        "ru": ("Суточный", "Недельный", "Месячный", "Для учителей"),
+        "en": ("Daily", "Weekly", "Monthly", "Teachers"),
+    }.get(lang, ("Kunlik", "Haftalik", "Oylik", "O'qituvchilar"))
+    return "\n".join(
+        f"💎 {label} — {TARIFFS[key]['price']}"
+        for label, key in zip(labels, ("daily", "weekly", "monthly", "teachers"))
+    )
+
 logging.info(
     "Bepul limitlar sozlamasi | AI_test=%s | ommaviy_test=%s | flash_kartochka=%s",
     FREE_QUIZ_LIMIT, FREE_PUBLIC_LIMIT, FREE_FLASHCARD_LIMIT
 )
-P2P_CARD_NUMBER = os.getenv("P2P_CARD_NUMBER", "").strip()
+P2P_CARD_NUMBER = re.sub(r"\D", "", os.getenv("P2P_CARD_NUMBER", "").strip())
+PAYMENT_CARDHOLDER = os.getenv("PAYMENT_CARDHOLDER", "").strip()
 
 def is_active_paid_status(status: str, premium_until: int) -> bool:
     return bool(status and "PRO" in status and premium_until and int(time.time()) <= premium_until)
@@ -301,11 +450,11 @@ MESSAGES = {
             "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
             "🔊 Ovoz va vibratsiya sozlamalari.\n"
             "🌍 O'zbek, Русский va English tillari.\n"
-            "🆓 *Bepul:* har 30 kunda {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochka.\n"
+            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Ilovada test yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan tanishib chiqing.*\n\n"
+            "📌 *Ilovada test yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan, tanishib chiqing.*\n\n"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -331,11 +480,11 @@ MESSAGES = {
         "support_admin_reply_title": "Admin javobi",
         "support_config_error": "⚠️ Admin bilan bog'lanish hozircha sozlanmagan. Iltimos, keyinroq urinib ko'ring.",
         "quiz_ready": "📝 {title} darsligi bo'yicha jami {count} ta test savoli muvaffaqiyatli tayyorlandi!",
-        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan {limit} ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
+        "free_quiz_limit_notice": "🔒 *Bepul AI test limiti tugadi!*\n\nSizga ajratilgan {limit} ta bepul AI testdan foydalanib bo'ldingiz. Yangi testlar yaratishda davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n{tariff_lines}\n\n🚀 Premium bo'limidan o'zingizga mos tarifni tanlashingiz mumkin.",
         "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
-        "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n💎 Kunlik — 10 000 so'm\n💎 Haftalik — 35 000 so'm\n💎 Oylik — 65 000 so'm\n👨‍🏫 O'qituvchilar — 95 000 so'm\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
-        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi yana {quiz_limit} ta AI test, {public_limit} ta ommaviy test va {flashcard_limit} ta Flash Kartochkadan bepul foydalanishingiz mumkin.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
+        "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n{tariff_lines}\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
+        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi bepul limitlaringiz: AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
     },
     "ru": {
         "welcome": (
@@ -351,11 +500,11 @@ MESSAGES = {
             "📊 Удобный просмотр и анализ результатов.\n"
             "🔊 Настройки звука и вибрации.\n"
             "🌍 Узбекский, русский и английский языки.\n"
-            "🆓 *Бесплатно:* {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек каждые 30 дней.\n"
+            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Способы создания и получения премиум теста в приложении размещены в виде видео в нашей группе ознакомьтесь.*\n\n"
+            "📌 *Способы создания тестов и получения Премиума в приложении опубликованы в нашей группе в виде видео, пожалуйста, ознакомьтесь.*\n\n"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -380,11 +529,11 @@ MESSAGES = {
         "support_admin_reply_title": "Ответ администратора",
         "support_config_error": "⚠️ Связь с администратором пока не настроена. Пожалуйста, попробуйте позже.",
         "quiz_ready": "📝 Успешно подготовлено {count} тестовых вопросов по материалу {title}!",
-        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все {limit} бесплатных AI-тестов. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите подходящий тариф в разделе Premium.",
+        "free_quiz_limit_notice": "🔒 *Бесплатный лимит AI-тестов исчерпан!*\n\nВы использовали все {limit} бесплатных AI-тестов. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n{tariff_lines}\n\n🚀 Выберите подходящий тариф в разделе Premium.",
         "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали {limit} бесплатных публичных тестов за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали {limit} бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
-        "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n💎 Суточный — 10 000 so'm\n💎 Недельный — 35 000 so'm\n💎 Месячный — 65 000 so'm\n👨‍🏫 Для учителей — 95 000 so'm\n\n🚀 Выберите новый тариф в разделе Premium.",
-        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Теперь вы снова можете бесплатно использовать {quiz_limit} AI-тестов, {public_limit} публичных тестов и {flashcard_limit} флеш-карточек.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
+        "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n{tariff_lines}\n\n🚀 Выберите новый тариф в разделе Premium.",
+        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Ваши бесплатные лимиты: AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
     },
     "en": {
         "welcome": (
@@ -400,11 +549,11 @@ MESSAGES = {
             "📊 Easy results viewing and analysis.\n"
             "🔊 Sound and vibration settings.\n"
             "🌍 Uzbek, Russian and English languages.\n"
-            "🆓 *Free:* {quiz_limit} AI quizzes, {public_limit} public quizzes and {flashcard_limit} flashcards every 30 days.\n"
+            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Check out our group of methods for creating tests and obtaining Premium in the application, arranged in the form of videos.*\n\n"
+            "📌 *Methods for creating tests and getting Premium in the app have been posted in our group as a video, please check them out.*\n\n"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
@@ -429,17 +578,30 @@ MESSAGES = {
         "support_admin_reply_title": "Admin reply",
         "support_config_error": "⚠️ Contact with the administrator is not configured yet. Please try again later.",
         "quiz_ready": "📝 A total of {count} quiz questions for {title} have been successfully generated!",
-        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all {limit} free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a plan in the Premium section.",
+        "free_quiz_limit_notice": "🔒 *Your free AI quiz limit has ended!*\n\nYou have used all {limit} free AI quizzes. To keep creating quizzes, we recommend 👑 *Premium*.\n\n{tariff_lines}\n\n🚀 Choose a plan in the Premium section.",
         "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your {limit} free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your {limit} free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
-        "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n💎 Daily — 10 000 so'm\n💎 Weekly — 35 000 so'm\n💎 Monthly — 65 000 so'm\n👨‍🏫 Teachers — 95 000 so'm\n\n🚀 Choose a new plan in the Premium section.",
-        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. You can now use {quiz_limit} AI quizzes, {public_limit} public quizzes, and {flashcard_limit} flashcards for free again.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
+        "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n{tariff_lines}\n\n🚀 Choose a new plan in the Premium section.",
+        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. Your free limits are now: AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
     }
 }
 
+def _connect_db(timeout: float = 30):
+    """SQLite MASTER uchun yagona ulanish standarti.
+
+    WAL rejimi init_db() da bir marta o'rnatiladi; har bir so'rovda qayta
+    PRAGMA journal_mode bajarilmaydi. busy_timeout lock holatida kutishni
+    sqlite3.connect timeout bilan bir xil qiymatda boshqaradi.
+    """
+    wait_seconds = max(1.0, float(timeout))
+    conn = sqlite3.connect(DB_PATH, timeout=wait_seconds, check_same_thread=False)
+    conn.execute(f"PRAGMA busy_timeout={int(wait_seconds * 1000)}")
+    return conn
+
+
 def get_user_lang(user_id: int) -> str:
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
         cursor.execute("SELECT language FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
@@ -452,9 +614,10 @@ def get_user_lang(user_id: int) -> str:
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS quizzes (
         id TEXT PRIMARY KEY,
@@ -722,6 +885,25 @@ def init_db():
     except Exception as e:
         logging.warning("Teacher group code migration: %s", e)
 
+
+    # Tez-tez ishlatiladigan filtrlash/join yo'nalishlari uchun xavfsiz indekslar.
+    # Faqat non-unique indekslar: mavjud eski ma'lumotlarda migratsiya to'xtab qolmaydi.
+    for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_user_created ON quizzes(user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_quizzes_public_created ON quizzes(is_public, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_flashcards_user_created ON flashcards(user_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_user_status_created ON payments(user_id, status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_teacher_groups_owner_active ON teacher_groups(owner_id, active, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_teacher_members_user_group ON teacher_group_members(user_id, group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_teacher_assignments_owner_group ON teacher_assignments(owner_id, group_id, active)",
+        "CREATE INDEX IF NOT EXISTS idx_teacher_sessions_owner_active ON teacher_sessions(owner_id, active, deleted, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_teacher_participants_session_user ON teacher_participants(session_id, user_id)",
+    ):
+        try:
+            cursor.execute(index_sql)
+        except Exception as index_error:
+            logging.warning("SQLite indeks yaratishda xatolik: %s", index_error)
+
     conn.commit()
     conn.close()
 
@@ -754,7 +936,7 @@ def _news_columns(conn):
 
 def init_news_master_db():
     """Create/migrate the News table in SQLite MASTER before Hybrid starts."""
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
     try:
         conn.execute(NEWS_TABLE_SQL)
@@ -847,12 +1029,176 @@ def init_news_master_db():
 init_news_master_db()
 
 
+# --- FASTAPI ISHGA TUSHISHI (zamonaviy lifespan usuli) ---
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    """FastAPI ishga tushishi va yopilishida fon ishchilarini boshqaradi."""
+    global _APP_WORKER_THREADS
+    _APP_STOP_EVENT.clear()
+    _APP_WORKER_THREADS = []
+
+    # P2P OCR alohida tizim; ishga tushmasa asosiy ilova ishlashda davom etadi.
+    try:
+        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID, ADMIN_IDS)
+        p2p_payment_ai.start()
+    except Exception as p2p_error:
+        logging.exception(
+            "P2P to'lov AI tizimini ishga tushirib bo'lmadi; asosiy ilova ishlashda davom etadi: %s",
+            p2p_error,
+        )
+
+    bot_thread = threading.Thread(target=start_bot_polling, name="telegram-bot-polling", daemon=True)
+    limit_thread = threading.Thread(target=limit_notification_worker, name="limit-notification-worker", daemon=True)
+    for worker_thread in (bot_thread, limit_thread):
+        worker_thread.start()
+        _APP_WORKER_THREADS.append(worker_thread)
+
+    try:
+        yield
+    finally:
+        logging.info("Ilova yopilmoqda: fon ishchilariga to'xtash signali yuborilmoqda.")
+        _APP_STOP_EVENT.set()
+        try:
+            bot.stop_polling()
+        except Exception:
+            pass
+        try:
+            p2p_payment_ai.stop(timeout=8)
+        except Exception:
+            logging.exception("P2P OCR ishchilarini to'xtatishda xatolik")
+        if hybrid_sync is not None:
+            try:
+                hybrid_sync.stop(timeout=5)
+            except Exception:
+                logging.exception("Hybrid Sync ishchisini to'xtatishda xatolik")
+        for worker_thread in _APP_WORKER_THREADS:
+            worker_thread.join(timeout=5)
+        logging.info("Ilova fon ishchilarini to'xtatish bosqichi yakunlandi.")
+
 # --- FASTAPI ENDPOINTS ---
-app = FastAPI()
+app = FastAPI(lifespan=app_lifespan)
+
+# Telegram Mini App autentifikatsiyasi: brauzerdan kelgan user_id ga ishonmaymiz.
+# Har bir himoyalangan API so'rovi Telegram WebApp initData imzosini olib kelishi kerak.
+try:
+    TELEGRAM_INIT_DATA_MAX_AGE = max(60, min(86400, int(os.getenv("TELEGRAM_INIT_DATA_MAX_AGE", "86400"))))
+except (TypeError, ValueError):
+    TELEGRAM_INIT_DATA_MAX_AGE = 86400
+    logging.warning("TELEGRAM_INIT_DATA_MAX_AGE noto'g'ri; 86400 soniya ishlatiladi.")
+
+def verify_telegram_init_data(init_data: str):
+    """Telegram WebApp initData HMAC-SHA256 imzosini va auth_date ni tekshiradi."""
+    if not TELEGRAM_BOT_TOKEN or not init_data or len(init_data) > 16384:
+        return None
+    try:
+        pairs = parse_qsl(init_data, keep_blank_values=True, strict_parsing=True)
+        data = dict(pairs)
+        if len(data) != len(pairs):  # Takroriy kalitlar bilan imzo talqinini chalkashtirishga yo'l qo'ymaymiz.
+            return None
+        received_hash = data.pop("hash", "")
+        if not received_hash or len(received_hash) != 64:
+            return None
+        auth_date = int(data.get("auth_date", "0"))
+        now = int(time.time())
+        if auth_date <= 0 or auth_date > now + 60 or now - auth_date > TELEGRAM_INIT_DATA_MAX_AGE:
+            return None
+        data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(data.items()))
+        secret_key = hmac.new(b"WebAppData", TELEGRAM_BOT_TOKEN.encode("utf-8"), hashlib.sha256).digest()
+        calculated_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(calculated_hash, received_hash):
+            return None
+        user_payload = json.loads(data.get("user", "{}"))
+        user_id = int(user_payload.get("id", 0))
+        return user_id if user_id > 0 else None
+    except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+
+
+# Telegram downloadFile() custom HTTP header yubora olmaydi.
+# Shu sababli faqat autentifikatsiyadan o'tgan Teacher foydalanuvchiga
+# qisqa muddatli, bir martalik va aniq endpointga bog'langan yuklash chiptasi beriladi.
+_TEACHER_DOWNLOAD_TICKETS = {}
+_TEACHER_DOWNLOAD_TICKETS_LOCK = threading.Lock()
+_TEACHER_DOWNLOAD_TICKET_TTL = 120
+
+
+@app.middleware("http")
+async def telegram_webapp_auth_middleware(request: Request, call_next):
+    """API'larda Telegram imzosini tek markazda tekshiradi va user_id soxtalashtirilishini to'sadi."""
+    path = request.url.path
+    if not path.startswith("/api/") or request.method == "OPTIONS":
+        return await call_next(request)
+
+    # Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida va qisqa muddat ishlaydi.
+    # Telegram/Android downloader bir fayl uchun bir nechta GET yuborishi mumkin;
+    # shu sababli chipta birinchi GET'dan keyin bekor qilinmaydi.
+    if path.startswith("/api/teacher/download/"):
+        download_token = path.rsplit("/", 1)[-1]
+        with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+            ticket_data = _TEACHER_DOWNLOAD_TICKETS.get(download_token)
+            ticket_valid = bool(
+                ticket_data
+                and ticket_data.get("expires_at", 0) >= time.time()
+                and ticket_data.get("download_path") == path
+                and request.method == "GET"
+                and ticket_data.get("uses", 0) < ticket_data.get("max_uses", 10)
+            )
+            if ticket_valid:
+                # Takroriy GET/retry'lar uchun cheklangan foydalanish soni.
+                ticket_data["uses"] = ticket_data.get("uses", 0) + 1
+        if not ticket_valid:
+            return JSONResponse(status_code=401, content={"detail": "Yuklab olish chiptasi yaroqsiz, muddati tugagan yoki foydalanish limiti tugagan."})
+        return await call_next(request)
+
+    # Bu endpointlar maxfiy foydalanuvchi ma'lumotini qaytarmaydi.
+    if request.method == "GET" and path in {"/api/tariff-config", "/api/upload-limits"}:
+        return await call_next(request)
+
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    verified_user_id = verify_telegram_init_data(init_data)
+    if not verified_user_id:
+        return JSONResponse(status_code=401, content={"detail": "Telegram autentifikatsiyasi tasdiqlanmadi"})
+
+    # URL query parametri orqali boshqa foydalanuvchi ID sini yuborishga yo'l qo'ymaymiz.
+    supplied_ids = request.query_params.getlist("user_id")
+    if any(not value.isdigit() or int(value) != verified_user_id for value in supplied_ids):
+        return JSONResponse(status_code=403, content={"detail": "Foydalanuvchi ID mos kelmadi"})
+
+    # JSON, form-data va URL-encoded body ichidagi user_id ham tekshiriladi.
+    content_type = request.headers.get("content-type", "").lower()
+    if any(kind in content_type for kind in ("application/json", "multipart/form-data", "application/x-www-form-urlencoded")):
+        try:
+            raw_body = await request.body()
+            body_user_ids = []
+            if "application/json" in content_type and raw_body:
+                payload = json.loads(raw_body.decode("utf-8"))
+                if isinstance(payload, dict) and "user_id" in payload:
+                    body_user_ids.append(payload.get("user_id"))
+            elif "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+                form = await request.form()
+                body_user_ids.extend(form.getlist("user_id"))
+                # Upload vaqtinchalik fayllarini tekshiruvdan keyin yopamiz; body endpoint uchun qayta uzatiladi.
+                for value in form.values():
+                    if hasattr(value, "close"):
+                        await value.close()
+            if any(str(value) != str(verified_user_id) for value in body_user_ids):
+                return JSONResponse(status_code=403, content={"detail": "Foydalanuvchi ID mos kelmadi"})
+
+            # Body tekshirildi; original baytlarni FastAPI endpointiga qayta uzatamiz.
+            async def receive_body():
+                return {"type": "http.request", "body": raw_body, "more_body": False}
+            request = Request(request.scope, receive_body)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return JSONResponse(status_code=400, content={"detail": "Noto'g'ri so'rov tanasi"})
+
+    request.state.telegram_user_id = verified_user_id
+    response = await call_next(request)
+    return response
+
 
 class NewsCreateSchema(BaseModel):
     title_uz: str = Field(min_length=1, max_length=255)
-    content_uz: str = Field(min_length=1)
+    content_uz: str = Field(min_length=1, max_length=20000)
 
 
 def translate_to_ru_and_en(text_uz: str):
@@ -874,12 +1220,14 @@ def translate_to_ru_and_en(text_uz: str):
 
 
 @app.post("/api/news")
-def create_news_api(news_data: NewsCreateSchema):
+def create_news_api(news_data: NewsCreateSchema, request: Request):
+    if not is_admin_id(request.state.telegram_user_id):
+        raise HTTPException(status_code=403, detail="Admin huquqi talab qilinadi")
     title_ru, title_en = translate_to_ru_and_en(news_data.title_uz)
     content_ru, content_en = translate_to_ru_and_en(news_data.content_uz)
     now = int(time.time())
 
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
     try:
         cur = conn.execute("""
@@ -915,7 +1263,7 @@ def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
         lang = get_user_lang(user_id)
     else:
         lang = lang if lang in ("uz", "ru", "en") else "uz"
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
     try:
@@ -954,6 +1302,7 @@ def get_news_api(lang: str = Query("uz"), user_id: Optional[int] = Query(None)):
 # --- HYBRID DATABASE V1 ---
 # SQLite remains the MASTER database and all existing application code stays unchanged.
 # PostgreSQL is an asynchronous mirror. Any PostgreSQL error must never stop SQLite/app requests.
+hybrid_sync = None
 try:
     import hybrid_sync
     hybrid_sync.start(DB_PATH)
@@ -984,24 +1333,24 @@ class QuizResponseWithoutExplanation(BaseModel):
 
 
 class ProgressUpdateRequest(BaseModel):
-    quiz_id: str
-    user_id: int
-    correct_count: int
-    percent: int
+    quiz_id: str = Field(min_length=1, max_length=128)
+    user_id: int = Field(gt=0)
+    correct_count: int = Field(ge=0, le=100000)
+    percent: int = Field(ge=0, le=100)
 
 
 class FlashcardCreateRequest(BaseModel):
-    user_id: int
-    front: str
-    back: str
+    user_id: int = Field(gt=0)
+    front: str = Field(min_length=1, max_length=5000)
+    back: str = Field(min_length=1, max_length=5000)
 
 
 class PaymentIntentRequest(BaseModel):
-    action: str
-    user_id: int
-    tariff_name: Optional[str] = None
-    tariff_price: Optional[str] = None
-    tariff_key: Optional[str] = None
+    action: str = Field(min_length=1, max_length=32)
+    user_id: int = Field(gt=0)
+    tariff_name: Optional[str] = Field(default=None, max_length=100)
+    tariff_price: Optional[str] = Field(default=None, max_length=32)
+    tariff_key: Optional[str] = Field(default=None, max_length=32)
 
 
 
@@ -1028,7 +1377,7 @@ def notify_free_limit_reached(user_id: int, kind: str):
         return
     used_col, notice_col, limit, message_key = columns[kind]
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
@@ -1042,7 +1391,7 @@ def notify_free_limit_reached(user_id: int, kind: str):
         used = row[used_col] or 0
         cycle = row["created_at"] or 0
         already = row[notice_col] or 0
-        if used < limit or not cycle or already == cycle:
+        if limit == -1 or used < limit or not cycle or already == cycle:
             conn.close()
             return
         cur.execute(f"UPDATE users SET {notice_col} = ? WHERE user_id = ? AND {notice_col} <> ?", (cycle, user_id, cycle))
@@ -1050,17 +1399,19 @@ def notify_free_limit_reached(user_id: int, kind: str):
         conn.commit()
         conn.close()
         if changed:
-            _send_limit_message(user_id, message_key, limit=limit)
+            _send_limit_message(user_id, message_key, limit=format_free_limit(limit, get_user_lang(user_id)), tariff_lines=tariff_lines(get_user_lang(user_id)))
     except Exception as e:
         logging.error(f"Bepul limit notification xatosi ({user_id}, {kind}): {e}")
 
 
 def process_expired_free_limits():
-    """Reset the 30-day free cycle and notify the user once when free limits return."""
+    """Reset expired 30-day free cycles; send Telegram notices after DB commit."""
     now = int(time.time())
     thirty_days = 30 * 24 * 3600
+    notifications = []
+    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
@@ -1080,11 +1431,10 @@ def process_expired_free_limits():
 
             already_notified = row["last_free_reset_notice_cycle"] or 0
             had_exhausted_limit = (
-                (row["free_used"] or 0) >= FREE_QUIZ_LIMIT
-                or (row["public_free_used"] or 0) >= FREE_PUBLIC_LIMIT
-                or (row["flashcard_free_used"] or 0) >= FREE_FLASHCARD_LIMIT
+                free_limit_reached(FREE_QUIZ_LIMIT, row["free_used"])
+                or free_limit_reached(FREE_PUBLIC_LIMIT, row["public_free_used"])
+                or free_limit_reached(FREE_FLASHCARD_LIMIT, row["flashcard_free_used"])
             )
-
             cur.execute(
                 "UPDATE users SET free_used=0, public_free_used=0, flashcard_free_used=0, "
                 "created_at=?, last_free_reset_notice_cycle=? "
@@ -1092,23 +1442,44 @@ def process_expired_free_limits():
                 (now, old_cycle if had_exhausted_limit else already_notified, user_id, old_cycle),
             )
             if cur.rowcount == 1 and had_exhausted_limit and already_notified != old_cycle:
-                try:
-                    lang = get_user_lang(user_id)
-                    text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"].format(quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
-                    bot.send_message(user_id, text, parse_mode="Markdown")
-                except Exception as e:
-                    logging.error(f"Bepul limit qaytgani haqida xabar yuborilmadi ({user_id}): {e}")
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logging.error(f"Bepul limit reset worker xatosi: {e}")
+                notifications.append(user_id)
 
+        conn.commit()
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.error("Bepul limit reset worker xatosi: %s", e)
+        return
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Telegram tarmoq chaqiruvlari SQLite ulanishi yopilgandan keyin bajariladi.
+    for user_id in notifications:
+        try:
+            lang = get_user_lang(user_id)
+            text = MESSAGES.get(lang, MESSAGES["uz"])["free_limits_restored_notice"].format(
+                quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, lang),
+                public_limit=format_free_limit(FREE_PUBLIC_LIMIT, lang),
+                flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, lang),
+            )
+            bot.send_message(user_id, text, parse_mode="Markdown")
+        except Exception as e:
+            logging.error("Bepul limit qaytgani haqida xabar yuborilmadi (%s): %s", user_id, e)
 
 def process_expired_paid_limits():
-    """Expire PRO plans and notify users once exactly when their paid period ends."""
+    """Expire PRO plans atomically; send Telegram notices after DB commit."""
     now = int(time.time())
+    notifications = []
+    conn = None
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
@@ -1123,39 +1494,57 @@ def process_expired_paid_limits():
             if (row["paid_limit_notice_until"] or 0) == expiry:
                 continue
             plan_key = row["plan_key"] or get_plan_key(row["status"] or "")
-            tariff_name = localized_tariff_name(plan_key, get_user_lang(user_id)) if plan_key else "Premium"
             cur.execute(
                 "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=? "
                 "WHERE user_id=? AND premium_until=?",
                 (expiry, user_id, expiry),
             )
             if cur.rowcount == 1:
-                try:
-                    lang = get_user_lang(user_id)
-                    text = MESSAGES.get(lang, MESSAGES["uz"])["paid_limit_notice"].format(tariff_name=tariff_name)
-                    bot.send_message(user_id, text, parse_mode="Markdown")
-                except Exception as e:
-                    logging.error(f"Premium tugash xabari yuborilmadi ({user_id}): {e}")
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logging.error(f"Premium limit worker xatosi: {e}")
+                notifications.append((user_id, plan_key))
 
+        conn.commit()
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.error("Premium limit worker xatosi: %s", e)
+        return
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    # Tilni aniqlash va Telegram yuborish DB tranzaksiyasidan tashqarida.
+    for user_id, plan_key in notifications:
+        try:
+            lang = get_user_lang(user_id)
+            tariff_name = localized_tariff_name(plan_key, lang) if plan_key else "Premium"
+            text = MESSAGES.get(lang, MESSAGES["uz"])["paid_limit_notice"].format(
+                tariff_name=tariff_name,
+                tariff_lines=tariff_lines(lang),
+            )
+            bot.send_message(user_id, text, parse_mode="Markdown")
+        except Exception as e:
+            logging.error("Premium tugash xabari yuborilmadi (%s): %s", user_id, e)
 
 def limit_notification_worker():
-    while True:
+    while not _APP_STOP_EVENT.is_set():
         try:
             process_expired_paid_limits()
             process_expired_free_limits()
         except Exception as e:
-            logging.error(f"Limit notification worker xatosi: {e}")
-        time.sleep(30)
+            logging.error("Limit notification worker xatosi: %s", e)
+        # Oddiy sleep o'rniga Event.wait: shutdown signali kelganda tez uyg'onadi.
+        _APP_STOP_EVENT.wait(30)
 
 def add_user_to_db(user_id: int):
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
             "INSERT OR IGNORE INTO users (user_id, created_at, language, status, plan_key, free_used, public_free_used, flashcard_free_used, premium_until, last_active) "
             "VALUES (?, ?, 'uz', 'Oddiy foydalanuvchi', '', 0, 0, 0, 0, ?)",
@@ -1169,10 +1558,9 @@ def add_user_to_db(user_id: int):
 
 def get_users_count():
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-        # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
+            # Faqat oxirgi 2 daqiqada Mini App ochiq/ko'rinib turgan foydalanuvchilar faol hisoblanadi.
         active_since = int(time.time()) - 2 * 60
         cursor.execute(
             "SELECT COUNT(DISTINCT user_id) FROM users WHERE last_active >= ?",
@@ -1188,9 +1576,8 @@ def get_users_count():
 
 def update_user_activity(user_id: int):
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
             "UPDATE users SET last_active = ? WHERE user_id = ?",
             (int(time.time()), user_id),
@@ -1219,10 +1606,9 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         tariff_price = TARIFFS[tariff_key]["price"]
         tx_id = f"TX{uuid.uuid4().hex[:6].upper()}"
 
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
-
+    
         # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
         cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
@@ -1253,11 +1639,15 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=FREE_QUIZ_LIMIT, public_limit=FREE_PUBLIC_LIMIT, flashcard_limit=FREE_FLASHCARD_LIMIT)
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang))
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
+    # Oddiy foydalanuvchilarning menyusi avvalgidek faqat /start bo'lib qoladi.
+    if _admin_only(message):
+        btn_help_admin = telebot.types.KeyboardButton(text="/help_admin")
+        markup.row(btn_help_admin)
     btn_start = telebot.types.KeyboardButton(text="/start")
-
     markup.row(btn_start)
     bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
 
@@ -1299,10 +1689,10 @@ def support_continue_markup(lang: str):
     return markup
 
 # --- ADMIN SUPPORT: murojaat va javob ---
-@bot.message_handler(content_types=["text"], func=lambda message: message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets)
+@bot.message_handler(content_types=["text"], func=lambda message: (message.from_user.id in support_waiting_users or message.from_user.id in support_reply_targets) and message.from_user.id not in broadcast_waiting_content)
 def handle_support_text(message):
     user_id = message.from_user.id
-    if ADMIN_ID and user_id == ADMIN_ID and user_id in support_reply_targets:
+    if is_admin_id(user_id) and user_id in support_reply_targets:
         target_user_id = support_reply_targets.pop(user_id)
         try:
             target_lang = get_user_lang(target_user_id)
@@ -1345,7 +1735,7 @@ def handle_support_text(message):
 @bot.callback_query_handler(func=lambda call: call.data == "support_continue")
 def handle_support_continue_callback(call):
     """Allow the user to continue the same admin-support conversation from Telegram."""
-    if ADMIN_ID and call.from_user.id == ADMIN_ID:
+    if is_admin_id(call.from_user.id):
         bot.answer_callback_query(call.id, "Bu tugma foydalanuvchi uchun.", show_alert=True)
         return
     try:
@@ -1366,7 +1756,7 @@ def handle_support_continue_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("support_reply:"))
 def handle_support_reply_callback(call):
-    if not ADMIN_ID or call.from_user.id != ADMIN_ID:
+    if not is_admin_id(call.from_user.id):
         bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
         return
     try:
@@ -1378,9 +1768,772 @@ def handle_support_reply_callback(call):
         logging.error(f"Admin reply callback xatosi: {e}")
         bot.answer_callback_query(call.id, "Xatolik yuz berdi.", show_alert=True)
 
-# --- ADMIN BONUS PREMIUM ---
+# --- ADMIN STATISTICS ---
 def _admin_only(message):
-    return bool(ADMIN_ID and int(message.from_user.id) == int(ADMIN_ID))
+    return is_admin_id(message.from_user.id)
+
+
+@bot.message_handler(commands=["test_error_alert"])
+def admin_test_error_alert_command(message):
+    """Administrator-only, controlled test for the Telegram error alert handler."""
+    if not _admin_only(message):
+        return
+
+    # Send confirmation first, then emit one controlled ERROR log.
+    # The installed AdminTelegramErrorHandler should deliver this log to ADMIN_ID.
+    try:
+        bot.send_message(
+            message.chat.id,
+            "🧪 Sinov boshlandi. Agar xatolik xabari tizimi ishlasa, administrator chatiga alohida ogohlantirish keladi."
+        )
+        logging.error(
+            "TEST ALERT: administrator tomonidan avtomatik xatolik xabari tekshirilmoqda."
+        )
+    except Exception as e:
+        logging.exception("Test error alert buyrug'ida xatolik yuz berdi: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Sinov buyrug'ini bajarishda xatolik yuz berdi.")
+        except Exception:
+            pass
+
+
+
+@bot.message_handler(commands=["monitor"])
+def admin_monitor_command(message):
+    """Show a lightweight, administrator-only snapshot of server and AI capacity."""
+    if not _admin_only(message):
+        return
+
+    # Semaphore availability gives a best-effort snapshot; it is not a historical metric.
+    try:
+        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+
+        db_status = "✅ Ulandi"
+        conn = None
+        try:
+            conn = _connect_db(timeout=5)
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("SELECT 1").fetchone()
+        except Exception as db_error:
+            db_status = "❌ Xato"
+            logging.error("Monitor: SQLite health check xatosi: %s", db_error)
+        finally:
+            if conn is not None:
+                conn.close()
+
+        # Linux / Railway konteynerida joriy RSS xotirasini /proc orqali olamiz.
+        # psutil qo'shimcha dependency sifatida talab qilinmaydi.
+        process_rss_mb = None
+        try:
+            with open("/proc/self/status", "r", encoding="utf-8") as proc_status:
+                for line in proc_status:
+                    if line.startswith("VmRSS:"):
+                        process_rss_mb = round(int(line.split()[1]) / 1024, 1)
+                        break
+        except (OSError, ValueError, IndexError):
+            pass
+
+        load_average = None
+        try:
+            load_average = " / ".join(f"{value:.2f}" for value in os.getloadavg())
+        except (AttributeError, OSError):
+            pass
+
+        p2p_status = {}
+        try:
+            p2p_status = p2p_payment_ai.get_status()
+        except Exception as p2p_error:
+            logging.warning("Monitor: P2P holatini olish imkoni bo'lmadi | sabab=%s", type(p2p_error).__name__)
+
+        p2p_budget = p2p_status.get("budget", {}) if isinstance(p2p_status, dict) else {}
+        now_local = datetime.now(timezone(timedelta(hours=5)))
+        process_metrics = []
+        if process_rss_mb is not None:
+            process_metrics.append(f"RAM (jarayon): <b>{process_rss_mb:.1f} MB</b>")
+        if load_average is not None:
+            process_metrics.append(f"Load average (1/5/15 daq.): <b>{load_average}</b>")
+        process_metrics_text = "\n".join(process_metrics) if process_metrics else "Jarayon metrikalari mavjud emas"
+
+        report = (
+            "🖥 <b>Quiz AI — Server va AI monitoring</b>\n"
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            f"🗄 SQLite bazasi: <b>{db_status}</b>\n"
+            f"📈 {process_metrics_text}\n"
+            f"🤖 Asosiy model: <code>{GEMINI_MODEL}</code>\n"
+            f"🔁 Zaxira model: <code>{GEMINI_FALLBACK_MODEL}</code>\n\n"
+            "⚙️ <b>AI parallel so‘rovlar</b>\n"
+            f"Band: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
+            f"Bo‘sh slotlar: <b>{ai_slots_free}</b>\n\n"
+            "⏳ <b>AI navbat sig‘imi</b>\n"
+            f"Band slotlar: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
+            f"Bo‘sh slotlar: <b>{queue_slots_free}</b>\n\n"
+            "💳 <b>P2P OCR navbati</b>\n"
+            f"Navbat: <b>{p2p_status.get('queue_size', 'N/A')}/{p2p_status.get('queue_limit', 'N/A')}</b>\n"
+            f"Bugungi OCR: <b>{p2p_budget.get('daily_requests', 'N/A')}/{p2p_budget.get('daily_limit', 'N/A')}</b>\n"
+            f"Oylik OCR: <b>{p2p_budget.get('monthly_requests', 'N/A')}/{p2p_budget.get('monthly_request_limit', 'N/A')}</b>\n"
+            f"Oylik sarf: <b>${float(p2p_budget.get('monthly_spend_usd', 0) or 0):.4f}</b>\n\n"
+            f"🔑 Generation API kalitlari: <b>{len(GOOGLE_API_KEYS)}</b>\n"
+            f"⏱ Bitta so‘rov limiti: <b>{AI_REQUEST_TIMEOUT} soniya</b>\n"
+            f"⏱ Umumiy vaqt limiti: <b>{AI_TOTAL_TIMEOUT} soniya</b>\n\n"
+            "ℹ️ Bu bir martalik joriy holat. Load average CPU foizi emas; tarixiy grafiklar Railway Metrics'da ko‘riladi."
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.exception("Admin monitoring hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Monitoring ma’lumotlarini olishda xatolik yuz berdi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+
+
+@bot.message_handler(commands=["stats"])
+def admin_stats_command(message):
+    """Show private Quiz AI usage statistics to the configured administrator only."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        # Uzbekistan local day (UTC+5), independent of the server timezone.
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        today_start = int(now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        now_ts = int(time.time())
+        active_since = now_ts - 2 * 60
+
+        conn = _connect_db(timeout=30)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("PRAGMA busy_timeout=30000")
+
+        total_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        new_users_today = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (today_start,)
+        ).fetchone()[0]
+        visitors_today = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (today_start,)
+        ).fetchone()[0]
+        active_now = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (active_since,)
+        ).fetchone()[0]
+
+        total_quizzes = cur.execute("SELECT COUNT(*) FROM quizzes").fetchone()[0]
+        quizzes_today = cur.execute(
+            "SELECT COUNT(*) FROM quizzes WHERE created_at >= ?", (today_start,)
+        ).fetchone()[0]
+        pending_payments = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'pending'"
+        ).fetchone()[0]
+        approved_payments_today = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'approved' AND created_at >= ?",
+            (today_start,),
+        ).fetchone()[0]
+
+        report = (
+            "📊 <b>Quiz AI — Statistika</b>\n"
+            f"📅 Sana: {now_local.strftime('%d-%m-%Y')} (O‘zbekiston)\n\n"
+            f"👥 Jami ro‘yxatdan o‘tganlar: <b>{total_users:,}</b>\n"
+            f"🆕 Bugun ro‘yxatdan o‘tganlar: <b>{new_users_today:,}</b>\n"
+            f"📱 Bugun faol bo‘lgan foydalanuvchilar: <b>{visitors_today:,}</b>\n"
+            f"🟢 Hozir faol (oxirgi 2 daqiqa): <b>{active_now:,}</b>\n\n"
+            f"📝 Jami yaratilgan testlar: <b>{total_quizzes:,}</b>\n"
+            f"✨ Bugun yaratilgan testlar: <b>{quizzes_today:,}</b>\n\n"
+            f"⏳ Kutilayotgan to‘lovlar: <b>{pending_payments:,}</b>\n"
+            f"✅ Bugun yaratilgan va tasdiqlangan to‘lov so‘rovlari: <b>{approved_payments_today:,}</b>"
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Admin statistikasini olishda xato: {e}")
+        bot.send_message(message.chat.id, "❌ Statistikani olishda xatolik yuz berdi. Server loglarini tekshiring.")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+
+# --- ADMIN FOYDALANUVCHILAR HISOBOTI ---
+@bot.message_handler(commands=["users"])
+def admin_users_report_command(message):
+    """Administrator uchun foydalanuvchilar, obunalar va uzoq faollashmaganlar hisoboti."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        now = int(time.time())
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        day_7 = now - 7 * 24 * 3600
+        day_30 = now - 30 * 24 * 3600
+
+        conn = _connect_db(timeout=20)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=20000")
+        cur = conn.cursor()
+
+        total_users = cur.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        created_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (day_7,)
+        ).fetchone()[0]
+        created_30_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (day_30,)
+        ).fetchone()[0]
+        active_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE last_active >= ?", (day_7,)
+        ).fetchone()[0]
+        inactive_7_days = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(last_active, 0) > 0 AND last_active < ?", (day_7,)
+        ).fetchone()[0]
+        never_active = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE COALESCE(last_active, 0) = 0"
+        ).fetchone()[0]
+        active_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ?", (now,)
+        ).fetchone()[0]
+        expired_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > 0 AND premium_until <= ?", (now,)
+        ).fetchone()[0]
+        ordinary_users = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE NOT (status LIKE '%PRO%' AND premium_until > ?)", (now,)
+        ).fetchone()[0]
+        paid_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ? AND COALESCE(premium_source, 'paid') != 'admin_bonus'", (now,)
+        ).fetchone()[0]
+        bonus_premium = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE status LIKE '%PRO%' AND premium_until > ? AND premium_source = 'admin_bonus'", (now,)
+        ).fetchone()[0]
+
+        inactive_rows = cur.execute(
+            "SELECT user_id, created_at, last_active, status, plan_key, premium_until "
+            "FROM users WHERE COALESCE(last_active, 0) > 0 AND last_active < ? "
+            "ORDER BY last_active ASC, created_at DESC LIMIT 8", (day_7,)
+        ).fetchall()
+
+        def date_text(timestamp):
+            timestamp = int(timestamp or 0)
+            return time.strftime('%d-%m-%Y %H:%M', time.gmtime(timestamp + 5 * 3600)) if timestamp > 0 else "ma’lumot yo‘q"
+
+        lines = [
+            "👥 <b>Quiz AI — Foydalanuvchilar hisoboti</b>",
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M')} (O‘zbekiston)",
+            "",
+            "📊 <b>Foydalanuvchilar</b>",
+            f"• Jami ro‘yxatdan o‘tganlar: <b>{total_users:,}</b>",
+            f"• Oxirgi 7 kunda qo‘shilganlar: <b>{created_7_days:,}</b>",
+            f"• Oxirgi 30 kunda qo‘shilganlar: <b>{created_30_days:,}</b>",
+            f"• Oxirgi 7 kunda faol bo‘lganlar: <b>{active_7_days:,}</b>",
+            f"• 7 kundan beri faol bo‘lmaganlar: <b>{inactive_7_days:,}</b>",
+            f"• Faollik qaydi yo‘q: <b>{never_active:,}</b>",
+            "",
+            "👑 <b>Obuna holati</b>",
+            f"• Faol Premium obunachilar: <b>{active_premium:,}</b>",
+            f"• Pullik Premium obunachilar: <b>{paid_premium:,}</b>",
+            f"• Admin bonusi orqali Premium: <b>{bonus_premium:,}</b>",
+            f"• Muddati tugagan PRO statuslar: <b>{expired_premium:,}</b>",
+            f"• Hozir faol Premium bo‘lmaganlar: <b>{ordinary_users:,}</b>",
+            "",
+            f"🕰 <b>7 kundan beri faol bo‘lmaganlar (ko‘pi bilan 8 ta):</b>",
+        ]
+        if inactive_rows:
+            for row in inactive_rows:
+                last_seen = date_text(row["last_active"])
+                created = date_text(row["created_at"])
+                status = row["status"] or "Oddiy foydalanuvchi"
+                lines.append(
+                    f"• ID <code>{row['user_id']}</code> — {status}\n"
+                    f"  Oxirgi faollik: {last_seen}\n"
+                    f"  Ro‘yxatdan o‘tgan: {created}"
+                )
+            if inactive_7_days > len(inactive_rows):
+                lines.append(f"… va yana {inactive_7_days - len(inactive_rows)} ta foydalanuvchi.")
+        else:
+            lines.append("• 7 kundan beri faol bo‘lmagan foydalanuvchi yo‘q.")
+
+        report = "\n".join(lines)
+        max_length = 3800
+        while len(report) > max_length:
+            split_at = report.rfind("\n", 0, max_length)
+            if split_at <= 0:
+                split_at = max_length
+            bot.send_message(message.chat.id, report[:split_at], parse_mode="HTML", disable_web_page_preview=True)
+            report = report[split_at:].lstrip("\n")
+        if report:
+            bot.send_message(message.chat.id, report, parse_mode="HTML", disable_web_page_preview=True)
+
+        logging.info(
+            "Foydalanuvchilar hisoboti yuborildi | jami=%s | premium_faol=%s | oxirgi_7_kunda_faol=%s | 7_kun_faol_emas=%s",
+            total_users, active_premium, active_7_days, inactive_7_days
+        )
+    except Exception as e:
+        logging.exception("Foydalanuvchilar hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Foydalanuvchilar hisobotini tayyorlab bo‘lmadi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+# --- ADMIN PAYMENTS & SUBSCRIPTION REPORT ---
+def _payment_price_to_sum(value):
+    """Narx matnidan so'm miqdorini xavfsiz ajratib oladi."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return int(digits) if digits else 0
+
+
+@bot.message_handler(commands=["payments"])
+def admin_payments_report_command(message):
+    """Administrator uchun tushum, tariflar, tugayotgan obunalar va kutilayotgan to'lovlar."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        now = int(time.time())
+        uz_tz = timezone(timedelta(hours=5))
+        now_local = datetime.now(uz_tz)
+        today_start = int(now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        week_end = now + 7 * 24 * 3600
+
+        conn = _connect_db(timeout=20)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=20000")
+        cur = conn.cursor()
+
+        # Faqat tasdiqlangan to'lovlar tushum hisoblanadi.
+        approved_rows = cur.execute(
+            "SELECT tariff_name, tariff_price, created_at FROM payments WHERE status='approved'"
+        ).fetchall()
+        pending_rows = cur.execute(
+            "SELECT tx_id, user_id, tariff_name, tariff_price, created_at FROM payments "
+            "WHERE status='pending' ORDER BY created_at ASC LIMIT 8"
+        ).fetchall()
+        pending_total = cur.execute(
+            "SELECT COUNT(*) FROM payments WHERE status='pending'"
+        ).fetchone()[0]
+        approved_today_rows = cur.execute(
+            "SELECT tariff_price FROM payments WHERE status='approved' AND created_at >= ?",
+            (today_start,)
+        ).fetchall()
+
+        # Obuna muddati yaqinlashayotgan PRO foydalanuvchilar; bonuslar alohida hisoblanmaydi.
+        expiring_rows = cur.execute(
+            "SELECT user_id, status, plan_key, premium_until, premium_source FROM users "
+            "WHERE premium_until > ? AND premium_until <= ? AND status LIKE '%PRO%' "
+            "ORDER BY premium_until ASC LIMIT 8",
+            (now, week_end)
+        ).fetchall()
+        expiring_total = cur.execute(
+            "SELECT COUNT(*) FROM users WHERE premium_until > ? AND premium_until <= ? "
+            "AND status LIKE '%PRO%'",
+            (now, week_end)
+        ).fetchone()[0]
+
+        total_revenue = sum(_payment_price_to_sum(row["tariff_price"]) for row in approved_rows)
+        today_revenue = sum(_payment_price_to_sum(row["tariff_price"]) for row in approved_today_rows)
+
+        tariff_stats = {key: {"count": 0, "revenue": 0} for key in TARIFFS}
+        for row in approved_rows:
+            plan_key = get_plan_key(row["tariff_name"] or "")
+            if plan_key in tariff_stats:
+                tariff_stats[plan_key]["count"] += 1
+                tariff_stats[plan_key]["revenue"] += _payment_price_to_sum(row["tariff_price"])
+
+        def money(amount):
+            return f"{amount:,}".replace(",", " ") + " so‘m"
+
+        report_lines = [
+            "💳 <b>Quiz AI — Daromad va obunalar hisoboti</b>",
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M')} (O‘zbekiston)",
+            "",
+            "💰 <b>Tushum</b>",
+            f"• Jami tasdiqlangan to‘lovlar: <b>{len(approved_rows):,}</b>",
+            f"• Jami tushum: <b>{money(total_revenue)}</b>",
+            f"• Bugungi tushum: <b>{money(today_revenue)}</b>",
+            "",
+            "📊 <b>Tariflar savdosi</b>",
+        ]
+        for key, tariff in TARIFFS.items():
+            stats = tariff_stats[key]
+            report_lines.append(
+                f"• {tariff['names']['uz']}: <b>{stats['count']}</b> ta — {money(stats['revenue'])}"
+            )
+
+        most_sold = max(tariff_stats.items(), key=lambda item: item[1]["count"]) if approved_rows else None
+        if most_sold and most_sold[1]["count"] > 0:
+            report_lines.extend([
+                "",
+                f"🏆 Eng ko‘p sotilgan tarif: <b>{TARIFFS[most_sold[0]]['names']['uz']}</b> "
+                f"({most_sold[1]['count']} ta)"
+            ])
+        else:
+            report_lines.extend(["", "🏆 Eng ko‘p sotilgan tarif: hozircha tasdiqlangan savdo yo‘q."])
+
+        report_lines.extend([
+            "",
+            f"⏳ <b>Tasdiqlanmagan to‘lovlar: {pending_total}</b>",
+        ])
+        if pending_rows:
+            for row in pending_rows:
+                created = time.strftime("%d-%m-%Y %H:%M", time.gmtime(int(row["created_at"] or 0) + 5 * 3600))
+                report_lines.append(
+                    f"• <code>{str(row['tx_id'])[:40]}</code> — ID <code>{row['user_id']}</code>\n"
+                    f"  {row['tariff_name'] or 'Tarif noma’lum'} | {row['tariff_price'] or 'Narx noma’lum'} | {created}"
+                )
+            if pending_total > len(pending_rows):
+                report_lines.append(f"… va yana {pending_total - len(pending_rows)} ta to‘lov.")
+        else:
+            report_lines.append("• Kutilayotgan to‘lov yo‘q.")
+
+        report_lines.extend([
+            "",
+            f"📅 <b>7 kun ichida muddati tugaydigan obunalar: {expiring_total}</b>",
+        ])
+        if expiring_rows:
+            for row in expiring_rows:
+                expiry = time.strftime("%d-%m-%Y %H:%M", time.gmtime(int(row["premium_until"]) + 5 * 3600))
+                plan_name = localized_tariff_name(row["plan_key"], "uz") if row["plan_key"] in TARIFFS else (row["status"] or "PRO")
+                source_note = " (bonus)" if row["premium_source"] == "admin_bonus" else ""
+                report_lines.append(
+                    f"• ID <code>{row['user_id']}</code> — {plan_name}{source_note}\n"
+                    f"  Tugash vaqti: {expiry}"
+                )
+            if expiring_total > len(expiring_rows):
+                report_lines.append(f"… va yana {expiring_total - len(expiring_rows)} ta obuna.")
+        else:
+            report_lines.append("• Yaqin 7 kunda muddati tugaydigan obuna yo‘q.")
+
+        # Telegram xabar limiti oshmasligi uchun hisobot bo'laklarga ajratiladi.
+        full_report = "\n".join(report_lines)
+        max_length = 3800
+        chunks = []
+        while len(full_report) > max_length:
+            split_at = full_report.rfind("\n", 0, max_length)
+            if split_at <= 0:
+                split_at = max_length
+            chunks.append(full_report[:split_at])
+            full_report = full_report[split_at:].lstrip("\n")
+        if full_report:
+            chunks.append(full_report)
+        for chunk in chunks:
+            bot.send_message(message.chat.id, chunk, parse_mode="HTML", disable_web_page_preview=True)
+
+        logging.info(
+            "Daromad va obunalar hisoboti yuborildi | tasdiqlangan_to'lov=%s | tushum=%s | kutilayotgan=%s | tugayotgan_obuna=%s",
+            len(approved_rows), total_revenue, pending_total, expiring_total
+        )
+    except Exception as e:
+        logging.exception("Daromad va obunalar hisobotini tayyorlashda xatolik: %s", e)
+        try:
+            bot.send_message(message.chat.id, "❌ Daromad va obunalar hisobotini tayyorlab bo‘lmadi. Railway loglarini tekshiring.")
+        except Exception:
+            pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+
+@bot.message_handler(commands=["db_health"])
+def admin_database_health_command(message):
+    """Administrator uchun SQLite bazasining yengil holat tekshiruvi."""
+    if not _admin_only(message):
+        return
+
+    conn = None
+    try:
+        conn = _connect_db(timeout=10)
+        conn.execute("PRAGMA busy_timeout=10000")
+        cur = conn.cursor()
+
+        # quick_check yengil tekshiruv; bazani o'zgartirmaydi.
+        check_row = cur.execute("PRAGMA quick_check").fetchone()
+        integrity_status = "✅ Sog‘lom" if check_row and check_row[0] == "ok" else "⚠️ Tekshirish kerak"
+
+        table_counts = {}
+        for table_name, label in (
+            ("users", "foydalanuvchilar"),
+            ("quizzes", "testlar"),
+            ("payments", "to‘lovlar"),
+            ("flashcards", "flash-kartochkalar"),
+        ):
+            try:
+                table_counts[label] = int(
+                    cur.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                )
+            except sqlite3.Error:
+                table_counts[label] = None
+
+        db_size = os.path.getsize(DB_PATH) if os.path.isfile(DB_PATH) else 0
+        wal_path = DB_PATH + "-wal"
+        wal_size = os.path.getsize(wal_path) if os.path.isfile(wal_path) else 0
+
+        def _format_bytes(size):
+            if size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            return f"{size / (1024 * 1024):.2f} MB"
+
+        def _count_text(value):
+            return f"{value:,}" if value is not None else "Jadval topilmadi"
+
+        now_local = datetime.now(timezone(timedelta(hours=5)))
+        report = (
+            "🗄 <b>Quiz AI — Ma’lumotlar bazasi holati</b>\n"
+            f"🕒 {now_local.strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            f"🔎 Bazaning yaxlitligi: <b>{integrity_status}</b>\n"
+            f"📦 SQLite fayli: <b>{_format_bytes(db_size)}</b>\n"
+            f"🧾 WAL jurnali: <b>{_format_bytes(wal_size)}</b>\n\n"
+            "📊 <b>Jadval yozuvlari</b>\n"
+            f"👥 Foydalanuvchilar: <b>{_count_text(table_counts['foydalanuvchilar'])}</b>\n"
+            f"📝 Testlar: <b>{_count_text(table_counts['testlar'])}</b>\n"
+            f"💳 To‘lovlar: <b>{_count_text(table_counts['to‘lovlar'])}</b>\n"
+            f"🗂 Flash-kartochkalar: <b>{_count_text(table_counts['flash-kartochkalar'])}</b>\n\n"
+            "ℹ️ Bu tekshiruv bazani o‘zgartirmaydi va zaxira nusxa yaratilganini anglatmaydi."
+        )
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+        logging.info("Ma’lumotlar bazasi holati tekshirildi | yaxlitlik=%s | SQLite_hajmi=%s_bayt | WAL_hajmi=%s_bayt",
+                     integrity_status, db_size, wal_size)
+    except Exception as e:
+        logging.exception("Ma’lumotlar bazasi holatini tekshirishda xatolik yuz berdi: %s", e)
+        try:
+            bot.send_message(
+                message.chat.id,
+                "❌ Ma’lumotlar bazasi holatini tekshirib bo‘lmadi. Railway loglarini tekshiring."
+            )
+        except Exception:
+            logging.exception("Baza tekshiruvi xatosi haqida Telegram xabarini yuborib bo‘lmadi.")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+# --- ADMIN SQLITE BACKUP: BROWSER DOWNLOAD LINK ---
+# Har bir havola tasodifiy, 10 daqiqalik va bir martalik bo'ladi.
+SQLITE_BACKUP_TOKEN_TTL = 10 * 60
+_sqlite_backup_tokens = {}
+_sqlite_backup_tokens_lock = threading.Lock()
+BACKUP_PUBLIC_BASE_URL = os.getenv("BACKUP_PUBLIC_BASE_URL", "").strip().rstrip("/")
+if not BACKUP_PUBLIC_BASE_URL:
+    _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().rstrip("/")
+    if _railway_domain:
+        BACKUP_PUBLIC_BASE_URL = (
+            _railway_domain if _railway_domain.startswith(("http://", "https://"))
+            else "https://" + _railway_domain
+        )
+
+
+def _issue_sqlite_backup_token():
+    now = time.time()
+    token = secrets.token_urlsafe(32)
+    with _sqlite_backup_tokens_lock:
+        expired = [key for key, expires_at in _sqlite_backup_tokens.items() if expires_at <= now]
+        for key in expired:
+            _sqlite_backup_tokens.pop(key, None)
+        _sqlite_backup_tokens[token] = now + SQLITE_BACKUP_TOKEN_TTL
+    return token
+
+
+def _consume_sqlite_backup_token(token: str) -> bool:
+    now = time.time()
+    with _sqlite_backup_tokens_lock:
+        expires_at = _sqlite_backup_tokens.pop(token, None)
+    return bool(expires_at and expires_at > now)
+
+
+@bot.message_handler(commands=["db_backup"])
+def admin_database_backup_command(message):
+    """Administrator-only: create a short-lived browser download link."""
+    if not _admin_only(message):
+        return
+
+    if not os.path.isfile(DB_PATH):
+        bot.send_message(message.chat.id, "❌ SQLite bazasi fayli topilmadi.")
+        return
+
+    if not BACKUP_PUBLIC_BASE_URL:
+        bot.send_message(
+            message.chat.id,
+            "⚠️ Yuklab olish havolasini yaratib bo‘lmadi. Railway Variables bo‘limida "
+            "RAILWAY_PUBLIC_DOMAIN mavjudligini tekshiring yoki BACKUP_PUBLIC_BASE_URL "
+            "o‘zgaruvchisiga ilovaning to‘liq HTTPS manzilini kiriting."
+        )
+        logging.error("DB backup link yaratilmadi: public base URL sozlanmagan.")
+        return
+
+    try:
+        token = _issue_sqlite_backup_token()
+        download_url = f"{BACKUP_PUBLIC_BASE_URL}/admin/sqlite-backup?token={token}"
+        bot.send_message(
+            message.chat.id,
+            "🗄 <b>Quiz AI — Baza zaxira nusxasi</b>\n\n"
+            "Havola 10 daqiqa davomida amal qiladi va faqat bir marta ishlatiladi.\n"
+            "Havolani Chrome yoki Yandex Browser orqali oching — zaxira fayli yuklanadi.\n\n"
+            f'⬇️ <a href="{download_url}">Zaxira nusxasini yuklab olish</a>\n\n'
+            "🔐 Havolani boshqa odamlarga yubormang.",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        logging.info("Administrator uchun bir martalik SQLite backup havolasi yaratildi.")
+    except Exception:
+        logging.exception("SQLite backup havolasini yaratishda xatolik yuz berdi.")
+        bot.send_message(message.chat.id, "❌ Zaxira havolasini yaratishda xatolik yuz berdi.")
+
+
+# --- ADMIN OMMAVIY XABAR YUBORISH ---
+@bot.message_handler(commands=["broadcast"])
+def admin_broadcast_command(message):
+    """Administrator matnini oldindan ko'rsatib, tasdiqdan keyin foydalanuvchilarga yuboradi."""
+    if not _admin_only(message):
+        return
+    if broadcast_active:
+        bot.send_message(message.chat.id, "⏳ Hozir boshqa ommaviy xabar yuborilmoqda. Tugashini kuting.")
+        return
+    broadcast_waiting_content.add(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        "📣 <b>Ommaviy xabar yuborish</b>\n\n"
+        "Barcha ro‘yxatdan o‘tgan foydalanuvchilarga yuboriladigan matnni yuboring.\n"
+        "Yuborishdan oldin xabarni ko‘rib chiqib, alohida tasdiqlaysiz.\n\n"
+        "Bekor qilish uchun /broadcast_cancel buyrug‘ini yuboring.",
+        parse_mode="HTML",
+    )
+    logging.info("Administrator ommaviy xabar matnini kiritish jarayonini boshladi.")
+
+
+@bot.message_handler(commands=["broadcast_cancel"])
+def admin_broadcast_cancel_command(message):
+    if not _admin_only(message):
+        return
+    broadcast_waiting_content.discard(message.from_user.id)
+    broadcast_pending_messages.pop(message.from_user.id, None)
+    bot.send_message(message.chat.id, "❎ Ommaviy xabar tayyorlash bekor qilindi.")
+    logging.info("Administrator ommaviy xabar tayyorlashni bekor qildi.")
+
+
+@bot.message_handler(content_types=["text"], func=lambda message: is_admin_id(message.from_user.id) and message.from_user.id in broadcast_waiting_content)
+def admin_broadcast_receive_text(message):
+    if not _admin_only(message):
+        return
+    text = (message.text or "").strip()
+    if not text:
+        bot.send_message(message.chat.id, "⚠️ Xabar bo‘sh. Iltimos, matn yuboring.")
+        return
+    if len(text) > 4000:
+        bot.send_message(message.chat.id, "⚠️ Xabar 4 000 belgidan oshmasligi kerak. Qisqaroq matn yuboring.")
+        return
+
+    broadcast_waiting_content.discard(message.from_user.id)
+    broadcast_pending_messages[message.from_user.id] = text
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.row(
+        telebot.types.InlineKeyboardButton("✅ Yuborishni tasdiqlash", callback_data="broadcast_confirm"),
+        telebot.types.InlineKeyboardButton("❎ Bekor qilish", callback_data="broadcast_cancel"),
+    )
+    try:
+        bot.send_message(
+            message.chat.id,
+            "👁 Ommaviy xabar — ko‘rib chiqish\n\n"
+            + text
+            + "\n\n⚠️ Bu xabar ro‘yxatdan o‘tgan foydalanuvchilarga yuboriladi. Yuborishni boshlash uchun tasdiqlang.",
+            parse_mode=None,
+            reply_markup=markup,
+        )
+        logging.info("Ommaviy xabar matni tayyorlandi; administrator tasdig‘i kutilmoqda.")
+    except Exception as e:
+        broadcast_pending_messages.pop(message.from_user.id, None)
+        logging.error("Ommaviy xabarni ko‘rib chiqish xabarini yuborishda xatolik: %s", e)
+        bot.send_message(message.chat.id, "❌ Ko‘rib chiqish xabarini yuborishda xatolik yuz berdi.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data in ("broadcast_confirm", "broadcast_cancel"))
+def admin_broadcast_callback(call):
+    global broadcast_active
+    if not is_admin_id(call.from_user.id):
+        bot.answer_callback_query(call.id, "Bu amal faqat administrator uchun.", show_alert=True)
+        return
+
+    if call.data == "broadcast_cancel":
+        broadcast_pending_messages.pop(call.from_user.id, None)
+        bot.answer_callback_query(call.id, "Ommaviy xabar bekor qilindi.")
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+            bot.send_message(call.message.chat.id, "❎ Ommaviy xabar yuborilmadi.")
+        except Exception as e:
+            logging.warning("Ommaviy xabarni bekor qilish xabarini yangilashda xatolik: %s", e)
+        logging.info("Administrator tasdiqlash bosqichida ommaviy xabarni bekor qildi.")
+        return
+
+    text = broadcast_pending_messages.pop(call.from_user.id, None)
+    if not text:
+        bot.answer_callback_query(call.id, "Tasdiqlash uchun xabar topilmadi.", show_alert=True)
+        return
+    with broadcast_lock:
+        if broadcast_active:
+            broadcast_pending_messages[call.from_user.id] = text
+            bot.answer_callback_query(call.id, "Boshqa ommaviy xabar yuborilmoqda.", show_alert=True)
+            return
+        broadcast_active = True
+
+    bot.answer_callback_query(call.id, "Yuborish boshlandi.")
+    try:
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except Exception as e:
+        logging.warning("Tasdiqlash tugmasini olib tashlashda xatolik: %s", e)
+
+    def _send_broadcast():
+        global broadcast_active
+        sent_count = 0
+        failed_count = 0
+        conn = None
+        try:
+            conn = _connect_db(timeout=30)
+            conn.execute("PRAGMA busy_timeout=30000")
+            rows = conn.execute("SELECT user_id FROM users ORDER BY user_id").fetchall()
+            user_ids = [int(row[0]) for row in rows if row and row[0] is not None]
+            total = len(user_ids)
+            bot.send_message(
+                ADMIN_ID,
+                f"📣 Ommaviy xabar yuborish boshlandi.\n👥 Qabul qiluvchilar: {total:,}\n⏱ Tezlik cheklovi: taxminan 10 ta xabar/soniya."
+            )
+            logging.info("Ommaviy xabar yuborish boshlandi | qabul_qiluvchilar=%s", total)
+            for user_id in user_ids:
+                try:
+                    bot.send_message(user_id, text, disable_web_page_preview=True)
+                    sent_count += 1
+                except Exception as send_error:
+                    failed_count += 1
+                    logging.warning("Ommaviy xabar yuborilmadi | user_id=%s | sabab=%s", user_id, str(send_error)[:300])
+                time.sleep(0.1)  # Telegram API yukini cheklash: taxminan 10 xabar/soniya.
+
+            summary = (
+                "📣 <b>Ommaviy xabar yuborish yakunlandi</b>\n\n"
+                f"👥 Jami qabul qiluvchilar: <b>{total:,}</b>\n"
+                f"✅ Muvaffaqiyatli yuborildi: <b>{sent_count:,}</b>\n"
+                f"❌ Yuborilmadi: <b>{failed_count:,}</b>\n\n"
+                "Xatolar tafsilotlari Railway loglarida qayd etildi."
+            )
+            bot.send_message(ADMIN_ID, summary, parse_mode="HTML")
+            logging.info("Ommaviy xabar yuborish yakunlandi | jami=%s | yuborildi=%s | xato=%s", total, sent_count, failed_count)
+        except Exception as e:
+            logging.exception("Ommaviy xabar yuborish jarayonida umumiy xatolik: %s", e)
+            try:
+                bot.send_message(ADMIN_ID, "❌ Ommaviy xabar jarayonida umumiy xatolik yuz berdi. Railway loglarini tekshiring.")
+            except Exception:
+                pass
+        finally:
+            if conn is not None:
+                conn.close()
+            with broadcast_lock:
+                broadcast_active = False
+
+    threading.Thread(target=_send_broadcast, daemon=True, name="admin-broadcast-worker").start()
+
 
 
 @bot.message_handler(commands=["bonus"])
@@ -1403,7 +2556,7 @@ def admin_bonus_command(message):
     add_user_to_db(target_id)
     now = int(time.time())
     duration = days * 24 * 3600
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
@@ -1459,7 +2612,7 @@ def admin_bonus_teacher_command(message):
     add_user_to_db(target_id)
     now = int(time.time())
     duration = days * 24 * 3600
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
@@ -1516,7 +2669,7 @@ def admin_bonus_revoke_command(message):
     except ValueError:
         bot.send_message(message.chat.id, "❌ USER_ID noto'g'ri.")
         return
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute("SELECT premium_source FROM users WHERE user_id=?", (target_id,)).fetchone()
@@ -1554,7 +2707,7 @@ def handle_receipt_photo(message):
     user_id = message.from_user.id
     user_lang = get_user_lang(user_id)
 
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = _connect_db(timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
     try:
@@ -1602,7 +2755,7 @@ def handle_p2p_admin_decision(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("p_"))
 def handle_admin_decision(call):
-    if ADMIN_ID and call.from_user.id != ADMIN_ID:
+    if not is_admin_id(call.from_user.id):
         bot.answer_callback_query(call.id, "Siz administrator emassiz!", show_alert=True)
         return
 
@@ -1612,9 +2765,8 @@ def handle_admin_decision(call):
     user_id = int(parts[3])
     user_lang = get_user_lang(user_id)
 
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute("SELECT status, tariff_name FROM payments WHERE tx_id = ?", (tx_id,))
     pay_row = cursor.fetchone()
 
@@ -1694,7 +2846,7 @@ def hybrid_db_check(
     record_id: Optional[str] = None,
 ):
     """SQLite MASTER va PostgreSQL MIRROR holatini o'qish uchun diagnostika."""
-    if ADMIN_ID is None or int(user_id) != int(ADMIN_ID):
+    if not is_admin_id(user_id):
         raise HTTPException(status_code=403, detail="Admin access required")
     try:
         import hybrid_sync
@@ -1710,49 +2862,54 @@ def hybrid_db_check(
         raise HTTPException(status_code=500, detail=f"Hybrid DB diagnostic failed: {e}")
 
 
-# --- TEMPORARY SQLITE BACKUP ENDPOINT (PostgreSQL migration preparation) ---
-# Set SQLITE_BACKUP_TOKEN in Railway Variables before using this endpoint.
-# The endpoint creates a consistent SQLite snapshot with sqlite3.backup(),
-# so the live /data database is never moved, renamed or modified.
-SQLITE_BACKUP_TOKEN = os.getenv("SQLITE_BACKUP_TOKEN", "").strip()
+# --- SQLITE BACKUP DOWNLOAD ENDPOINT ---
+# Faqat botdagi administrator buyrug'i bergan, 10 daqiqalik bir martalik token qabul qilinadi.
 BACKUP_DIR = "/tmp/quiz_pilot_backups"
+
 
 def _remove_temp_backup(path: str):
     try:
         if os.path.exists(path):
             os.remove(path)
     except Exception:
-        logging.exception("Temporary SQLite backup cleanup failed")
+        logging.exception("Vaqtinchalik SQLite backup faylini o'chirishda xatolik.")
+
 
 @app.get("/admin/sqlite-backup")
 def download_sqlite_backup(
-    token: str = Query(..., min_length=16),
+    token: str = Query(..., min_length=32, max_length=128),
     background_tasks: BackgroundTasks = None,
 ):
-    if not SQLITE_BACKUP_TOKEN:
-        raise HTTPException(status_code=503, detail="SQLite backup endpoint is not configured")
-    if not secrets.compare_digest(token, SQLITE_BACKUP_TOKEN):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not os.path.exists(DB_PATH):
-        raise HTTPException(status_code=404, detail="SQLite database file was not found")
+    if not _consume_sqlite_backup_token(token):
+        raise HTTPException(
+            status_code=403,
+            detail="Havola yaroqsiz, muddati tugagan yoki avval ishlatilgan. Botdan /db_backup buyrug'ini qayta yuboring.",
+        )
+    if not os.path.isfile(DB_PATH):
+        raise HTTPException(status_code=404, detail="SQLite baza fayli topilmadi.")
 
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"quiz_pilot_sqlite_backup_{stamp}.db")
+    stamp = datetime.now(timezone(timedelta(hours=5))).strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(BACKUP_DIR, f"quiz_ai_sqlite_backup_{stamp}.db")
 
     try:
-        # sqlite3 backup API creates a consistent snapshot while the app is live.
-        src_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        dst_conn = sqlite3.connect(backup_path, check_same_thread=False)
+        # SQLite backup API jonli bazaning izchil nusxasini yaratadi;
+        # asosiy DB fayli ko'chirilmaydi va o'zgartirilmaydi.
+        src_conn = _connect_db(timeout=30)
+        dst_conn = sqlite3.connect(backup_path, timeout=30, check_same_thread=False)
         try:
+            src_conn.execute("PRAGMA busy_timeout=30000")
             src_conn.backup(dst_conn)
+            check_result = dst_conn.execute("PRAGMA quick_check").fetchone()
+            if not check_result or check_result[0] != "ok":
+                raise sqlite3.DatabaseError("Zaxira nusxasi quick_check tekshiruvidan o'tmadi.")
         finally:
             dst_conn.close()
             src_conn.close()
     except Exception:
         _remove_temp_backup(backup_path)
-        logging.exception("SQLite backup creation failed")
-        raise HTTPException(status_code=500, detail="SQLite backup creation failed")
+        logging.exception("SQLite backup yaratishda xatolik yuz berdi.")
+        raise HTTPException(status_code=500, detail="Zaxira nusxasini yaratib bo'lmadi.")
 
     tasks = background_tasks or BackgroundTasks()
     tasks.add_task(_remove_temp_backup, backup_path)
@@ -1761,6 +2918,7 @@ def download_sqlite_backup(
         media_type="application/octet-stream",
         filename=os.path.basename(backup_path),
         background=tasks,
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1784,6 +2942,33 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+def health_check():
+    """Railway uchun minimal liveness/readiness tekshiruvi; ichki ma'lumotlarni oshkor qilmaydi."""
+    conn = None
+    try:
+        if not os.path.isfile(DB_PATH):
+            raise sqlite3.OperationalError("database file is not present")
+        conn = _connect_db(timeout=3)
+        conn.execute("SELECT 1").fetchone()
+        return JSONResponse(
+            status_code=200,
+            content={"status": "ok"},
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as exc:
+        # Tashqi health-check javobida DB yo'li yoki xato tafsilotlari berilmaydi.
+        logging.warning("Health check muvaffaqiyatsiz | sabab=%s", type(exc).__name__)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable"},
+            headers={"Cache-Control": "no-store"},
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     show_quiz_explanations = os.getenv("SHOW_QUIZ_EXPLANATIONS", "false").strip().lower() in ("1", "true", "yes", "on")
@@ -1793,6 +2978,34 @@ def read_root(request: Request):
     })
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+@app.get("/api/tariff-config")
+def get_tariff_config():
+    """Mini App uchun Railway'dagi joriy tariflar va ommaga ko'rsatiladigan karta raqami."""
+    return {
+        "tariffs": {
+            key: {
+                "price": item["price"],
+                "duration": item["duration"],
+                "duration_value": item["duration_value"],
+                "duration_unit": item["duration_unit"],
+                "names": item["names"],
+            }
+            for key, item in TARIFFS.items()
+        },
+        "card_number": P2P_CARD_NUMBER,
+        "free_limits": {
+            "quiz": None if FREE_QUIZ_LIMIT == -1 else FREE_QUIZ_LIMIT,
+            "public": None if FREE_PUBLIC_LIMIT == -1 else FREE_PUBLIC_LIMIT,
+            "flashcard": None if FREE_FLASHCARD_LIMIT == -1 else FREE_FLASHCARD_LIMIT,
+        },
+        "free_limits_display": {
+            "quiz": {lang: format_free_limit(FREE_QUIZ_LIMIT, lang) for lang in ("uz", "ru", "en")},
+            "public": {lang: format_free_limit(FREE_PUBLIC_LIMIT, lang) for lang in ("uz", "ru", "en")},
+            "flashcard": {lang: format_free_limit(FREE_FLASHCARD_LIMIT, lang) for lang in ("uz", "ru", "en")},
+        },
+    }
 
 
 @app.post("/api/payment-intent")
@@ -1815,7 +3028,7 @@ def api_payment_intent(req: PaymentIntentRequest):
 @app.get("/api/premium-status")
 def get_premium_status(user_id: int):
     add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
@@ -1832,9 +3045,12 @@ def get_premium_status(user_id: int):
             "free_used": 0,
             "public_free_used": 0,
             "flashcard_free_used": 0,
-            "public_remaining": FREE_PUBLIC_LIMIT,
-            "flashcard_remaining": FREE_FLASHCARD_LIMIT,
-            "quiz_remaining": FREE_QUIZ_LIMIT,
+            "public_remaining": free_limit_remaining(FREE_PUBLIC_LIMIT, 0),
+            "flashcard_remaining": free_limit_remaining(FREE_FLASHCARD_LIMIT, 0),
+            "quiz_remaining": free_limit_remaining(FREE_QUIZ_LIMIT, 0),
+            "public_unlimited": FREE_PUBLIC_LIMIT == -1,
+            "flashcard_unlimited": FREE_FLASHCARD_LIMIT == -1,
+            "quiz_unlimited": FREE_QUIZ_LIMIT == -1,
             "plan_key": "",
             "is_paid": False,
             "is_teacher": False,
@@ -1889,9 +3105,12 @@ def get_premium_status(user_id: int):
         "free_used": free_used,
         "public_free_used": public_free_used,
         "flashcard_free_used": flashcard_free_used,
-        "public_remaining": max(0, FREE_PUBLIC_LIMIT - public_free_used),
-        "flashcard_remaining": max(0, FREE_FLASHCARD_LIMIT - flashcard_free_used),
-        "quiz_remaining": max(0, FREE_QUIZ_LIMIT - free_used),
+        "public_remaining": free_limit_remaining(FREE_PUBLIC_LIMIT, public_free_used),
+        "flashcard_remaining": free_limit_remaining(FREE_FLASHCARD_LIMIT, flashcard_free_used),
+        "quiz_remaining": free_limit_remaining(FREE_QUIZ_LIMIT, free_used),
+        "public_unlimited": FREE_PUBLIC_LIMIT == -1,
+        "flashcard_unlimited": FREE_FLASHCARD_LIMIT == -1,
+        "quiz_unlimited": FREE_QUIZ_LIMIT == -1,
         "plan_key": plan_key,
         "is_paid": is_paid,
         "is_teacher": is_teacher,
@@ -1923,7 +3142,7 @@ async def create_quiz_web(
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    conn_check = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn_check = _connect_db()
     conn_check.row_factory = sqlite3.Row
     cursor_check = conn_check.cursor()
     cursor_check.execute(
@@ -1964,7 +3183,7 @@ async def create_quiz_web(
         # Muhim: bir foydalanuvchi bir vaqtning o'zida 2 ta request yuborsa,
         # ikkalasi ham limitdan o'tib ketmasligi uchun bepul joyni
         # Gemini chaqiruvidan OLDIN atomik tarzda band qilamiz.
-        if "PRO" not in current_status:
+        if "PRO" not in current_status and FREE_QUIZ_LIMIT != -1:
             cursor_check.execute(
                 "UPDATE users "
                 "SET free_used = COALESCE(free_used, 0) + 1 "
@@ -1997,7 +3216,7 @@ async def create_quiz_web(
         extension = Path(original_name).suffix.lower()
         if extension not in ALLOWED_UPLOAD_EXTENSIONS:
             if free_slot_reserved:
-                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn_restore = _connect_db()
                 cur_restore = conn_restore.cursor()
                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                 conn_restore.commit(); conn_restore.close()
@@ -2017,7 +3236,7 @@ async def create_quiz_web(
                     user_id, original_name, len(contents) / (1024 * 1024), MAX_UPLOAD_FILE_MB
                 )
                 if free_slot_reserved:
-                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    conn_restore = _connect_db()
                     cur_restore = conn_restore.cursor()
                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                     conn_restore.commit(); conn_restore.close()
@@ -2040,7 +3259,7 @@ async def create_quiz_web(
                             pdf_sahifalar_soni = page_count
                             if page_count > MAX_PDF_PAGES:
                                 if free_slot_reserved:
-                                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                    conn_restore = _connect_db()
                                     cur_restore = conn_restore.cursor()
                                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                     conn_restore.commit(); conn_restore.close()
@@ -2056,7 +3275,7 @@ async def create_quiz_web(
                                             user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
                                         )
                                         if free_slot_reserved:
-                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            conn_restore = _connect_db()
                                             cur_restore = conn_restore.cursor()
                                             cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                             conn_restore.commit(); conn_restore.close()
@@ -2069,7 +3288,7 @@ async def create_quiz_web(
                         pdf_sahifalar_soni = page_count
                         if page_count > MAX_PDF_PAGES:
                             if free_slot_reserved:
-                                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                conn_restore = _connect_db()
                                 cur_restore = conn_restore.cursor()
                                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                 conn_restore.commit(); conn_restore.close()
@@ -2084,7 +3303,7 @@ async def create_quiz_web(
                                         user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
                                     )
                                     if free_slot_reserved:
-                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        conn_restore = _connect_db()
                                         cur_restore = conn_restore.cursor()
                                         cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                         conn_restore.commit(); conn_restore.close()
@@ -2109,7 +3328,7 @@ async def create_quiz_web(
                                         user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
                                     )
                                     if free_slot_reserved:
-                                        conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                        conn_restore = _connect_db()
                                         cur_restore = conn_restore.cursor()
                                         cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                         conn_restore.commit(); conn_restore.close()
@@ -2129,7 +3348,7 @@ async def create_quiz_web(
                                             user_id, text_len, MAX_EXTRACTED_TEXT_CHARS
                                         )
                                         if free_slot_reserved:
-                                            conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                                            conn_restore = _connect_db()
                                             cur_restore = conn_restore.cursor()
                                             cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                                             conn_restore.commit(); conn_restore.close()
@@ -2151,7 +3370,7 @@ async def create_quiz_web(
             logging.error("Faylni o'qish yoki matnni ajratishda xatolik yuz berdi: %s", e)
             if free_slot_reserved:
                 try:
-                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    conn_restore = _connect_db()
                     cur_restore = conn_restore.cursor()
                     cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                     conn_restore.commit(); conn_restore.close()
@@ -2166,7 +3385,7 @@ async def create_quiz_web(
             )
             if free_slot_reserved:
                 try:
-                    conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                    conn_restore = _connect_db()
                     cur_restore = conn_restore.cursor()
                     cur_restore.execute(
                         "UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?",
@@ -2188,7 +3407,7 @@ async def create_quiz_web(
     if not raw_text.strip():
         if free_slot_reserved:
             try:
-                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn_restore = _connect_db()
                 cur_restore = conn_restore.cursor()
                 cur_restore.execute("UPDATE users SET free_used = CASE WHEN COALESCE(free_used, 0) > 0 THEN free_used - 1 ELSE 0 END WHERE user_id = ?", (user_id,))
                 conn_restore.commit(); conn_restore.close()
@@ -2205,7 +3424,7 @@ async def create_quiz_web(
     if not quiz_json_raw:
         if free_slot_reserved:
             try:
-                conn_restore = sqlite3.connect(DB_PATH, check_same_thread=False)
+                conn_restore = _connect_db()
                 cur_restore = conn_restore.cursor()
                 cur_restore.execute(
                     "UPDATE users "
@@ -2244,9 +3463,8 @@ async def create_quiz_web(
             quiz_title.strip() if (quiz_title and quiz_title.strip()) else auto_title
         )
 
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
             """INSERT INTO quizzes (id, user_id, title, total, answered, quiz_json, created_at, last_score, last_percent, is_public)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
@@ -2288,10 +3506,9 @@ def split_quiz(quiz_id: str, user_id: int, question_count: int):
     if question_count not in (20, 30, 40):
         raise HTTPException(status_code=400, detail="Noto'g'ri test hajmi")
 
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
         "SELECT id, user_id, title, quiz_json, total FROM quizzes WHERE id = ? AND user_id = ?",
         (quiz_id, user_id),
@@ -2391,7 +3608,73 @@ def randomize_quiz_answer_positions(items):
 
     return items
 
-def generate_quiz_from_gemini(extracted_text):
+# --- AI NAVBATI YUKLAMASI BO'YICHA AVTOMATIK ADMIN OGOHLANTIRISHI ---
+# Navbat sig'imining 80% yoki undan ko'pi band bo'lsa, adminga xabar yuboradi.
+# Takroriy xabarlar 5 daqiqalik cooldown bilan cheklanadi.
+_AI_QUEUE_ALERT_THRESHOLD = max(1, int(AI_MAX_QUEUE * 0.80))
+_ai_queue_alert_lock = threading.Lock()
+_ai_queue_last_alert_at = 0.0
+
+
+def _safe_ai_error_text(error):
+    """AI provider xatolaridan maxfiy kalitlarni olib tashlab, xavfsiz matn qaytaradi."""
+    try:
+        message = str(error or "Noma'lum AI xatosi")
+    except Exception:
+        message = "AI provider xatosi (tafsilotni o'qib bo'lmadi)"
+
+    # API kalitlari log yoki /ai_monitor xabariga hech qachon chiqmasin.
+    for secret in GOOGLE_API_KEYS:
+        if secret:
+            message = message.replace(secret, "[MAXFIY_API_KALIT]")
+
+    # Provider xatolarida URL query yoki konfiguratsiya ko'rinishida kelishi mumkin.
+    message = re.sub(
+        r"(?i)([?&]key=|api[_ -]?key\s*[:=]\s*)([^&\s,;]+)",
+        r"\1[MAXFIY]",
+        message,
+    )
+    message = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [MAXFIY]", message)
+    return message[:180]
+
+
+def _maybe_alert_ai_queue_load():
+    """Send a rate-limited admin alert when AI queue capacity is nearly exhausted."""
+    global _ai_queue_last_alert_at
+
+    if not ADMIN_ID:
+        return
+
+    try:
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+        if queue_slots_used < _AI_QUEUE_ALERT_THRESHOLD:
+            return
+
+        now = time.monotonic()
+        with _ai_queue_alert_lock:
+            if now - _ai_queue_last_alert_at < 300:
+                return
+            _ai_queue_last_alert_at = now
+
+        percent = min(100.0, queue_slots_used * 100.0 / max(1, AI_MAX_QUEUE))
+        alert = (
+            "⚠️ <b>Quiz AI — AI navbati band</b>\\n"
+            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\\n"
+            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\\n"
+            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /monitor buyrug'idan foydalaning."
+        )
+        bot.send_message(ADMIN_ID, alert, parse_mode="HTML", disable_web_page_preview=True)
+        logging.warning(
+            "AI navbati yuqori yuklamada | band=%s | limit=%s | foiz=%.1f",
+            queue_slots_used, AI_MAX_QUEUE, percent
+        )
+    except Exception:
+        # Monitoring xatosi test yaratish jarayoniga xalaqit bermasligi kerak.
+        logging.exception("AI navbati bo'yicha admin ogohlantirishini yuborishda xatolik")
+
+
+def _generate_quiz_from_gemini_impl(extracted_text):
     """
     Professional AI Queue + Model Fallback + API Key Rotation + Retry +
     Timeout + Concurrency Protection.
@@ -2448,12 +3731,29 @@ MUHIM QOIDALAR:
 3. {explanation_rule}
 4. {option_rule}"""
 
+    # Umumiy deadline navbatni kutishdan boshlanadi: queue + semaphore +
+    # Gemini chaqiruvi + retry kutishlari bitta vaqt budjetiga kiradi.
+    request_started = time.monotonic()
+    deadline = request_started + AI_TOTAL_TIMEOUT
+
     # Navbat va parallel so'rovlar uchun kutish vaqtlarini alohida o'lchaymiz.
-    queue_wait_started = time.monotonic()
-    if not ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT):
-        logging.error("AI testlar navbatida kutish muddati tugadi | limit=%s soniya", AI_TOTAL_TIMEOUT)
+    queue_wait_started = request_started
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] += 1
+    queue_remaining = max(0.0, deadline - time.monotonic())
+    queue_acquired = ai_queue_slots.acquire(timeout=queue_remaining)
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
+        if queue_acquired:
+            _ai_monitor_state["accepted_requests"] += 1
+        else:
+            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": "AI navbatida kutish muddati tugadi"})
+            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
+    if not queue_acquired:
+        logging.error("AI testlar navbatida kutish muddati tugadi | umumiy_limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
+    _maybe_alert_ai_queue_load()
     if queue_wait_seconds >= 1.0:
         logging.info("AI NAVBATI | So'rov navbat joyini kutdi | kutish=%.2f soniya", queue_wait_seconds)
 
@@ -2466,8 +3766,11 @@ MUHIM QOIDALAR:
             if model_name and model_name not in models:
                 models.append(model_name)
 
-        deadline = time.monotonic() + AI_TOTAL_TIMEOUT
         last_error = None
+        # Katta matnni har bir kalit/model urinishida qayta slice qilmaslik uchun
+        # so'rov mazmunini navbatdan chiqqach bir marta tayyorlaymiz.
+        request_contents = extracted_text[:MAX_TEXT_INPUT_CHARS]
+        request_char_count = len(request_contents)
 
         # Har bir retry roundida avval PRIMARY modelning barcha keylari,
         # keyin FALLBACK modelning barcha keylari sinab ko'riladi.
@@ -2497,11 +3800,27 @@ MUHIM QOIDALAR:
                         logging.info("GEMINI PARALLELLIGI | Bo'sh so'rov o'rnini kutish yakunlandi | kutish=%.2f soniya", semaphore_wait_seconds)
 
                     started = time.monotonic()
+                    with _ai_monitor_lock:
+                        _ai_monitor_state["key_attempts"][key_idx] = _ai_monitor_state["key_attempts"].get(key_idx, 0) + 1
                     try:
-                        client = genai.Client(api_key=api_key)
+                        # Har bir HTTP chaqiruv timeouti qolgan umumiy deadline'dan
+                        # ham oshmasin; SDK timeout millisekundlarda qabul qilinadi.
+                        remaining_for_api = deadline - time.monotonic()
+                        if remaining_for_api <= 0:
+                            last_error = "AI umumiy vaqt chegarasi Gemini chaqiruvidan oldin tugadi"
+                            continue
+                        request_timeout_ms = max(
+                            1, int(min(AI_REQUEST_TIMEOUT, remaining_for_api) * 1000)
+                        )
+                        client = genai.Client(
+                            api_key=api_key,
+                            http_options=genai_types.HttpOptions(
+                                timeout=request_timeout_ms
+                            ),
+                        )
                         response = client.models.generate_content(
                             model=model_name,
-                            contents=extracted_text[:MAX_TEXT_INPUT_CHARS],
+                            contents=request_contents,
                             config=genai_types.GenerateContentConfig(
                                 system_instruction=system_instruction,
                                 response_mime_type="application/json",
@@ -2558,7 +3877,7 @@ MUHIM QOIDALAR:
                                 "parallel_so'rov_chegarasida_kutish=%.2f soniya | JSON_to'g'ri=%s | "
                                 "izoh_rejimi=%s | umumiy_vaqt=%.2f soniya",
                                 model_name, key_idx, retry_round + 1,
-                                len(extracted_text[:MAX_TEXT_INPUT_CHARS]), len(response.text),
+                                request_char_count, len(response.text),
                                 question_count, prompt_tokens, output_tokens,
                                 input_output_tokens, total_tokens,
                                 elapsed, queue_wait_seconds, semaphore_wait_seconds,
@@ -2566,21 +3885,33 @@ MUHIM QOIDALAR:
                                 "YOQILGAN" if GEMINI_INCLUDE_EXPLANATIONS else "O'CHIRILGAN",
                                 time.monotonic() - queue_wait_started
                             )
+                            with _ai_monitor_lock:
+                                _ai_monitor_state["key_success"][key_idx] = _ai_monitor_state["key_success"].get(key_idx, 0) + 1
                             return response.text
 
                         last_error = f"{model_name}: Gemini bo'sh javob qaytardi"
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_idx] = _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
+                            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": f"{model_name}, Kalit #{key_idx + 1}: Gemini bo'sh javob qaytardi"})
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
 
                     except Exception as e:
-                        last_error = str(e)
+                        safe_error = _safe_ai_error_text(e)
+                        last_error = f"{type(e).__name__}: {safe_error}"
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_idx] = _ai_monitor_state["key_failures"].get(key_idx, 0) + 1
+                            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": f"{model_name}, Kalit #{key_idx + 1}: {type(e).__name__}: {safe_error}"})
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
                         logging.warning(
-                            "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_tafsiloti=%s",
-                            model_name, key_idx, retry_round + 1, e
+                            "Gemini so'rovi bajarilmadi | model=%s | API_kalit_indeksi=%s | urinish=%s | xato_turi=%s | xato_tafsiloti=%s",
+                            model_name, key_idx, retry_round + 1, type(e).__name__, safe_error
                         )
                     finally:
                         gemini_semaphore.release()
 
-                    if time.monotonic() < deadline:
-                        time.sleep(min(5.0, 0.75 * (2 ** retry_round)))
+                    remaining_after_attempt = deadline - time.monotonic()
+                    if remaining_after_attempt > 0:
+                        time.sleep(min(5.0, 0.75 * (2 ** retry_round), remaining_after_attempt))
 
         logging.error(
             "Barcha AI model, kalit va qayta urinishlar muvaffaqiyatsiz yakunlandi. Oxirgi xato tafsiloti: %s",
@@ -2589,6 +3920,185 @@ MUHIM QOIDALAR:
         return None
     finally:
         ai_queue_slots.release()
+
+
+# --- AI GENERATION OUTCOME STATISTICS (in-memory, since process start) ---
+_ai_stats_lock = threading.Lock()
+_ai_generation_stats = {
+    "success": 0,
+    "failed": 0,
+    "total_seconds": 0.0,
+    "last_success_at": 0.0,
+    "last_failure_at": 0.0,
+}
+
+
+def generate_quiz_from_gemini(extracted_text):
+    """Track each top-level generation attempt without changing generation logic."""
+    started_at = time.monotonic()
+    succeeded = False
+    try:
+        result = _generate_quiz_from_gemini_impl(extracted_text)
+        succeeded = bool(result)
+        return result
+    except Exception:
+        # Preserve the existing exception behavior while counting the failed attempt.
+        raise
+    finally:
+        elapsed = max(0.0, time.monotonic() - started_at)
+        with _ai_stats_lock:
+            if succeeded:
+                _ai_generation_stats["success"] += 1
+                _ai_generation_stats["last_success_at"] = time.time()
+            else:
+                _ai_generation_stats["failed"] += 1
+                _ai_generation_stats["last_failure_at"] = time.time()
+            _ai_generation_stats["total_seconds"] += elapsed
+
+
+@bot.message_handler(commands=["ai_monitor"])
+def admin_ai_monitor_command(message):
+    """Administrator uchun AI navbati, xatolar va API kalitlar statistikasini yuboradi."""
+    if not _admin_only(message):
+        return
+
+    try:
+        ai_slots_free = max(0, int(getattr(gemini_semaphore, "_value", 0)))
+        queue_slots_free = max(0, int(getattr(ai_queue_slots, "_value", 0)))
+        ai_slots_busy = max(0, AI_MAX_CONCURRENT - ai_slots_free)
+        queue_slots_used = max(0, AI_MAX_QUEUE - queue_slots_free)
+
+        with _ai_monitor_lock:
+            waiting = _ai_monitor_state["waiting_for_queue"]
+            accepted = _ai_monitor_state["accepted_requests"]
+            key_attempts = dict(_ai_monitor_state["key_attempts"])
+            key_success = dict(_ai_monitor_state["key_success"])
+            key_failures = dict(_ai_monitor_state["key_failures"])
+            recent_errors = list(_ai_monitor_state["last_errors"])
+
+        with _ai_stats_lock:
+            successful_generations = _ai_generation_stats["success"]
+            failed_generations = _ai_generation_stats["failed"]
+
+        report = (
+            "🤖 <b>Quiz AI — AI navbati va API nazorati</b>\n"
+            f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+            "⚙️ <b>Joriy yuklama</b>\n"
+            f"🔄 Ishlayotgan AI so‘rovlari: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
+            f"⏳ Navbat slotlari band: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
+            f"🕰 Navbat joyini kutayotgan so‘rovlar: <b>{waiting}</b>\n"
+            f"🟢 Bo‘sh navbat slotlari: <b>{queue_slots_free}</b>\n\n"
+            "📊 <b>Test yaratish natijalari (server ishga tushganidan beri)</b>\n"
+            f"✅ Muvaffaqiyatli: <b>{successful_generations}</b>\n"
+            f"❌ Muvaffaqiyatsiz: <b>{failed_generations}</b>\n"
+            f"📥 Navbatga qabul qilingan jami so‘rovlar: <b>{accepted}</b>\n\n"
+            "🔑 <b>API kalitlari statistikasi</b>\n"
+            f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
+        )
+
+        # Telegram bitta xabar uchun taxminan 4096 belgi cheklaydi.
+        # Kalitlar ro'yxatini kichik bo'laklarga ajratib yuboramiz.
+        messages = [report]
+        if GOOGLE_API_KEYS:
+            key_lines = []
+            for key_idx in range(len(GOOGLE_API_KEYS)):
+                attempts = key_attempts.get(key_idx, 0)
+                successes = key_success.get(key_idx, 0)
+                failures = key_failures.get(key_idx, 0)
+                key_lines.append(
+                    f"• Kalit #{key_idx + 1}: urinish <b>{attempts}</b>, "
+                    f"muvaffaqiyat <b>{successes}</b>, xato <b>{failures}</b>"
+                )
+            chunk = "🔑 <b>API kalitlari (davomi bo‘lishi mumkin)</b>\n"
+            for line in key_lines:
+                addition = line + "\n"
+                if len(chunk) + len(addition) > 3000:
+                    messages.append(chunk.rstrip())
+                    chunk = "🔑 <b>API kalitlari (davomi)</b>\n"
+                chunk += addition
+            if chunk.strip():
+                messages.append(chunk.rstrip())
+        else:
+            messages.append("⚠️ AI test yaratish API kalitlari topilmadi.")
+
+        if recent_errors:
+            error_chunk = "⚠️ <b>Oxirgi AI xatolari</b>\n"
+            for item in recent_errors[-3:]:
+                error_time = datetime.fromtimestamp(
+                    item["time"], timezone(timedelta(hours=5))
+                ).strftime("%d-%m %H:%M:%S")
+                safe_message = (str(item["message"]).replace("&", "&amp;")
+                                .replace("<", "&lt;").replace(">", "&gt;"))
+                line = f"• <code>{error_time}</code> — {safe_message[:180]}\n"
+                if len(error_chunk) + len(line) > 3000:
+                    messages.append(error_chunk.rstrip())
+                    error_chunk = "⚠️ <b>Oxirgi AI xatolari (davomi)</b>\n"
+                error_chunk += line
+            messages.append(error_chunk.rstrip())
+        else:
+            messages.append("✅ Hozircha qayd etilgan AI API xatolari yo‘q.")
+
+        messages.append(
+            "ℹ️ Hisoblagichlar xotirada saqlanadi va server qayta ishga tushganda "
+            "noldan boshlanadi. API kalitlarining maxfiy qiymatlari ko‘rsatilmaydi."
+        )
+
+        for part in messages:
+            if part:
+                bot.send_message(message.chat.id, part, parse_mode="HTML")
+        logging.info("AI navbati va API nazorati hisoboti administratorga yuborildi.")
+    except Exception as e:
+        logging.exception("AI navbati va API nazorati hisobotini yuborishda xatolik: %s", e)
+        try:
+            bot.send_message(
+                message.chat.id,
+                "❌ AI nazorati hisobotini yuborishda xatolik yuz berdi. Batafsil ma’lumot Railway loglarida."
+            )
+        except Exception:
+            pass
+
+
+
+@bot.message_handler(commands=["ai_stats"])
+def admin_ai_generation_stats_command(message):
+    """Show generation success/failure counts since this process started."""
+    if not _admin_only(message):
+        return
+
+    with _ai_stats_lock:
+        success = _ai_generation_stats["success"]
+        failed = _ai_generation_stats["failed"]
+        total_seconds = _ai_generation_stats["total_seconds"]
+        last_success_at = _ai_generation_stats["last_success_at"]
+        last_failure_at = _ai_generation_stats["last_failure_at"]
+
+    total = success + failed
+    avg_seconds = total_seconds / total if total else 0.0
+    success_rate = (success * 100.0 / total) if total else 0.0
+
+    def _format_stat_time(timestamp):
+        if not timestamp:
+            return "Hali yo‘q"
+        return datetime.fromtimestamp(
+            timestamp, timezone(timedelta(hours=5))
+        ).strftime("%d-%m-%Y %H:%M:%S")
+
+    report = (
+        "📊 <b>Quiz AI — AI test yaratish statistikasi</b>\n"
+        f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n\n"
+        "✅ <b>Muvaffaqiyatli:</b> " + f"<b>{success}</b>\n"
+        "❌ <b>Muvaffaqiyatsiz:</b> " + f"<b>{failed}</b>\n"
+        f"📦 Jami urinishlar: <b>{total}</b>\n"
+        f"📈 Muvaffaqiyat foizi: <b>{success_rate:.1f}%</b>\n"
+        f"⏱ O‘rtacha vaqt: <b>{avg_seconds:.1f} soniya</b>\n\n"
+        f"🟢 Oxirgi muvaffaqiyat: <code>{_format_stat_time(last_success_at)}</code>\n"
+        f"🔴 Oxirgi xato: <code>{_format_stat_time(last_failure_at)}</code>\n\n"
+        "ℹ️ Hisob server qayta ishga tushguncha saqlanadi; bu tarixiy DB hisoboti emas."
+    )
+    try:
+        bot.send_message(message.chat.id, report, parse_mode="HTML")
+    except Exception as e:
+        logging.exception("AI statistikasi yuborilmadi: %s", e)
 
 
 @app.post("/api/contact-admin")
@@ -2637,10 +4147,9 @@ def user_heartbeat(user_id: int):
 def get_user_quizzes(user_id: int):
     add_user_to_db(user_id)
     total_users = get_users_count()
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
         "SELECT id, title, total, answered, created_at, last_score, last_percent,"
         " is_public FROM quizzes WHERE user_id = ? ORDER BY created_at DESC",
@@ -2673,7 +4182,7 @@ def get_user_quizzes(user_id: int):
 @app.get("/api/public-quizzes")
 def get_public_quizzes(user_id: int):
     add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
@@ -2693,7 +4202,7 @@ def get_public_quizzes(user_id: int):
         public_free_used = (u["public_free_used"] or 0) if u else 0
 
     is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
-    public_remaining = max(0, FREE_PUBLIC_LIMIT - public_free_used)
+    public_remaining = free_limit_remaining(FREE_PUBLIC_LIMIT, public_free_used)
 
     cursor.execute("SELECT id, title, total, created_at FROM quizzes WHERE is_public = 1 ORDER BY created_at DESC LIMIT 50")
     rows = cursor.fetchall()
@@ -2705,7 +4214,7 @@ def get_public_quizzes(user_id: int):
             "title": r["title"],
             "total": r["total"],
             "created_at": r["created_at"],
-            "locked": (not is_paid and public_remaining <= 0),
+            "locked": (not is_paid and FREE_PUBLIC_LIMIT != -1 and public_remaining <= 0),
         }
         for r in rows
     ]
@@ -2715,28 +4224,43 @@ def get_public_quizzes(user_id: int):
         "is_paid": is_paid,
         "public_free_used": public_free_used,
         "public_remaining": public_remaining,
-        "public_limit": FREE_PUBLIC_LIMIT,
+        "public_limit": None if FREE_PUBLIC_LIMIT == -1 else FREE_PUBLIC_LIMIT,
+        "public_unlimited": FREE_PUBLIC_LIMIT == -1,
     }
 
 
 @app.get("/api/public-quiz-detail")
 def get_public_quiz_detail(quiz_id: str, user_id: int):
+    """Ommaviy testni faqat mavjud va ommaviy bo'lsa ochadi; limitni shundan keyin sarflaydi."""
     add_user_to_db(user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+
+    # Avval test mavjudligi va ommaviyligi tekshiriladi. Noto'g'ri ID bepul
+    # foydalanish hisoblagichini kamaytirmasligi kerak.
+    cursor.execute(
+        "SELECT title, quiz_json FROM quizzes WHERE id = ? AND is_public = 1",
+        (quiz_id,),
+    )
+    quiz_row = cursor.fetchone()
+    if not quiz_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Ommaviy test topilmadi")
 
     cursor.execute(
         "SELECT status, premium_until, public_free_used, created_at FROM users WHERE user_id = ?",
         (user_id,),
     )
-    u = cursor.fetchone()
+    user_row = cursor.fetchone()
 
     now = int(time.time())
-    is_paid = bool(u and is_active_paid_status(u["status"] or "", u["premium_until"] or 0))
+    is_paid = bool(
+        user_row and is_active_paid_status(user_row["status"] or "", user_row["premium_until"] or 0)
+    )
 
-    # 30 kunlik bepul davr tugagan bo'lsa, uchala bepul hisoblagichni reset qilamiz.
-    if u and now - (u["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
+    # 30 kunlik bepul davr tugagan bo'lsa, hisoblagichlarni qayta boshlaymiz.
+    if user_row and now - (user_row["created_at"] or now) >= 30 * 24 * 3600 and not is_paid:
         cursor.execute(
             "UPDATE users SET free_used = 0, public_free_used = 0, flashcard_free_used = 0, created_at = ? WHERE user_id = ?",
             (now, user_id),
@@ -2744,10 +4268,10 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
         conn.commit()
         public_free_used = 0
     else:
-        public_free_used = (u["public_free_used"] or 0) if u else 0
+        public_free_used = (user_row["public_free_used"] or 0) if user_row else 0
 
-    # Premium / Teacher: cheksiz.
-    if not is_paid:
+    # Premium / Teacher foydalanuvchilari cheksiz foydalanadi.
+    if not is_paid and FREE_PUBLIC_LIMIT != -1:
         cursor.execute(
             "UPDATE users SET public_free_used = COALESCE(public_free_used, 0) + 1 "
             "WHERE user_id = ? AND COALESCE(public_free_used, 0) < ?",
@@ -2767,38 +4291,42 @@ def get_public_quiz_detail(quiz_id: str, user_id: int):
                 "message": messages.get(lang, messages["uz"]),
             }
         conn.commit()
-        if not is_paid:
-            notify_free_limit_reached(user_id, "public")
 
-    cursor.execute("SELECT title, quiz_json, is_public FROM quizzes WHERE id = ?", (quiz_id,))
-    row = cursor.fetchone()
     conn.close()
+    if not is_paid:
+        notify_free_limit_reached(user_id, "public")
 
-    if not row or row["is_public"] != 1:
-        raise HTTPException(status_code=404, detail=teacher_text(owner_id, "quiz_not_found"))
-
-    return {"status": "ok", "title": row["title"] or "Test", "quiz_json": json.loads(row["quiz_json"])}
+    return {
+        "status": "ok",
+        "title": quiz_row["title"] or "Test",
+        "quiz_json": json.loads(quiz_row["quiz_json"]),
+    }
 
 
 @app.post("/api/toggle-public")
 def toggle_public(quiz_id: str, user_id: int, is_public: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?",
-        (is_public, quiz_id, user_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+    """Faqat test egasi uning ommaviy holatini 0/1 qiymatiga o'zgartira oladi."""
+    if is_public not in (0, 1):
+        raise HTTPException(status_code=400, detail="Ommaviylik qiymati 0 yoki 1 bo'lishi kerak.")
+    conn = _connect_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE quizzes SET is_public = ? WHERE id = ? AND user_id = ?",
+            (is_public, quiz_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=404, detail="Test topilmadi.")
+        conn.commit()
+        return {"status": "ok"}
+    finally:
+        conn.close()
 
 
 @app.post("/api/set-language")
 def set_language(user_id: int, lang: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
         "UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id)
     )
@@ -2854,9 +4382,9 @@ def _make_variant(items, variant_code: str):
 
 
 class TeacherVariantsRequest(BaseModel):
-    user_id: int
-    quiz_id: str
-    variants: List[str] = Field(default_factory=lambda: ["A", "B", "C", "D"])
+    user_id: int = Field(gt=0)
+    quiz_id: str = Field(min_length=1, max_length=128)
+    variants: List[str] = Field(default_factory=lambda: ["A", "B", "C", "D"], min_length=1, max_length=4)
 
 
 @app.post("/api/teacher/generate-variants")
@@ -2925,17 +4453,17 @@ def _get_teacher_variant(quiz_id: str, owner_id: int, variant_code: str):
 
 
 class TeacherGroupCreateRequest(BaseModel):
-    user_id: int
-    name: str
-    description: str = ""
+    user_id: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
 
 
 class TeacherGroupJoinRequest(BaseModel):
-    group_id: str = ""
-    join_code: str = ""
-    user_id: int
-    first_name: str = ""
-    username: str = ""
+    group_id: str = Field(default="", max_length=128)
+    join_code: str = Field(default="", max_length=12)
+    user_id: int = Field(gt=0)
+    first_name: str = Field(default="", max_length=100)
+    username: str = Field(default="", max_length=64)
 
 
 def _new_group_code(conn, length=6):
@@ -3008,12 +4536,11 @@ def teacher_join_group(req: TeacherGroupJoinRequest):
     def _write(conn):
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        if code:
-            cur.execute("SELECT id,name,active FROM teacher_groups WHERE join_code=?", (code,))
-        elif group_id:
-            cur.execute("SELECT id,name,active FROM teacher_groups WHERE id=?", (group_id,))
-        else:
+        # Guruhga qo'shilish faqat maxsus join_code orqali amalga oshadi.
+        # Ichki group_id ni bilishning o'zi guruhga kirish huquqini bermasligi kerak.
+        if not code:
             raise HTTPException(status_code=400, detail=teacher_text(req.user_id, "group_code_required"))
+        cur.execute("SELECT id,name,active FROM teacher_groups WHERE join_code=?", (code,))
         group = cur.fetchone()
         if not group or not group["active"]:
             raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "group_not_found"))
@@ -3068,13 +4595,13 @@ def teacher_delete_group(group_id: str, user_id: int):
     return {"status":"ok"}
 
 class TeacherAssignmentCreateRequest(BaseModel):
-    user_id: int
-    group_id: str
-    quiz_id: str
-    variant_code: str = ""
-    title: str = ""
-    due_at: int = 0
-    duration_minutes: int = 30
+    user_id: int = Field(gt=0)
+    group_id: str = Field(min_length=1, max_length=128)
+    quiz_id: str = Field(min_length=1, max_length=128)
+    variant_code: str = Field(default="", max_length=1)
+    title: str = Field(default="", max_length=150)
+    due_at: int = Field(default=0, ge=0)
+    duration_minutes: int = Field(default=30, ge=5, le=180)
 
 
 @app.post("/api/teacher/assignments")
@@ -3128,6 +4655,22 @@ def teacher_delete_assignment(assignment_id: str, user_id: int):
     teacher_db_write(_write)
     return {"status":"ok"}
 
+def _teacher_download_response(path: str, media_type: str):
+    """Teacher eksport faylini tayyor baytlar sifatida xavfsiz yuboradi."""
+    filename = os.path.basename(path)
+    with open(path, "rb") as file_obj:
+        content = file_obj.read()
+    try:
+        os.remove(path)
+    except OSError:
+        logging.warning("Teacher eksport vaqtinchalik faylini o'chirib bo'lmadi: %s", filename)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/teacher/export-assignment")
 def teacher_export_assignment(assignment_id: str, user_id: int, format: str):
     require_teacher(user_id)
@@ -3145,6 +4688,8 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
     require_teacher(user_id)
     row, items = _load_quiz_items(quiz_id, user_id)
     fmt = format.lower().strip()
+    if fmt not in {"pdf", "docx"}:
+        raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
     codes = list(TEACHER_VARIANT_CODES) if int(all_variants) else [variant.upper()]
     for c in codes:
         if c not in TEACHER_VARIANT_CODES: raise HTTPException(status_code=400, detail=teacher_text(user_id, "variant_required"))
@@ -3156,19 +4701,8 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
     def answer_key(payload):
         return [chr(65 + int(q.get("correct_index", 0))) for q in payload.get("quizzes", [])]
 
-    if fmt == "xlsx":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.xlsx")
-        wb=Workbook(); ws=wb.active; ws.title="Testlar"
-        ws.append(["Variant","№","Savol","A","B","C","D","To'g'ri javob"])
-        for code,payload in variant_payloads:
-            for i,q in enumerate(payload.get("quizzes",[]),1):
-                opts=(q.get("options") or [])+['','','','']
-                ws.append([code,i,q.get("question",""),opts[0],opts[1],opts[2],opts[3],chr(65+int(q.get("correct_index",0)))])
-        ws.freeze_panes="A2"; wb.save(path)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
     if fmt == "docx":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.docx")
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}_{uuid.uuid4().hex}.docx")
         doc=Document(); doc.add_heading(row["title"], level=1); doc.add_paragraph("Test kaliti bilan | Variantlar: " + ", ".join(codes))
         for code,payload in variant_payloads:
             doc.add_heading(f"Variant {code}", level=2)
@@ -3178,10 +4712,10 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 for j in range(4): doc.add_paragraph(f"{chr(65+j)}) {opts[j]}", style=None)
             doc.add_paragraph("Javoblar: " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))))
         doc.save(path)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        return _teacher_download_response(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
     if fmt == "pdf":
-        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}.pdf")
+        path=os.path.join(DOWNLOADS_DIR, f"{safe}_teacher_{'_'.join(codes)}_{uuid.uuid4().hex}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         doc=SimpleDocTemplate(path,pagesize=A4,rightMargin=30,leftMargin=30,topMargin=30,bottomMargin=30)
         styles=getSampleStyleSheet(); title_style=ParagraphStyle("t_title",parent=styles["Title"],fontName=bold,fontSize=16,alignment=TA_CENTER); q_style=ParagraphStyle("t_q",parent=styles["BodyText"],fontName=font,fontSize=9,leading=12)
@@ -3214,7 +4748,7 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 story.append(Spacer(1,4))
             story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
         doc.build(story)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+        return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
 
@@ -3403,7 +4937,7 @@ def teacher_db_connect():
     rejimi init_db() vaqtida o'rnatiladi, bu yerda esa faqat busy_timeout ishlatiladi.
     """
     global _teacher_schema_checked
-    conn = sqlite3.connect(DB_PATH, timeout=20, check_same_thread=False)
+    conn = _connect_db(timeout=20)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=20000")
     try:
@@ -3616,12 +5150,12 @@ def teacher_quizzes(user_id: int):
 
 
 class TeacherSessionCreateRequest(BaseModel):
-    user_id: int
-    quiz_id: str
-    duration_minutes: int = 30
-    variant_code: str = ""
-    group_id: str = ""
-    assignment_id: str = ""
+    user_id: int = Field(gt=0)
+    quiz_id: str = Field(min_length=1, max_length=128)
+    duration_minutes: int = Field(default=30, ge=5, le=180)
+    variant_code: str = Field(default="", max_length=1)
+    group_id: str = Field(default="", max_length=128)
+    assignment_id: str = Field(default="", max_length=128)
 
 
 @app.post("/api/teacher/create-session")
@@ -3965,33 +5499,47 @@ def teacher_session_quiz(session_id: str, user_id: int):
 
 
 class TeacherSubmitRequest(BaseModel):
-    session_id: str
-    user_id: int
-    first_name: str = ""
-    username: str = ""
-    score: int
-    total: int
-    percent: int
+    session_id: str = Field(min_length=1, max_length=128)
+    user_id: int = Field(gt=0)
+    first_name: str = Field(default="", max_length=100)
+    username: str = Field(default="", max_length=64)
+    score: int = Field(ge=0, le=100000)
+    total: int = Field(ge=1, le=100000)
+    percent: int = Field(ge=0, le=100)
 
 
 @app.post("/api/teacher-submit")
 def teacher_submit(req: TeacherSubmitRequest):
     conn=teacher_db_connect(); conn.row_factory=sqlite3.Row; cur=conn.cursor()
-    cur.execute("SELECT expires_at, active, COALESCE(deleted,0) AS deleted FROM teacher_sessions WHERE id=?", (req.session_id,)); s=cur.fetchone()
+    cur.execute("SELECT s.id,s.quiz_id,s.group_id,s.owner_id,s.expires_at,s.active,COALESCE(s.deleted,0) AS deleted,q.total AS quiz_total FROM teacher_sessions s JOIN quizzes q ON q.id=s.quiz_id WHERE s.id=?", (req.session_id,)); s=cur.fetchone()
     if not s: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
     now=int(time.time())
     if s["deleted"]: conn.close(); raise HTTPException(status_code=404, detail=teacher_text(req.user_id, "session_not_found"))
+    # Natijani faqat sessiya egasi yoki shu guruhga haqiqiy a'zo bo'lgan
+    # Telegram foydalanuvchisi yuborishi mumkin. user_id HMAC middleware orqali tasdiqlanadi.
+    if not _student_can_access_session(conn, req.session_id, req.user_id):
+        conn.close(); raise HTTPException(status_code=403, detail=teacher_text(req.user_id, "session_not_found"))
     cur.execute("SELECT id, started_at, finished_at FROM teacher_participants WHERE session_id=? AND user_id=? ORDER BY id LIMIT 1", (req.session_id, req.user_id))
     existing_participant = cur.fetchone()
+    # Sessiyaga oldindan kirish qaydi bo'lmasa, natijani bevosita yuborishga yo'l qo'ymaymiz.
+    if not existing_participant or int(existing_participant[1] or 0) <= 0:
+        conn.close(); raise HTTPException(status_code=403, detail=teacher_text(req.user_id, "session_not_found"))
+    # Natija chegaralari va test savollari soni serverdagi ma'lumot bilan mos bo'lishi shart.
+    try:
+        score, total, percent = int(req.score), int(req.total), int(req.percent)
+    except (TypeError, ValueError):
+        conn.close(); raise HTTPException(status_code=400, detail="Natija qiymatlari noto'g'ri.")
+    expected_total = int(s["quiz_total"] or 0)
+    if total != expected_total or total <= 0 or score < 0 or score > total or percent != int((score * 100 / total) + 0.5) or percent < 0 or percent > 100:
+        conn.close(); raise HTTPException(status_code=400, detail="Test natijasi tekshiruvdan o'tmadi.")
     # Timer 00:00 da avtomatik yuborilgan natija ham server tomonidan qabul qilinadi,
-    # lekin faqat o'quvchi sessiya tugashidan oldin kirgan bo'lsa. Bu kechikkan
-    # network request sabab natijaning yo'qolib qolishini oldini oladi.
-    if not s["active"] or now>s["expires_at"]:
-        started = int(existing_participant[1] or 0) if existing_participant else 0
-        finished = int(existing_participant[2] or 0) if existing_participant else 0
-        if not existing_participant or not started or started > int(s["expires_at"] or 0) or finished:
+    # lekin faqat o'quvchi sessiya tugashidan oldin kirgan bo'lsa.
+    if not s["active"] or now>int(s["expires_at"] or 0):
+        started = int(existing_participant[1] or 0)
+        finished = int(existing_participant[2] or 0)
+        if started > int(s["expires_at"] or 0) or finished:
             conn.close(); raise HTTPException(status_code=410, detail=teacher_text(req.user_id, "session_expired"))
-    values = (req.first_name[:100], req.username[:100], req.score, req.total, req.percent, now, now)
+    values = (req.first_name[:100], req.username[:100], score, total, percent, now, now)
     if existing_participant:
         # Once a student has submitted a result, the session is locked for that
         # student. A duplicate/retry must never overwrite the completed result.
@@ -4046,22 +5594,18 @@ def _register_pdf_font():
 def teacher_export(session_id: str, user_id: int, format: str):
     s, rows = _teacher_export_rows(session_id, user_id)
     os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-    fmt=format.lower(); safe=re.sub(r"[^A-Za-z0-9_-]+", "_", s["title"] or "quiz")[:40]
-    if fmt=="xlsx":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.xlsx")
-        wb=Workbook(); ws=wb.active; ws.title="Natijalar"
-        ws.append(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]);
-        for i,r in enumerate(rows,1): ws.append([i,r["first_name"],r["username"],r["score"],r["total"],r["percent"]])
-        ws.freeze_panes="A2"; wb.save(path)
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    fmt=format.lower().strip()
+    if fmt not in {"pdf", "docx"}:
+        raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
+    safe=re.sub(r"[^A-Za-z0-9_-]+", "_", s["title"] or "quiz")[:40]
     if fmt=="docx":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.docx")
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.docx")
         doc=Document(); doc.add_heading(s["title"], level=1); doc.add_paragraph(f"Sessiya: {s['code']}")
         table=doc.add_table(rows=1, cols=6); hdr=table.rows[0].cells
         for i,t in enumerate(["№","O'quvchi","Username","To'g'ri","Jami","Foiz"]): hdr[i].text=t
         # Faqat MTA Word eksportida ishtirokchi ismi/username ichidagi
         # Telegram emoji belgilarini olib tashlaymiz: Word'da '?' bo'lib chiqmaydi.
-        # PDF, Excel va ilovaning boshqa qismlariga tegilmaydi.
+        # PDF eksporti va ilovaning boshqa qismlariga tegilmaydi.
         _mta_word_emoji_pattern = re.compile(
             "["
             "\\U0001F1E6-\\U0001F1FF"
@@ -4078,9 +5622,9 @@ def teacher_export(session_id: str, user_id: int, format: str):
             cells=table.add_row().cells
             vals=[i,_mta_word_without_telegram_emoji(r["first_name"]),_mta_word_without_telegram_emoji(r["username"]),r["score"],r["total"],f"{r['percent']}%"]
             for j,v in enumerate(vals): cells[j].text=str(v)
-        doc.save(path); return FileResponse(path, filename=os.path.basename(path), media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        doc.save(path); return _teacher_download_response(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     if fmt=="pdf":
-        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}.pdf")
+        path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.pdf")
         reg,bld=_register_pdf_font(); font="QuizPilotFont" if reg else "Helvetica"; bold="QuizPilotFontBold" if bld else font
         # PDF-only fallback fonts and emoji-to-image support; other export formats stay untouched.
         symbol_font = font
@@ -4113,7 +5657,6 @@ def teacher_export(session_id: str, user_id: int, format: str):
                 return text.replace("№", f'<font name="{symbol_font}">№</font>')
             try:
                 from PIL import Image, ImageDraw, ImageFont
-                import unicodedata
                 pieces = []
                 i = 0
                 while i < len(text):
@@ -4168,16 +5711,98 @@ def teacher_export(session_id: str, user_id: int, format: str):
             for _emoji_path in _emoji_images:
                 try: os.remove(_emoji_path)
                 except OSError: pass
-        return FileResponse(path, filename=os.path.basename(path), media_type="application/pdf")
+        return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
+
+
+@app.post("/api/teacher/download-ticket")
+def create_teacher_download_ticket(
+    target: str,
+    user_id: int,
+    format: str,
+    quiz_id: Optional[str] = None,
+    assignment_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    variant: str = "A",
+    all_variants: int = 0,
+):
+    """Telegram native downloader uchun qisqa muddatli, bir martalik yuklash URL yaratadi."""
+    require_teacher(user_id)
+    fmt = (format or "").lower().strip()
+    if fmt not in {"pdf", "docx"}:
+        raise HTTPException(status_code=400, detail="Faqat PDF va Word formatlari qo‘llab-quvvatlanadi.")
+
+    target = (target or "").lower().strip()
+    params = {"user_id": int(user_id), "format": fmt}
+    if target == "quiz" and quiz_id:
+        params.update({"quiz_id": quiz_id, "variant": (variant or "A").upper(), "all_variants": int(bool(int(all_variants)))})
+    elif target == "assignment" and assignment_id:
+        params.update({"assignment_id": assignment_id})
+    elif target == "session" and session_id:
+        params.update({"session_id": session_id})
+    else:
+        raise HTTPException(status_code=400, detail="Yuklab olish so‘rovi noto‘g‘ri.")
+
+    token = secrets.token_urlsafe(32)
+    download_path = f"/api/teacher/download/{token}"
+    now = time.time()
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        # Eski chiptalarni xotiradan tozalaymiz.
+        for old_token, old_data in list(_TEACHER_DOWNLOAD_TICKETS.items()):
+            if old_data.get("expires_at", 0) < now:
+                _TEACHER_DOWNLOAD_TICKETS.pop(old_token, None)
+        _TEACHER_DOWNLOAD_TICKETS[token] = {
+            "user_id": int(user_id),
+            "target": target,
+            "params": params,
+            "download_path": download_path,
+            "expires_at": now + _TEACHER_DOWNLOAD_TICKET_TTL,
+            "uses": 0,
+            "max_uses": 10,
+        }
+    return {"status": "ok", "download_url": download_path, "expires_in": _TEACHER_DOWNLOAD_TICKET_TTL}
+
+
+@app.get("/api/teacher/download/{token}")
+def download_teacher_with_ticket(token: str):
+    """Qisqa muddatli chiptaga bog'langan Teacher eksportini qayta GET/retry'larda ham yuboradi."""
+    with _TEACHER_DOWNLOAD_TICKETS_LOCK:
+        # Middleware URL, muddat va foydalanish sonini tekshiradi.
+        # Ticketni bu yerda o'chirmaymiz: Android/Telegram downloader takroriy GET yuboradi.
+        ticket = _TEACHER_DOWNLOAD_TICKETS.get(token)
+    if not ticket or ticket.get("expires_at", 0) < time.time():
+        raise HTTPException(status_code=401, detail="Yuklab olish chiptasi yaroqsiz yoki muddati tugagan.")
+
+    params = ticket["params"]
+    target = ticket["target"]
+    if target == "quiz":
+        return teacher_export_quiz(
+            quiz_id=params["quiz_id"],
+            user_id=params["user_id"],
+            format=params["format"],
+            variant=params.get("variant", "A"),
+            all_variants=params.get("all_variants", 0),
+        )
+    if target == "assignment":
+        return teacher_export_assignment(
+            assignment_id=params["assignment_id"],
+            user_id=params["user_id"],
+            format=params["format"],
+        )
+    if target == "session":
+        return teacher_export(
+            session_id=params["session_id"],
+            user_id=params["user_id"],
+            format=params["format"],
+        )
+    raise HTTPException(status_code=400, detail="Yuklab olish turi noto‘g‘ri.")
 
 
 @app.get("/api/flashcards")
 def get_flashcards(user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
         "SELECT id, front, back FROM flashcards WHERE user_id = ? ORDER BY"
         " created_at DESC",
@@ -4192,7 +5817,7 @@ def get_flashcards(user_id: int):
 @app.post("/api/create-flashcard")
 def create_flashcard(req: FlashcardCreateRequest):
     add_user_to_db(req.user_id)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
@@ -4213,7 +5838,7 @@ def create_flashcard(req: FlashcardCreateRequest):
         conn.commit()
 
     # Premium / Teacher: cheksiz.
-    if not is_paid:
+    if not is_paid and FREE_FLASHCARD_LIMIT != -1:
         cursor.execute(
             "UPDATE users SET flashcard_free_used = COALESCE(flashcard_free_used, 0) + 1 "
             "WHERE user_id = ? AND COALESCE(flashcard_free_used, 0) < ?",
@@ -4248,9 +5873,8 @@ def create_flashcard(req: FlashcardCreateRequest):
 
 @app.delete("/api/delete-flashcard")
 def delete_flashcard(card_id: str, user_id: int):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _connect_db()
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
     cursor.execute(
         "DELETE FROM flashcards WHERE id = ? AND user_id = ?", (card_id, user_id)
     )
@@ -4260,40 +5884,63 @@ def delete_flashcard(card_id: str, user_id: int):
 
 
 @app.get("/api/quiz-detail")
-def get_quiz_detail(quiz_id: str):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def get_quiz_detail(quiz_id: str, user_id: int):
+    """Shaxsiy testni faqat uning egasiga qaytaradi."""
+    conn = _connect_db()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute("SELECT title, quiz_json FROM quizzes WHERE id = ?", (quiz_id,))
+    cursor.execute(
+        "SELECT title, quiz_json FROM quizzes WHERE id = ? AND user_id = ?",
+        (quiz_id, user_id),
+    )
     row = cursor.fetchone()
     conn.close()
     if row:
         return {"status": "ok", "title": row["title"] or "Test", "quiz_json": json.loads(row["quiz_json"])}
+    # Begona test mavjudligini ham oshkor qilmaymiz.
     raise HTTPException(status_code=404, detail="Test topilmadi")
 
 
 @app.post("/api/update-progress")
 def update_progress(data: ProgressUpdateRequest):
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")
-    cursor.execute(
-        "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
-        " WHERE id = ? AND user_id = ?",
-        (data.correct_count, data.percent, data.quiz_id, data.user_id),
-    )
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
+    """Natijani faqat test egasi uchun, testdagi haqiqiy savollar soniga mos saqlaydi."""
+    conn = _connect_db()
+    try:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT total FROM quizzes WHERE id = ? AND user_id = ?",
+            (data.quiz_id, data.user_id),
+        )
+        quiz_row = cursor.fetchone()
+        if not quiz_row:
+            raise HTTPException(status_code=404, detail="Test topilmadi.")
+
+        total = int(quiz_row["total"] or 0)
+        if total <= 0 or data.correct_count > total:
+            raise HTTPException(status_code=400, detail="To'g'ri javoblar soni test hajmiga mos emas.")
+        expected_percent = int((data.correct_count * 100 / total) + 0.5)
+        if data.percent != expected_percent:
+            raise HTTPException(status_code=400, detail="Test foizi hisob-kitobga mos kelmaydi.")
+
+        cursor.execute(
+            "UPDATE quizzes SET answered = total, last_score = ?, last_percent = ?"
+            " WHERE id = ? AND user_id = ?",
+            (data.correct_count, data.percent, data.quiz_id, data.user_id),
+        )
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=404, detail="Test topilmadi.")
+        conn.commit()
+        return {"status": "ok"}
+    finally:
+        conn.close()
 
 
 @app.delete("/api/delete-quiz")
 def delete_quiz(quiz_id: str, user_id: int):
     try:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = _connect_db()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute(
             "DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id)
         )
@@ -4305,11 +5952,13 @@ def delete_quiz(quiz_id: str, user_id: int):
 
 
 def start_bot_polling():
-    while True:
+    while not _APP_STOP_EVENT.is_set():
         try:
             bot.infinity_polling(timeout=20, long_polling_timeout=10)
         except Exception:
-            time.sleep(5)
+            if not _APP_STOP_EVENT.is_set():
+                logging.exception("Telegram polling vaqtinchalik xatoga uchradi; qayta uriniladi.")
+                _APP_STOP_EVENT.wait(5)
 
 
 @app.exception_handler(Exception)
@@ -4325,17 +5974,140 @@ async def api_exception_handler(request: Request, exc: Exception):
     raise exc
 
 
-@app.on_event("startup")
-async def startup_event():
-    # P2P OCR is an isolated background subsystem. It never blocks the bot/event loop.
-    try:
-        p2p_payment_ai.configure(DB_PATH, bot, ADMIN_ID)
-        p2p_payment_ai.start()
-    except Exception as p2p_error:
-        # Payment OCR failure must never stop Quiz Pilot startup.
-        logging.exception("P2P Payment AI could not start; normal app continues: %s", p2p_error)
-    threading.Thread(target=start_bot_polling, daemon=True).start()
-    threading.Thread(target=limit_notification_worker, daemon=True).start()
+
+
+
+# ==================================================================
+# QUIZ AI ADMIN PANEL — barcha mavjud admin amallarini bitta menyuga jamlash
+# ==================================================================
+def _admin_panel_main_markup():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        telebot.types.InlineKeyboardButton("📊 Umumiy statistika", callback_data="adminpanel:run:stats"),
+        telebot.types.InlineKeyboardButton("👥 Foydalanuvchilar", callback_data="adminpanel:run:users"),
+        telebot.types.InlineKeyboardButton("💳 Daromad va obunalar", callback_data="adminpanel:run:payments"),
+        telebot.types.InlineKeyboardButton("🖥 Server monitoring", callback_data="adminpanel:run:monitor"),
+        telebot.types.InlineKeyboardButton("🤖 AI test statistikasi", callback_data="adminpanel:run:ai_stats"),
+        telebot.types.InlineKeyboardButton("🔎 AI navbati va API nazorati", callback_data="adminpanel:run:ai_monitor"),
+        telebot.types.InlineKeyboardButton("🧾 To‘lov AI holati", callback_data="adminpanel:run:payment_ai_status"),
+        telebot.types.InlineKeyboardButton("🗄 Baza holati", callback_data="adminpanel:run:db_health"),
+        telebot.types.InlineKeyboardButton("📥 Baza backup", callback_data="adminpanel:run:db_backup"),
+        telebot.types.InlineKeyboardButton("📢 Ommaviy xabar", callback_data="adminpanel:run:broadcast"),
+        telebot.types.InlineKeyboardButton("🎁 Bonuslar", callback_data="adminpanel:submenu:bonuses"),
+        telebot.types.InlineKeyboardButton("🛠 Xatolik ogohlantirish sinovi", callback_data="adminpanel:run:test_error_alert"),
+    )
+    return markup
+
+
+def _admin_panel_bonus_markup():
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
+        telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
+        telebot.types.InlineKeyboardButton("🗑 Bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
+        telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
+    )
+    return markup
+
+
+@bot.message_handler(commands=["help_admin"])
+def admin_help_panel_command(message):
+    """Administrator uchun tugmali boshqaruv markazi."""
+    if not _admin_only(message):
+        return
+    text = (
+        "🛡 <b>Quiz AI — Admin Panel</b>\n\n"
+        "Kerakli bo‘limni tanlang. Hisobotlar shu yerning o‘zida ochiladi.\n\n"
+        "📊 Statistika — foydalanuvchilar, testlar va bugungi faollik.\n"
+        "👥 Foydalanuvchilar — yangi, faol va Premium foydalanuvchilar.\n"
+        "💳 Daromad — tushum, tariflar va to‘lovlar.\n"
+        "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
+        "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
+        "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
+        "🎁 Bonuslar — buyruq formati bo‘yicha yordam.\n\n"
+        "🔐 Ushbu menyu faqat administrator uchun ochiq."
+    )
+    bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
+    logging.info("Admin Panel ochildi.")
+
+
+@bot.callback_query_handler(func=lambda call: (call.data or "").startswith("adminpanel:"))
+def admin_help_panel_callback(call):
+    if not is_admin_id(call.from_user.id):
+        bot.answer_callback_query(call.id, "Bu menyu faqat administrator uchun.", show_alert=True)
+        return
+
+    action = call.data.split(":", 2)
+    kind = action[1] if len(action) > 1 else "home"
+    value = action[2] if len(action) > 2 else ""
+
+    if kind == "home":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text(
+                "🛡 <b>Quiz AI — Admin Panel</b>\n\nKerakli funksiyani tanlang:",
+                call.message.chat.id, call.message.message_id,
+                parse_mode="HTML", reply_markup=_admin_panel_main_markup()
+            )
+        except Exception:
+            bot.send_message(call.message.chat.id, "🛡 <b>Quiz AI — Admin Panel</b>\n\nKerakli funksiyani tanlang:", parse_mode="HTML", reply_markup=_admin_panel_main_markup())
+        return
+
+    if kind == "submenu" and value == "bonuses":
+        bot.answer_callback_query(call.id)
+        try:
+            bot.edit_message_text("🎁 <b>Bonuslarni boshqarish</b>\n\nKerakli amalni tanlang:", call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=_admin_panel_bonus_markup())
+        except Exception:
+            bot.send_message(call.message.chat.id, "🎁 <b>Bonuslarni boshqarish</b>\n\nKerakli amalni tanlang:", parse_mode="HTML", reply_markup=_admin_panel_bonus_markup())
+        return
+
+    if kind == "guide":
+        guide_texts = {
+            "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
+            "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
+            "bonus_revoke": "🗑 <b>Bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
+        }
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, guide_texts.get(value, "Buyruq topilmadi."), parse_mode="HTML", reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("⬅️ Admin Panel", callback_data="adminpanel:home")))
+        return
+
+    if kind == "run":
+        handlers = {
+            "stats": admin_stats_command,
+            "users": admin_users_report_command,
+            "payments": admin_payments_report_command,
+            "monitor": admin_monitor_command,
+            "ai_stats": admin_ai_generation_stats_command,
+            "ai_monitor": admin_ai_monitor_command,
+            "payment_ai_status": admin_payment_ai_status,
+            "db_health": admin_database_health_command,
+            "db_backup": admin_database_backup_command,
+            "broadcast": admin_broadcast_command,
+            "test_error_alert": admin_test_error_alert_command,
+        }
+        handler = handlers.get(value)
+        if not handler:
+            bot.answer_callback_query(call.id, "Bu funksiya ushbu faylda mavjud emas.", show_alert=True)
+            return
+        bot.answer_callback_query(call.id, "Funksiya ishga tushirilmoqda…")
+        # Mavjud handlerlarni qayta ishlatamiz; ularning asosiy funksional kodi o‘zgarmaydi.
+        from types import SimpleNamespace
+        synthetic_message = SimpleNamespace(
+            chat=call.message.chat,
+            from_user=call.from_user,
+            text="/" + value,
+            message_id=call.message.message_id,
+        )
+        try:
+            handler(synthetic_message)
+            logging.info("Admin Panel orqali funksiya ishga tushirildi | funksiya=%s", value)
+        except Exception:
+            logging.exception("Admin Panel funksiyasini ishga tushirishda xatolik | funksiya=%s", value)
+            bot.send_message(call.message.chat.id, "❌ Funksiyani ishga tushirishda xatolik yuz berdi. Railway loglarini tekshiring.")
+        return
+
+    bot.answer_callback_query(call.id, "Noma’lum menyu amali.", show_alert=True)
+
 
 
 
