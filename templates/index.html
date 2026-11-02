@@ -1711,6 +1711,82 @@
         #create-promo-carousel .create-promo-slide:nth-child(6) {
             background-image: linear-gradient(90deg, rgba(5,17,35,.96) 0%, rgba(5,17,35,.78) 48%, rgba(5,17,35,.12) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJiZyIgeDI9IjEiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjMDkyYjQ4Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTcxMDNlIi8+PC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgaWQ9ImNhcmQiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzEyYzhlOCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzYyNjdmZiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNiZykiLz48Y2lyY2xlIGN4PSI5NjAiIGN5PSIyNDAiIHI9IjIxMCIgZmlsbD0iIzIwZDhmZiIgb3BhY2l0eT0iLjEwIi8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNzEwIDc4KSByb3RhdGUoMTAgMTkwIDE3MCkiPjxyZWN0IHg9Ijk1IiB5PSIyOCIgd2lkdGg9IjMwMCIgaGVpZ2h0PSIzMzAiIHJ4PSIzMCIgZmlsbD0iIzEwMTcyZSIgc3Ryb2tlPSIjOWY4Y2ZmIiBzdHJva2Utd2lkdGg9IjgiLz48cmVjdCB4PSI0OCIgeT0iNTYiIHdpZHRoPSIzMDAiIGhlaWdodD0iMzMwIiByeD0iMzAiIGZpbGw9IiMxNzJiNGEiIHN0cm9rZT0iIzQwZGNmZiIgc3Ryb2tlLXdpZHRoPSI4Ii8+PHJlY3QgeD0iMCIgeT0iODgiIHdpZHRoPSIzMDAiIGhlaWdodD0iMzMwIiByeD0iMzAiIGZpbGw9InVybCgjY2FyZCkiIHN0cm9rZT0iI2Q3ZmFmZiIgc3Ryb2tlLXdpZHRoPSI3Ii8+PHBhdGggZD0iTTcyIDE2NWgxNTZNNzIgMjA1aDEyMCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiIG9wYWNpdHk9Ii45Ii8+PGNpcmNsZSBjeD0iMjIyIiBjeT0iMzAwIiByPSIzOCIgZmlsbD0iI2ZmZiIgb3BhY2l0eT0iLjk1Ii8+PHBhdGggZD0iTTIwNSAzMDBsMTIgMTIgMjMtMjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzI4NjZkNyIgc3Ryb2tlLXdpZHRoPSIxMCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PC9nPjxnIGZpbGw9IiM3N2VkZmYiIG9wYWNpdHk9Ii44Ij48cGF0aCBkPSJNOTQwIDQybDEyIDI2IDI3IDEyLTI3IDEyLTEyIDI3LTEyLTI3LTI3LTEyIDI3LTEyeiIvPjxjaXJjbGUgY3g9IjEwODAiIGN5PSIzOTAiIHI9IjkiLz48Y2lyY2xlIGN4PSI2NzAiIGN5PSI4NSIgcj0iNyIvPjwvZz48L3N2Zz4=") !important;
         }
+
+        /* Quiz AI — yangi Slaydlar kartasi va alohida ekran */
+        .create-tools-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 12px;
+            margin-bottom: 15px;
+            align-items: stretch;
+        }
+        .create-tools-row .create-tool-card {
+            position: relative;
+            box-sizing: border-box;
+            width: 100%;
+            min-width: 0;
+            min-height: 132px;
+            margin: 0;
+            padding: 20px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            border-radius: 14px;
+            color: var(--text-main, #fff);
+            font: inherit;
+            text-align: center;
+        }
+        .create-tool-icon { display:block; font-size:32px; line-height:1.2; }
+        .create-tool-title { font-weight:800; font-size:15px; }
+        .create-tool-desc { color:var(--text-hint); font-size:12px; line-height:1.35; }
+        .slides-tool-card {
+            border: 1px solid rgba(0, 190, 255, .48);
+            background: linear-gradient(145deg, rgba(0,125,210,.24), rgba(30,45,85,.48));
+            cursor:pointer;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 5px 18px rgba(0,120,215,.12);
+        }
+        .slides-tool-card:active { transform:scale(.985); }
+        .slides-premium-tag {
+            position:absolute; top:8px; right:8px;
+            padding:3px 7px; border-radius:20px;
+            background:linear-gradient(135deg,#f8d878,#c58b22);
+            color:#302006; font-size:9px; font-weight:900; letter-spacing:.35px;
+        }
+        .slides-screen-header { display:flex; align-items:center; gap:10px; }
+        .slides-screen-header h1 { flex:1; }
+        .slides-back-btn {
+            width:38px; height:38px; border-radius:11px;
+            border:1px solid var(--aero-border); background:var(--aero-glass);
+            color:var(--text-main,#fff); font-size:24px; cursor:pointer;
+        }
+        .slides-header-crown { font-size:22px; }
+        .slides-builder-panel {
+            margin:18px 0; padding:24px 18px; border-radius:18px;
+            text-align:center;
+        }
+        .slides-builder-icon { font-size:48px; margin-bottom:8px; }
+        .slides-builder-panel h2 { margin:6px 0 8px; font-size:20px; }
+        .slides-builder-panel p { color:var(--text-hint); line-height:1.5; }
+        .slides-builder-panel label {
+            display:block; text-align:left; margin:20px 0 8px;
+            font-weight:700; color:var(--text-main,#fff);
+        }
+        .slides-builder-panel .input-text { text-align:left; min-height:100px; }
+        .slides-coming-soon {
+            margin:12px 0; padding:10px 12px; border-radius:10px;
+            color:var(--text-hint); background:rgba(255,255,255,.06);
+            font-size:13px;
+        }
+        .slides-generate-btn { opacity:.55; cursor:not-allowed; }
+        .slides-premium-note { font-size:12px; margin-top:12px; }
+        @media (max-width: 380px) {
+            .create-tools-row { gap:8px; }
+            .create-tools-row .create-tool-card { min-height:124px; padding:18px 7px; }
+            .create-tool-title { font-size:13px; }
+            .create-tool-desc { font-size:11px; }
+        }
 </style>
 <style id="quizpilot-theme-manager">
 
@@ -13125,6 +13201,13 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(3) { 
 html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(4) { background-image: linear-gradient(90deg,rgba(4,18,40,.94) 0%,rgba(4,18,40,.72) 46%,rgba(4,18,40,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzA2MWMzYyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMWI0MCIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI2MCIgcj0iMjQwIiBmaWxsPSIjMDBiOGZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MjAiIHk9IjI1MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjEzMCIgcng9IjgiIGZpbGw9IiMzOWI3ZmYiLz48cmVjdCB4PSI4MDUiIHk9IjE5MCIgd2lkdGg9IjU1IiBoZWlnaHQ9IjE5MCIgcng9IjgiIGZpbGw9IiM2MmQ4YjUiLz48cmVjdCB4PSI4OTAiIHk9IjEwNSIgd2lkdGg9IjU1IiBoZWlnaHQ9IjI3NSIgcng9IjgiIGZpbGw9IiNmZmQzNGQiLz48cGF0aCBkPSJNNzAwIDE0MGM4MCA1MCAxNTAtNDUgMjcwIDEwIiBmaWxsPSJub25lIiBzdHJva2U9IiM3Y2U5ZmYiIHN0cm9rZS13aWR0aD0iOCIvPjwvc3ZnPg==") !important; }
 html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { background-image: linear-gradient(90deg,rgba(25,11,48,.94) 0%,rgba(25,11,48,.72) 46%,rgba(25,11,48,.18) 100%), url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjAwIDUwMCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzIwMTA0NCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzQwMTU2YiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMjAwIiBoZWlnaHQ9IjUwMCIgZmlsbD0idXJsKCNnKSIvPjxjaXJjbGUgY3g9IjkyMCIgY3k9IjI1MCIgcj0iMjQwIiBmaWxsPSIjYjA2Y2ZmIiBvcGFjaXR5PSIuMTgiLz48cmVjdCB4PSI3MDAiIHk9IjEyMCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjZDk1NzdjIiBzdHJva2U9IiNmZmIyYzUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDE1NSkiLz48cmVjdCB4PSI3MDAiIHk9IjE5MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjNGY4ZmU4IiBzdHJva2U9IiNhOWQ0ZmYiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODMwIDIyNSkiLz48cmVjdCB4PSI3MTUiIHk9IjI2MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MCIgcng9IjEyIiBmaWxsPSIjMzZiODhmIiBzdHJva2U9IiNhOGZmZTUiIHN0cm9rZS13aWR0aD0iNCIgdHJhbnNmb3JtPSJyb3RhdGUoLTUgODQ1IDI5NSkiLz48L3N2Zz4=") !important; }
 </style>
+<style id="slides-credit-wallet-styles">
+.slides-credit-panel{margin:12px 16px 14px;padding:16px 18px;border-radius:18px;border:1px solid rgba(0,200,255,.28);background:linear-gradient(135deg,rgba(8,35,62,.88),rgba(12,22,42,.92));box-shadow:0 8px 24px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.08)}
+.slides-credit-main{display:flex;align-items:center;justify-content:space-between;gap:12px}.slides-credit-label{font-size:13px;font-weight:700;opacity:.88}.slides-credit-value{font-size:29px;font-weight:800;line-height:1.25;color:#42d7ff;letter-spacing:.2px}.slides-credit-value small{font-size:13px;font-weight:600;color:rgba(255,255,255,.78)}.slides-credit-caption{font-size:11px;opacity:.7;margin-top:3px}.slides-credit-wallet-icon{font-size:34px;filter:drop-shadow(0 0 10px rgba(0,200,255,.28))}.slides-credit-history-btn{margin-top:12px;padding:8px 11px;border:1px solid rgba(120,210,255,.25);border-radius:10px;background:rgba(255,255,255,.07);color:inherit;font-size:12px;font-weight:650}.slides-credit-history{margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:8px}.slides-credit-history-row{display:flex;justify-content:space-between;gap:10px;padding:8px 2px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.07)}.slides-credit-history-row:last-child{border-bottom:0}.slides-credit-plus{color:#4ade80;font-weight:700}.slides-credit-minus{color:#fb7185;font-weight:700}.slides-credit-date{display:block;font-size:10px;opacity:.58;margin-top:2px}.slides-credit-error{font-size:11px;color:#fca5a5;margin-top:8px}
+.slides-credit-estimate{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0;padding:12px 14px;border:1px solid rgba(0,200,255,.2);border-radius:13px;background:rgba(0,150,220,.08)}.slides-credit-estimate>span{font-size:12px;opacity:.8}.slides-credit-estimate strong{font-size:15px;color:#42d7ff}.slides-credit-estimate small{display:block;flex-basis:100%;text-align:right;font-size:10px;opacity:.72}.slides-credit-estimate{flex-wrap:wrap}
+
+.slides-credit-buy-area{margin-top:13px;padding-top:12px;border-top:1px solid rgba(255,255,255,.12)}.slides-credit-buy-title{font-size:13px;font-weight:800;margin-bottom:9px}.slides-credit-packages{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.slides-credit-package{border:1px solid rgba(0,190,255,.25);border-radius:12px;padding:11px 10px;background:rgba(255,255,255,.055);color:inherit;text-align:left;cursor:pointer;min-width:0}.slides-credit-package:disabled{opacity:.5;cursor:wait}.slides-credit-package strong{display:block;font-size:14px}.slides-credit-package small{display:block;font-size:11px;opacity:.72;margin-top:4px}.slides-credit-package b{display:block;color:#42d7ff;font-size:13px;margin-top:6px}
+</style>
 </head>
 <body>
 
@@ -13195,10 +13278,18 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
 
         <div class="create-form-content">
             <input type="text" id="quiz-title-input" class="input-title" placeholder="Test nomi (Masalan: Matematika, Tarix)..." data-placeholder="placeholder_title">
-            <div class="upload-box" onclick="document.getElementById('file-input').click()">
-                <span style="font-size: 40px; display: block; margin-bottom: 10px;">📂</span>
-                <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
-                <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+            <div class="create-tools-row">
+                <div class="upload-box create-tool-card" onclick="document.getElementById('file-input').click()">
+                    <span class="create-tool-icon">📂</span>
+                    <span id="upload-text" data-lang="upload_box">Darslik yuklash (PDF yoki DOCX)</span>
+                    <input type="file" id="file-input" accept=".pdf,.docx" style="display: none;" onchange="fileSelected(this)">
+                </div>
+                <button type="button" class="create-tool-card slides-tool-card" onclick="openSlidesScreen()">
+                    <span class="slides-premium-tag">👑 PREMIUM</span>
+                    <span class="create-tool-icon">📊</span>
+                    <span class="create-tool-title" data-lang="slides_card_title">Slaydlar yaratish</span>
+                    <span class="create-tool-desc" data-lang="slides_card_desc">AI yordamida taqdimot tayyorlang</span>
+                </button>
             </div>
             <div style="text-align: center; color: var(--text-hint); margin-bottom: 15px;" data-lang="or_text">yoki matn kiriting:</div>
             <textarea id="text-input" class="input-text" rows="2" placeholder="Mavzu yoki konspekt matnini joylang..." data-placeholder="placeholder_text"></textarea>
@@ -13214,6 +13305,65 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     <div class="ai-loader-dots" aria-hidden="true"><i></i><i></i><i></i></div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="slides-screen" class="screen">
+        <div class="header slides-screen-header">
+            <button type="button" class="slides-back-btn" onclick="switchScreen('create')" aria-label="Back">←</button>
+            <h1 data-lang="slides_screen_title">AI Slaydlar</h1>
+            <span class="slides-header-crown">👑</span>
+        </div>
+        <div class="slides-credit-panel glass-panel" aria-live="polite">
+            <div class="slides-credit-main">
+                <div>
+                    <div class="slides-credit-label" data-lang="slides_credit_balance_label">💎 Mening kreditlarim</div>
+                    <div class="slides-credit-value"><span id="slides-credit-balance">—</span> <small data-lang="slides_credit_unit">kredit</small></div>
+                    <div class="slides-credit-caption" data-lang="slides_credit_caption">Slayd yaratish uchun mavjud balans</div>
+                </div>
+                <div class="slides-credit-wallet-icon">👛</div>
+            </div>
+            <button type="button" class="slides-credit-history-btn" id="slides-credit-history-toggle" onclick="toggleSlidesCreditHistory()" data-lang="slides_credit_history_btn">📜 Kreditlar tarixi</button>
+            <div class="slides-credit-history" id="slides-credit-history" hidden>
+                <div class="slides-credit-history-list" id="slides-credit-history-list" data-lang="slides_credit_history_empty">Hozircha operatsiyalar yo‘q.</div>
+            </div>
+            <div class="slides-credit-error" id="slides-credit-error" hidden data-lang="slides_credit_load_error">Balansni yuklab bo‘lmadi. Qayta urinib ko‘ring.</div>
+            <div class="slides-credit-buy-area">
+                <div class="slides-credit-buy-title" data-lang="slides_buy_title">💎 Kredit sotib olish</div>
+                <div id="slides-credit-packages" class="slides-credit-packages"><span data-lang="slides_packages_loading">Paketlar yuklanmoqda...</span></div>
+                <div id="slides-credit-buy-status" class="slides-credit-error" hidden></div>
+            </div>
+        </div>
+        <div class="slides-builder-panel glass-panel">
+            <div class="slides-builder-icon">📊</div>
+            <h2 data-lang="slides_builder_title">AI taqdimot yaratuvchisi</h2>
+            <p data-lang="slides_builder_desc">Mavzu yoki material asosida professional taqdimot tayyorlang.</p>
+            <label for="slides-topic-input" data-lang="slides_topic_label">Taqdimot mavzusi</label>
+            <textarea id="slides-topic-input" class="input-text" rows="4" data-placeholder="slides_topic_placeholder" placeholder="Masalan: Sun’iy intellektning ta’limdagi o‘rni"></textarea>
+            <label for="slides-source-file" data-lang="slides_source_label">Qo‘shimcha material (PDF yoki DOCX, ixtiyoriy)</label>
+            <input type="file" id="slides-source-file" class="input-text" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            <small id="slides-source-file-name" class="slides-source-file-name"></small>
+            <label for="slides-theme-select" data-lang="slides_theme_label">Dizayn uslubi</label>
+            <select id="slides-theme-select" class="input-text">
+                <option value="modern" data-lang="slides_theme_modern">Modern</option>
+                <option value="minimal" data-lang="slides_theme_minimal">Minimal</option>
+                <option value="academic" data-lang="slides_theme_academic">Akademik</option>
+                <option value="creative" data-lang="slides_theme_creative">Creative</option>
+            </select>
+            <label for="slides-count-select" data-lang="slides_count_label">Slaydlar soni</label>
+            <select id="slides-count-select" class="input-text" onchange="updateSlidesCreditEstimate()">
+                <option value="5">5</option><option value="10" selected>10</option><option value="15">15</option><option value="20">20</option>
+            </select>
+            <div class="slides-credit-estimate" id="slides-credit-estimate" aria-live="polite">
+                <span data-lang="slides_cost_label">Kerakli kredit</span>
+                <strong><span id="slides-credit-required">—</span> <span data-lang="slides_cost_unit">kredit</span></strong>
+                <small id="slides-credit-affordability" data-lang="slides_cost_loading">Hisoblanmoqda...</small>
+            </div>
+            <div class="slides-coming-soon" id="slides-generation-status" data-lang="slides_generation_ready">Mavzu yoki PDF/DOCX materialdan PowerPoint yarating.</div>
+            <button type="button" class="submit-btn slides-generate-btn" id="slides-generate-button" onclick="generateSlidesPresentation()">
+                <span data-lang="slides_generate_btn">Taqdimot yaratish</span> 🚀
+            </button>
+            <p class="slides-premium-note" data-lang="slides_premium_note">👑 Premium foydalanuvchilar uchun</p>
         </div>
     </div>
 
@@ -13649,7 +13799,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar", student_group_join_title: "Guruhga qo‘shilish", student_group_join_desc: "O‘qituvchingiz bergan 6 belgili guruh kodini kiriting.", student_group_code_placeholder: "Masalan: A7K29P", student_group_join_btn: "➕ Guruhga qo‘shilish", student_group_code_required: "Guruh kodini kiriting.", student_group_not_found: "Bunday faol guruh topilmadi. Kodni tekshiring.", student_group_joined: "Siz guruhga muvaffaqiyatli qo‘shildingiz.", student_group_already: "Siz bu guruhga allaqachon qo‘shilgansiz.", student_my_groups: "👥 Mening guruhlarim", student_no_groups: "Hali hech qanday guruhga qo‘shilmagansiz.", student_active_tests: "🚀 Faol testlar", student_no_active_tests: "Hozircha faol test yo‘q. O‘qituvchi testni boshlaganda shu yerda ko‘rinadi.", student_test_start: "🚀 Testni boshlash", student_test_info: "📝 {total} ta savol · ⏱️ {duration} daqiqa", student_test_remaining: "Qolgan vaqt: {time}", student_new_test: "🔔 Yangi test boshlandi", student_session_expired: "⏰ Bu test sessiyasi tugagan.", student_session_access: "Bu guruh testiga kirish uchun avval guruhga qo‘shiling.", student_active_students: "Faol o‘quvchilar", student_completed_students: "Yakunlagan", student_time_up: "⏰ Vaqt tugadi.", student_test_completed: "✅ Test yakunlangan", student_test_result: "Natijangiz: {score}/{total} ({percent}%)",
                 placeholder_title: "Test nomi (Masalan: Matematika, Tarix)...",
                 placeholder_text: "Mavzu yoki konspekt matnini joylang...",
-                upload_box: "Darslik yuklash (PDF yoki DOCX)", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
+                upload_box: "Darslik yuklash (PDF yoki DOCX)", slides_card_title: "Slaydlar yaratish", slides_card_desc: "AI yordamida taqdimot tayyorlang", slides_screen_title: "AI Slaydlar", slides_builder_title: "AI taqdimot yaratuvchisi", slides_builder_desc: "Mavzu yoki material asosida professional taqdimot tayyorlang.", slides_topic_label: "Taqdimot mavzusi", slides_topic_placeholder: "Masalan: Sun’iy intellektning ta’limdagi o‘rni", slides_coming_soon: "Slayd yaratish moduli tayyorlanmoqda", slides_generation_ready: "Mavzu yoki PDF/DOCX materialdan PowerPoint yarating.", slides_source_label: "Qo‘shimcha material (PDF yoki DOCX, ixtiyoriy)", slides_theme_label: "Dizayn uslubi", slides_theme_modern: "Modern", slides_theme_minimal: "Minimal", slides_theme_academic: "Akademik", slides_theme_creative: "Ijodiy", slides_generating: "Taqdimot yaratilmoqda...", slides_generate_success: "Taqdimot tayyor. Yuklab olish boshlandi.", slides_generate_error: "Taqdimot yaratishda xatolik yuz berdi.", slides_need_topic: "Mavzu kiriting yoki PDF/DOCX fayl tanlang.", slides_file_selected: "Tanlangan fayl: ", slides_generate_btn: "Taqdimot yaratish", slides_premium_note: "👑 Premium foydalanuvchilar uchun", slides_count_label: "Slaydlar soni", slides_cost_label: "Kerakli kredit", slides_cost_loading: "Hisoblanmoqda...", slides_cost_unit: "kredit", slides_cost_insufficient: "Kredit yetarli emas", slides_cost_sufficient: "Balans yetarli", slides_credit_balance_label: "💎 Mening kreditlarim", slides_credit_unit: "kredit", slides_credit_caption: "Slayd yaratish uchun mavjud balans", slides_credit_history_btn: "📜 Kreditlar tarixi", slides_credit_history_empty: "Hozircha operatsiyalar yo‘q.", slides_credit_load_error: "Balansni yuklab bo‘lmadi. Qayta urinib ko‘ring.", slides_credit_added: "Kredit qo‘shildi", slides_credit_spent: "Kredit sarflandi", slides_buy_title: "💎 Kredit sotib olish", slides_packages_loading: "Paketlar yuklanmoqda...", slides_package_buy: "Sotib olish", slides_package_credits: "kredit", slides_buy_sent: "To‘lov ko‘rsatmasi Telegram botga yuborildi. Chek rasmini botga jo‘nating.", slides_buy_failed: "Xaridni boshlashda xatolik. Qayta urinib ko‘ring.", selected_file: "Tanlangan: ", or_text: "yoki matn kiriting:",
                 btn_generate: "AI yordamida yaratish 🚀", promo_1_title: "🤖 AI yordamida test yaratish", promo_1_desc: "Mavzu, konspekt yoki darslikdan tez va qulay test tayyorlang.", promo_2_title: "👨‍🏫 Professional O‘qituvchi", promo_2_desc: "Guruhlar, topshiriqlar, sessiyalar va o‘quvchilar natijalarini boshqaring.", promo_3_title: "📝 Topshiriq va guruh testlari", promo_3_desc: "O‘quvchilar testga guruh orqali kiradi va belgilangan vaqt ichida ishlaydi.", promo_4_title: "📊 Natijalar va 4 xil variant", promo_4_desc: "A, B, C, D variantlar, natijalar va qulay eksport imkoniyatlari.", promo_5_title: "📚 Kutubxona va guruhga qo‘shilish", promo_5_desc: "Testlar, kartochkalar va faol guruh testlariga bir joydan kiring.", promo_6_title: "🗂 Flash-kartochkalar", promo_6_desc: "Muhim atamalarni takrorlang, bilimlaringizni mustahkamlang va eslab qolishni osonlashtiring.", loading_status: "AI test yaratmoqda", loading_substatus: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...",
                 theme_title: "Tema", theme_desc: "Ilovaning ko‘rinishini o‘zingizga moslang.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Oboy", wallpaper_desc: "Ilova fonini o‘zingizga moslang.", wallpaper_default: "Standart", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Yengil rejim", performance_mode_desc: "Kuchsizroq telefonlarda ilovani silliqroq ishlatish uchun grafik effektlarni yengillashtiradi.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Tizim tilini tanlang:", app_version_title: "Ilova versiyasi", vibration_title: "📳 Vibratsiya", vibration_desc: "Tugmalarni bosganda yengil vibratsiya.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Ovoz", sound_desc: "Test jarayonida tovushlar ijro etiladi.", contact_admin: "Admin bilan bog'lanish", contact_admin_desc: "Savol yoki muammo bo'lsa, biz bilan bog'laning.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Chiqish",
                 msg_no_tests: "Sizda hali testlar yo'q.", msg_no_public: "Hozircha hech kim ommaviy test joylamagan.",
@@ -13679,7 +13829,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 nav_create: "Создать", nav_library: "Библиотека", nav_teacher: "Учитель", teacher_active: "АКТИВЕН", teacher_center_title: "👨‍🏫 Профессиональный центр учителя", teacher_center_desc: "Группы, задания, тест-сессии, 4 варианта, результаты и экспорт — всё в одном месте.", teacher_groups: "Группы", teacher_groups_desc: "Управление классами и группами", teacher_assignments: "Задания", teacher_assignments_desc: "Назначение теста группе", teacher_variants: "4 варианта", teacher_variants_desc: "Варианты A, B, C, D", teacher_results_title: "Результаты", teacher_results_desc: "Баллы, рейтинг и статистика", teacher_session_title: "🚀 Запустить групповой тест", teacher_session_note: "После создания сессии ученики входят в тест через раздел «Присоединиться к группе». Результаты собираются автоматически.", teacher_variant_title: "🔄 Варианты теста", teacher_variant_note: "Один тест в 4 вариантах A, B, C, D с соответствующими ключами.", teacher_sessions_title: "📚 Активные и прошлые сессии", teacher_group_name_required: "Введите название группы.", teacher_group_created: "Группа создана.", teacher_assignment_created: "Задание назначено группе.", teacher_variant_label: "Вариант", teacher_student: "Ученик", teacher_score: "Баллы", teacher_refresh: "Обновить", teacher_loading: "Загрузка...", nav_settings: "Настройки", nav_premium: "Премиум",
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.", student_active_tests: "🚀 Активные тесты", student_no_active_tests: "Активных тестов пока нет. Когда учитель запустит тест, он появится здесь.", student_test_start: "🚀 Начать тест", student_test_info: "📝 {total} вопросов · ⏱️ {duration} мин.", student_test_remaining: "Осталось: {time}", student_new_test: "🔔 Новый тест начался", student_session_expired: "⏰ Эта сессия теста завершена.", student_session_access: "Чтобы войти в групповой тест, сначала присоединитесь к группе.", student_active_students: "Активные ученики", student_completed_students: "Завершили", student_time_up: "⏰ Время вышло.", student_test_completed: "✅ Тест завершён", student_test_result: "Ваш результат: {score}/{total} ({percent}%)",
                 placeholder_title: "Название теста...", placeholder_text: "Вставьте текст темы или конспекта...",
-                upload_box: "Загрузить учебник (PDF или DOCX)", selected_file: "Выбрано: ", or_text: "или введите текст:",
+                upload_box: "Загрузить учебник (PDF или DOCX)", slides_card_title: "Создать слайды", slides_card_desc: "Подготовьте презентацию с помощью ИИ", slides_screen_title: "ИИ-слайды", slides_builder_title: "Создатель презентаций с ИИ", slides_builder_desc: "Создайте профессиональную презентацию по теме или материалу.", slides_topic_label: "Тема презентации", slides_topic_placeholder: "Например: Роль искусственного интеллекта в образовании", slides_coming_soon: "Модуль создания слайдов находится в разработке", slides_generation_ready: "Создайте PowerPoint по теме или материалу PDF/DOCX.", slides_source_label: "Дополнительный материал (PDF или DOCX, необязательно)", slides_theme_label: "Стиль дизайна", slides_theme_modern: "Modern", slides_theme_minimal: "Минимализм", slides_theme_academic: "Академический", slides_theme_creative: "Креативный", slides_generating: "Создание презентации...", slides_generate_success: "Презентация готова. Загрузка началась.", slides_generate_error: "Ошибка при создании презентации.", slides_need_topic: "Введите тему или выберите PDF/DOCX файл.", slides_file_selected: "Выбран файл: ", slides_generate_btn: "Создать презентацию", slides_premium_note: "👑 Для пользователей Premium", slides_count_label: "Количество слайдов", slides_cost_label: "Требуется кредитов", slides_cost_loading: "Расчёт...", slides_cost_unit: "кредитов", slides_cost_insufficient: "Недостаточно кредитов", slides_cost_sufficient: "Баланс достаточен", slides_credit_balance_label: "💎 Мои кредиты", slides_credit_unit: "кредитов", slides_credit_caption: "Доступный баланс для создания слайдов", slides_credit_history_btn: "📜 История кредитов", slides_credit_history_empty: "Операций пока нет.", slides_credit_load_error: "Не удалось загрузить баланс. Попробуйте ещё раз.", slides_credit_added: "Кредиты начислены", slides_credit_spent: "Кредиты потрачены", slides_buy_title: "💎 Купить кредиты", slides_packages_loading: "Загрузка пакетов...", slides_package_buy: "Купить", slides_package_credits: "кредитов", slides_buy_sent: "Инструкция по оплате отправлена в Telegram-бот. Отправьте боту фото чека.", slides_buy_failed: "Не удалось начать покупку. Попробуйте ещё раз.", selected_file: "Выбрано: ", or_text: "или введите текст:",
                 btn_generate: "Создать с помощью ИИ 🚀", promo_1_title: "🤖 Создание теста с помощью AI", promo_1_desc: "Быстро создавайте тесты по теме, конспекту или учебнику.", promo_2_title: "👨‍🏫 Профессиональный учитель", promo_2_desc: "Управляйте группами, заданиями, сессиями и результатами учеников.", promo_3_title: "📝 Задания и групповые тесты", promo_3_desc: "Ученики входят через свою группу и проходят тест в установленное время.", promo_4_title: "📊 Результаты и 4 варианта", promo_4_desc: "Варианты A, B, C, D, результаты и удобный экспорт.", promo_5_title: "📚 Библиотека и вступление в группу", promo_5_desc: "Получайте доступ к тестам, карточкам и активным групповым тестам в одном месте.", promo_6_title: "🗂 Флеш-карточки", promo_6_desc: "Повторяйте важные термины, закрепляйте знания и запоминайте материал легче.", loading_status: "ИИ готовит тест", loading_substatus: "Анализируем материал и формируем вопросы...",
                 theme_title: "Тема", theme_desc: "Настройте внешний вид приложения под себя.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Обои", wallpaper_desc: "Настройте фон приложения под себя.", wallpaper_default: "Стандартные", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Лёгкий режим", performance_mode_desc: "Уменьшает графические эффекты для более плавной работы на слабых телефонах.", performance_mode_on: "ВКЛ", performance_mode_off: "ВЫКЛ", select_lang: "Выберите язык системы:", app_version_title: "Версия приложения", vibration_title: "📳 Вибрация", vibration_desc: "Лёгкая вибрация при нажатии кнопок.", vibration_on: "ВКЛ", vibration_off: "ВЫКЛ", sound_title: "🔊 Звук", sound_desc: "Звуки воспроизводятся во время теста.", contact_admin: "Связаться с администратором", contact_admin_desc: "Если у вас есть вопрос или проблема, напишите нам.", sound_on: "ВКЛ", sound_off: "ВЫКЛ", btn_exit: "✖ Выход",
                 msg_no_tests: "У вас пока нет тестов.", msg_no_public: "Публичных тестов пока нет.",
@@ -13709,7 +13859,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 nav_create: "Create", nav_library: "Library", nav_teacher: "Teacher", teacher_active: "ACTIVE", teacher_center_title: "👨‍🏫 Professional Teacher Center", teacher_center_desc: "Groups, assignments, test sessions, 4 variants, results and exports — all in one place.", teacher_groups: "Groups", teacher_groups_desc: "Manage classes and groups", teacher_assignments: "Assignments", teacher_assignments_desc: "Assign a quiz to a group", teacher_variants: "4 variants", teacher_variants_desc: "A, B, C, D variants", teacher_results_title: "Results", teacher_results_desc: "Scores, ranking and statistics", teacher_session_title: "🚀 Start group quiz", teacher_session_note: "After creating a session, students enter the test through the “Join group” section without a link. Results are collected automatically.", teacher_variant_title: "🔄 Quiz variants", teacher_variant_note: "One quiz in 4 variants A, B, C, D with matching answer keys.", teacher_sessions_title: "📚 Active and previous sessions", teacher_group_name_required: "Enter a group name.", teacher_group_created: "Group created.", teacher_assignment_created: "Assignment was assigned to the group.", teacher_variant_label: "Variant", teacher_student: "Student", teacher_score: "Score", teacher_refresh: "Refresh", teacher_loading: "Loading...", nav_settings: "Settings", nav_premium: "Premium",
                 tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.", student_active_tests: "🚀 Active tests", student_no_active_tests: "No active tests yet. It will appear here when the teacher starts a test.", student_test_start: "🚀 Start test", student_test_info: "📝 {total} questions · ⏱️ {duration} min", student_test_remaining: "Time left: {time}", student_new_test: "🔔 New test started", student_session_expired: "⏰ This test session has ended.", student_session_access: "Join the group first to enter this group test.", student_active_students: "Active students", student_completed_students: "Completed", student_time_up: "⏰ Time is up.", student_test_completed: "✅ Test completed", student_test_result: "Your result: {score}/{total} ({percent}%)",
                 placeholder_title: "Quiz title...", placeholder_text: "Paste your textbook content or notes here...",
-                upload_box: "Upload textbook (PDF or DOCX)", selected_file: "Selected: ", or_text: "or enter text:",
+                upload_box: "Upload textbook (PDF or DOCX)", slides_card_title: "Create slides", slides_card_desc: "Build a presentation with AI", slides_screen_title: "AI Slides", slides_builder_title: "AI presentation creator", slides_builder_desc: "Create a professional presentation from a topic or source material.", slides_topic_label: "Presentation topic", slides_topic_placeholder: "For example: The role of artificial intelligence in education", slides_coming_soon: "The slide generation module is in development", slides_generation_ready: "Create a PowerPoint from a topic or PDF/DOCX material.", slides_source_label: "Additional material (PDF or DOCX, optional)", slides_theme_label: "Design style", slides_theme_modern: "Modern", slides_theme_minimal: "Minimal", slides_theme_academic: "Academic", slides_theme_creative: "Creative", slides_generating: "Creating presentation...", slides_generate_success: "Presentation is ready. Download started.", slides_generate_error: "An error occurred while creating the presentation.", slides_need_topic: "Enter a topic or choose a PDF/DOCX file.", slides_file_selected: "Selected file: ", slides_generate_btn: "Create presentation", slides_premium_note: "👑 For Premium users", slides_count_label: "Number of slides", slides_cost_label: "Credits required", slides_cost_loading: "Calculating...", slides_cost_unit: "credits", slides_cost_insufficient: "Not enough credits", slides_cost_sufficient: "Balance is sufficient", slides_credit_balance_label: "💎 My credits", slides_credit_unit: "credits", slides_credit_caption: "Available balance for creating slides", slides_credit_history_btn: "📜 Credit history", slides_credit_history_empty: "No transactions yet.", slides_credit_load_error: "Could not load balance. Please try again.", slides_credit_added: "Credits added", slides_credit_spent: "Credits spent", slides_buy_title: "💎 Buy credits", slides_packages_loading: "Loading packages...", slides_package_buy: "Buy", slides_package_credits: "credits", slides_buy_sent: "Payment instructions were sent to the Telegram bot. Send the receipt photo to the bot.", slides_buy_failed: "Could not start the purchase. Please try again.", selected_file: "Selected: ", or_text: "or enter text:",
                 btn_generate: "Generate with AI 🚀", promo_1_title: "🤖 Create quizzes with AI", promo_1_desc: "Quickly create a quiz from a topic, notes, or a textbook.", promo_2_title: "👨‍🏫 Professional Teacher", promo_2_desc: "Manage groups, assignments, sessions, and student results.", promo_3_title: "📝 Assignments and group quizzes", promo_3_desc: "Students join through their group and take the test within the set time.", promo_4_title: "📊 Results and 4 variants", promo_4_desc: "A, B, C, D variants, results, and convenient export options.", promo_5_title: "📚 Library and group joining", promo_5_desc: "Access quizzes, flashcards, and active group tests in one place.", promo_6_title: "🗂 Flashcards", promo_6_desc: "Review key terms, reinforce your knowledge, and remember information more easily.", loading_status: "AI is preparing your quiz", loading_substatus: "Analyzing the material and generating questions...",
                 theme_title: "Theme", theme_desc: "Customize the look of the app to your liking.", theme_teacher_aero: "Aero Premium", theme_ios_black: "iOS Black", theme_colorful: "Colorful Fusion", theme_nebula: "Nebula", theme_crystal: "Crystal Aurora", theme_quantum: "Quantum Aurora", wallpaper_title: "Wallpaper", wallpaper_desc: "Customize the app background to your liking.", wallpaper_default: "Default", wallpaper_aurora: "Aurora Glow", wallpaper_ocean: "Ocean Dream", wallpaper_sunset: "Sunset Horizon", wallpaper_emerald: "Emerald Mist", wallpaper_sakura: "Sakura Dream", wallpaper_cyber: "Cyber Pulse", wallpaper_cosmic: "Cosmic Violet", performance_mode_title: "⚡ Lite Mode", performance_mode_desc: "Reduces graphic effects for smoother performance on less powerful phones.", performance_mode_on: "ON", performance_mode_off: "OFF", select_lang: "Select system language:", app_version_title: "App version", vibration_title: "📳 Vibration", vibration_desc: "Light vibration when buttons are tapped.", vibration_on: "ON", vibration_off: "OFF", sound_title: "🔊 Sound", sound_desc: "Sounds play during the quiz.", contact_admin: "Contact Admin", contact_admin_desc: "If you have a question or problem, contact us.", sound_on: "ON", sound_off: "OFF", btn_exit: "✖ Exit",
                 msg_no_tests: "You don't have any quizzes yet.", msg_no_public: "No public quizzes available yet.",
@@ -14276,6 +14426,197 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 const screen = document.getElementById('create-screen');
                 if (screen && screen.classList.contains('active')) showSlide(createPromoIndex + 1);
             }, 4500);
+        }
+
+        let slidesCreditsPerSlide = 1;
+        let slidesCurrentBalance = 0;
+
+        function openSlidesScreen() {
+            switchScreen('slides');
+            loadSlidesCredits();
+            loadSlidesPricing();
+        }
+
+        async function loadSlidesPricing() {
+            try {
+                const response = await fetch(`${BASE_URL}/api/slides/config`, {cache:'no-store'});
+                if (!response.ok) throw new Error('slides_pricing_unavailable');
+                const data = await response.json();
+                if (data.status !== 'ok') throw new Error('slides_pricing_unavailable');
+                const slidesCard = document.querySelector('.slides-tool-card');
+                if (slidesCard) slidesCard.hidden = data.enabled === false;
+                if (data.enabled === false) return;
+                slidesCreditsPerSlide = Math.max(1, Number(data.credits_per_slide) || 1);
+                const select = document.getElementById('slides-count-select');
+                if (select && Array.isArray(data.slide_count_options)) {
+                    const allowed = data.slide_count_options.map(Number).filter(n => Number.isInteger(n) && n > 0 && n <= 100);
+                    if (allowed.length) {
+                        const current = Number(select.value);
+                        select.innerHTML = allowed.map(n => `<option value="${n}">${n}</option>`).join('');
+                        select.value = String(allowed.includes(current) ? current : allowed[0]);
+                    }
+                }
+                updateSlidesCreditEstimate();
+            } catch (e) {
+                console.warn('Slaydlar narxini yuklashda xatolik:', e);
+                const status = document.getElementById('slides-credit-affordability');
+                if (status) status.textContent = langPack[currentLang].slides_cost_loading;
+            }
+        }
+
+        function updateSlidesCreditEstimate() {
+            const select = document.getElementById('slides-count-select');
+            const requiredNode = document.getElementById('slides-credit-required');
+            const statusNode = document.getElementById('slides-credit-affordability');
+            if (!select || !requiredNode || !statusNode) return;
+            const count = Math.max(1, Number(select.value) || 10);
+            const required = count * slidesCreditsPerSlide;
+            requiredNode.textContent = required.toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ');
+            const enough = slidesCurrentBalance >= required;
+            statusNode.textContent = langPack[currentLang][enough ? 'slides_cost_sufficient' : 'slides_cost_insufficient'];
+            statusNode.style.color = enough ? '#4ade80' : '#fb7185';
+        }
+
+        function toggleSlidesCreditHistory() {
+            const panel = document.getElementById('slides-credit-history');
+            const button = document.getElementById('slides-credit-history-toggle');
+            if (!panel) return;
+            panel.hidden = !panel.hidden;
+            if (panel.hidden) return;
+            loadSlidesCredits();
+        }
+
+        async function loadSlidesCredits() {
+            const balanceNode = document.getElementById('slides-credit-balance');
+            const historyNode = document.getElementById('slides-credit-history-list');
+            const errorNode = document.getElementById('slides-credit-error');
+            if (!balanceNode) return;
+            if (errorNode) errorNode.hidden = true;
+            try {
+                const response = await fetch(`${BASE_URL}/api/slides/credits?user_id=${encodeURIComponent(userId)}&_t=${Date.now()}`, {cache:'no-store'});
+                if (!response.ok) throw new Error('credit_balance_unavailable');
+                const data = await response.json();
+                if (data.status !== 'ok') throw new Error('credit_balance_unavailable');
+                balanceNode.textContent = Number(data.balance || 0).toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ');
+                slidesCurrentBalance = Math.max(0, Number(data.balance) || 0);
+                updateSlidesCreditEstimate();
+                renderSlidesCreditPackages(Array.isArray(data.packages) ? data.packages : []);
+                if (historyNode) {
+                    const rows = Array.isArray(data.transactions) ? data.transactions : [];
+                    if (!rows.length) {
+                        historyNode.textContent = langPack[currentLang].slides_credit_history_empty;
+                    } else {
+                        historyNode.innerHTML = rows.map(item => {
+                            const amount = Number(item.amount || 0);
+                            const positive = amount > 0;
+                            const label = item.description || (positive ? langPack[currentLang].slides_credit_added : langPack[currentLang].slides_credit_spent);
+                            const date = item.created_at ? new Date(item.created_at * 1000).toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ') : '';
+                            return `<div class="slides-credit-history-row"><span>${escapeHtml(label)}<span class="slides-credit-date">${escapeHtml(date)}</span></span><span class="${positive ? 'slides-credit-plus' : 'slides-credit-minus'}">${positive ? '+' : ''}${amount}</span></div>`;
+                        }).join('');
+                    }
+                }
+            } catch (e) {
+                if (errorNode) errorNode.hidden = false;
+                console.warn('Slayd kredit balansini yuklashda xatolik:', e);
+            }
+        }
+
+        function renderSlidesCreditPackages(packages) {
+            const host = document.getElementById('slides-credit-packages');
+            if (!host) return;
+            if (!packages.length) {
+                host.textContent = currentLang === 'ru' ? 'Пакеты пока не настроены.' : currentLang === 'en' ? 'Credit packages are not configured yet.' : 'Kredit paketlari hali sozlanmagan.';
+                return;
+            }
+            host.innerHTML = packages.map(pkg => {
+                const price = Number(pkg.price || 0).toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ') + (currentLang === 'en' ? ' UZS' : ' so‘m');
+                const title = escapeHtml(pkg.name || pkg.id || 'Credits');
+                const amount = Number(pkg.credits || 0);
+                return `<button type="button" class="slides-credit-package" onclick="buySlidesCreditPackage('${encodeURIComponent(String(pkg.id || ''))}')"><strong>${title}</strong><small>${amount.toLocaleString()} ${langPack[currentLang].slides_package_credits}</small><b>${escapeHtml(price)}</b></button>`;
+            }).join('');
+        }
+
+        async function buySlidesCreditPackage(encodedPackageId) {
+            const status = document.getElementById('slides-credit-buy-status');
+            const packageId = decodeURIComponent(encodedPackageId || '');
+            if (!packageId) return;
+            if (status) { status.hidden = true; status.textContent = ''; }
+            try {
+                const response = await fetch(`${BASE_URL}/api/payment-intent`, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'payment_intent', user_id:userId, payment_type:'credits', package_id:packageId})
+                });
+                const data = await response.json();
+                if (!response.ok || data.status !== 'ok') throw new Error(data.detail || 'purchase_failed');
+                if (status) { status.textContent = langPack[currentLang].slides_buy_sent; status.hidden = false; status.style.color = '#4ade80'; }
+            } catch (error) {
+                console.warn('Kredit xaridini boshlashda xato:', error);
+                if (status) { status.textContent = langPack[currentLang].slides_buy_failed; status.hidden = false; }
+            }
+        }
+
+        const slidesSourceInput = document.getElementById('slides-source-file');
+        if (slidesSourceInput) slidesSourceInput.addEventListener('change', () => {
+            const label = document.getElementById('slides-source-file-name');
+            if (label) label.textContent = slidesSourceInput.files && slidesSourceInput.files[0]
+                ? langPack[currentLang].slides_file_selected + slidesSourceInput.files[0].name : '';
+        });
+
+        async function generateSlidesPresentation() {
+            const topicNode = document.getElementById('slides-topic-input');
+            const countNode = document.getElementById('slides-count-select');
+            const themeNode = document.getElementById('slides-theme-select');
+            const fileNode = document.getElementById('slides-source-file');
+            const button = document.getElementById('slides-generate-button');
+            const status = document.getElementById('slides-generation-status');
+            const topic = (topicNode?.value || '').trim();
+            const sourceFile = fileNode?.files?.[0] || null;
+            if (!topic && !sourceFile) {
+                if (status) { status.textContent = langPack[currentLang].slides_need_topic; status.style.color = '#fb7185'; }
+                return;
+            }
+            const count = Math.max(1, Number(countNode?.value) || 10);
+            const required = count * slidesCreditsPerSlide;
+            if (slidesCurrentBalance < required) {
+                if (status) { status.textContent = langPack[currentLang].slides_cost_insufficient; status.style.color = '#fb7185'; }
+                return;
+            }
+            const form = new FormData();
+            form.append('user_id', String(userId));
+            form.append('topic', topic);
+            form.append('slide_count', String(count));
+            form.append('theme', themeNode?.value || 'modern');
+            if (sourceFile) form.append('file', sourceFile);
+            if (button) { button.disabled = true; button.dataset.originalText = button.innerText; button.innerText = langPack[currentLang].slides_generating; }
+            if (status) { status.textContent = langPack[currentLang].slides_generating; status.style.color = ''; }
+            try {
+                const response = await fetch(`${BASE_URL}/api/slides/generate`, {method:'POST', body:form});
+                if (!response.ok) {
+                    let detail = '';
+                    try { const err = await response.json(); detail = err.detail || ''; } catch (_) {}
+                    throw new Error(detail || 'slide_generation_failed');
+                }
+                const blob = await response.blob();
+                const disposition = response.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="?([^";]+)"?/i);
+                const filename = match ? match[1] : 'Quiz_AI_Slides.pptx';
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url; anchor.download = filename;
+                document.body.appendChild(anchor); anchor.click(); anchor.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 30000);
+                if (status) { status.textContent = langPack[currentLang].slides_generate_success; status.style.color = '#4ade80'; }
+                if (topicNode) topicNode.value = '';
+                if (fileNode) fileNode.value = '';
+                const fileLabel = document.getElementById('slides-source-file-name'); if (fileLabel) fileLabel.textContent = '';
+                await loadSlidesCredits();
+            } catch (error) {
+                console.warn('Slayd yaratishda xatolik:', error);
+                if (status) { status.textContent = error.message && error.message !== 'slide_generation_failed' ? error.message : langPack[currentLang].slides_generate_error; status.style.color = '#fb7185'; }
+                await loadSlidesCredits();
+            } finally {
+                if (button) { button.disabled = false; button.innerHTML = `<span data-lang="slides_generate_btn">${langPack[currentLang].slides_generate_btn || 'Taqdimot yaratish'}</span> 🚀`; }
+            }
         }
 
         function switchScreen(screenName, swipeDirection) {
@@ -15725,5 +16066,10 @@ window.onload = function() {
             box-shadow: 0 0 8px rgba(255, 214, 10, 0.55), 0 0 16px rgba(255, 214, 10, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
         }
     </style>
+
+<style>
+.slides-source-file-name{display:block;min-height:1.2em;margin:5px 0 12px;color:var(--text-secondary,#94a3b8);font-size:12px;overflow-wrap:anywhere}.slides-generate-btn:disabled{opacity:.65;cursor:wait}.slides-builder-panel input[type=file]{width:100%;margin:8px 0 4px;padding:10px;border-radius:12px}
+</style>
+
 </body>
 </html>
