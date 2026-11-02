@@ -49,6 +49,12 @@ from pathlib import Path
 from deep_translator import GoogleTranslator
 from datetime import datetime, timezone, timedelta
 
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE
+
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
 import p2p_payment_ai
 
@@ -730,6 +736,19 @@ def init_db():
         status TEXT DEFAULT 'pending',
         created_at INTEGER)""")
 
+    # Kredit xaridlari uchun kengaytma. Eski to'lovlar payment_type='premium' hisoblanadi.
+    payment_columns = {row[1] for row in cursor.execute("PRAGMA table_info(payments)").fetchall()}
+    for column, definition in (("payment_type", "TEXT DEFAULT 'premium'"), ("package_id", "TEXT DEFAULT ''"), ("credits_amount", "INTEGER DEFAULT 0")):
+        if column not in payment_columns:
+            cursor.execute(f"ALTER TABLE payments ADD COLUMN {column} {definition}")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS credit_wallets (
+        user_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
+        updated_at INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL, reference TEXT NOT NULL UNIQUE, description TEXT DEFAULT '',
+        created_at INTEGER NOT NULL)""")
+
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
         id TEXT PRIMARY KEY,
         owner_id INTEGER,
@@ -1196,6 +1215,18 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     return response
 
 
+class SlideItemSchema(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    bullets: List[str] = Field(min_length=2, max_length=6)
+    speaker_notes: Optional[str] = Field(default="", max_length=1200)
+
+
+class SlideDeckSchema(BaseModel):
+    presentation_title: str = Field(min_length=1, max_length=180)
+    subtitle: Optional[str] = Field(default="", max_length=240)
+    slides: List[SlideItemSchema]
+
+
 class NewsCreateSchema(BaseModel):
     title_uz: str = Field(min_length=1, max_length=255)
     content_uz: str = Field(min_length=1, max_length=20000)
@@ -1351,6 +1382,8 @@ class PaymentIntentRequest(BaseModel):
     tariff_name: Optional[str] = Field(default=None, max_length=100)
     tariff_price: Optional[str] = Field(default=None, max_length=32)
     tariff_key: Optional[str] = Field(default=None, max_length=32)
+    payment_type: Optional[str] = Field(default="premium", max_length=16)
+    package_id: Optional[str] = Field(default=None, max_length=40)
 
 
 
@@ -1588,6 +1621,129 @@ def update_user_activity(user_id: int):
         logging.error(f"Faol foydalanuvchi vaqtini yangilashda xato: {e}")
 
 
+def get_slide_credit_packages():
+    """Load trusted credit packages from the SLIDE_CREDIT_PACKAGES JSON env var."""
+    raw = os.getenv("SLIDE_CREDIT_PACKAGES", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        packages = {}
+        for package_id, item in data.items():
+            if not isinstance(item, dict):
+                continue
+            credits, price = int(item.get("credits", 0)), int(item.get("price", 0))
+            if not str(package_id).strip() or credits <= 0 or price <= 0 or credits > 1000000 or price > 100000000:
+                continue
+            packages[str(package_id)] = {"id": str(package_id), "name": str(item.get("name") or f"{credits} kredit")[:80], "credits": credits, "price": price}
+        return packages
+    except Exception as exc:
+        logging.error("SLIDE_CREDIT_PACKAGES JSON noto'g'ri: %s", exc)
+        return {}
+
+
+def trigger_credit_payment_flow(user_id, package_id):
+    """Create a P2P payment intent for a server-configured credit package."""
+    try:
+        package = get_slide_credit_packages().get(str(package_id))
+        if not package:
+            logging.warning("Noma'lum kredit paketi | user_id=%s | package_id=%s", user_id, package_id)
+            return False
+        lang = get_user_lang(user_id)
+        tx_id = f"CR{uuid.uuid4().hex[:8].upper()}"
+        price_text = f"{package['price']:,}".replace(",", " ") + " so'm"
+        conn = _connect_db()
+        try:
+            conn.execute("UPDATE payments SET status='cancelled' WHERE user_id=? AND status='pending'", (user_id,))
+            conn.execute(
+                "INSERT INTO payments (tx_id,user_id,tariff_name,tariff_price,status,created_at,payment_type,package_id,credits_amount) "
+                "VALUES (?,?,?,?, 'pending', ?, 'credits', ?, ?)",
+                (tx_id, int(user_id), f"Kreditlar: {package['name']}", price_text, int(time.time()), package['id'], package['credits']),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        messages = {
+            "uz": "💎 Kredit xaridi\nPaket: {name}\nKreditlar: {credits}\nTo'lov: {price}\nBuyurtma: `{tx}`\n\nTo'lovni amalga oshirib, chek rasmini shu chatga yuboring.",
+            "ru": "💎 Покупка кредитов\nПакет: {name}\nКредиты: {credits}\nОплата: {price}\nЗаказ: `{tx}`\n\nОплатите и отправьте фото чека в этот чат.",
+            "en": "💎 Credit purchase\nPackage: {name}\nCredits: {credits}\nPayment: {price}\nOrder: `{tx}`\n\nPay and send the receipt image in this chat.",
+        }
+        message = messages.get(lang, messages["uz"]).format(name=package['name'], credits=package['credits'], price=price_text, tx=tx_id)
+        if P2P_CARD_NUMBER:
+            card_labels = {"uz": "💳 To'lov kartasi", "ru": "💳 Карта для оплаты", "en": "💳 Payment card"}
+            message += f"\n\n{card_labels.get(lang, card_labels['uz'])}: `{P2P_CARD_NUMBER}`"
+        bot.send_message(user_id, message, parse_mode="Markdown")
+        return True
+    except Exception as exc:
+        logging.exception("Kredit xaridi to'lovini yaratishda xato: %s", exc)
+        return False
+
+
+def get_credit_balance(user_id):
+    conn = _connect_db()
+    try:
+        row = conn.execute("SELECT balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"):
+    """Atomar kredit yechish; takroriy reference va manfiy balansga yo'l qo'ymaydi."""
+    try:
+        amount = int(amount)
+        if amount <= 0 or amount > 1000000 or not str(reference).strip():
+            return False, "invalid_request"
+        conn = _connect_db()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) "
+                "ON CONFLICT(user_id) DO NOTHING", (int(user_id), int(time.time()))
+            )
+            cur = conn.execute(
+                "UPDATE credit_wallets SET balance=balance-?, updated_at=? "
+                "WHERE user_id=? AND balance>=?",
+                (amount, int(time.time()), int(user_id), amount)
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return False, "insufficient_credits"
+            conn.execute(
+                "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) "
+                "VALUES (?,?, 'spend', ?, ?, ?)",
+                (int(user_id), -amount, str(reference), str(description)[:200], int(time.time()))
+            )
+            conn.commit()
+            return True, get_credit_balance(user_id)
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return False, "duplicate_reference"
+        finally:
+            conn.close()
+    except Exception as exc:
+        logging.exception("Kredit yechishda xato: %s", exc)
+        return False, "internal_error"
+
+
+def get_credit_history(user_id, limit=20):
+    conn = _connect_db()
+    try:
+        rows = conn.execute(
+            "SELECT amount,transaction_type,reference,description,created_at "
+            "FROM credit_transactions WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            (int(user_id), max(1, min(int(limit), 100)))
+        ).fetchall()
+        return [dict(row) if isinstance(row, sqlite3.Row) else {
+            "amount": row[0], "transaction_type": row[1], "reference": row[2],
+            "description": row[3], "created_at": row[4]
+        } for row in rows]
+    finally:
+        conn.close()
+
+
 def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_key=None):
     try:
         user_lang = get_user_lang(user_id)
@@ -1612,7 +1768,8 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
         cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
-            "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
+            "INSERT INTO payments (tx_id, user_id, tariff_name, tariff_price, status, created_at, payment_type, package_id, credits_amount) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, 'premium', '', 0)",
             (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
         )
         conn.commit()
@@ -3011,18 +3168,245 @@ def get_tariff_config():
 @app.post("/api/payment-intent")
 def api_payment_intent(req: PaymentIntentRequest):
     if req.action == "payment_intent":
-        if req.tariff_key not in TARIFFS:
+        if req.payment_type == "credits":
+            package = get_slide_credit_packages().get(str(req.package_id or ""))
+            if not package:
+                raise HTTPException(status_code=400, detail="Noto'g'ri yoki sozlanmagan kredit paketi")
+            threading.Thread(target=trigger_credit_payment_flow, args=(req.user_id, package["id"]), daemon=True).start()
+            return {"status": "ok", "message": "Kredit xaridi so'rovi qabul qilindi"}
+        if req.payment_type not in (None, "", "premium") or req.tariff_key not in TARIFFS:
             raise HTTPException(status_code=400, detail="Noto'g'ri tarif")
-        threading.Thread(
-            target=trigger_payment_flow,
-            args=(req.user_id, req.tariff_name, req.tariff_price, req.tariff_key),
-            daemon=True,
-        ).start()
-        return {
-            "status": "ok",
-            "message": "To'lov so'rovi muvaffaqiyatli qabul qilindi",
-        }
+        threading.Thread(target=trigger_payment_flow, args=(req.user_id, req.tariff_name, req.tariff_price, req.tariff_key), daemon=True).start()
+        return {"status": "ok", "message": "To'lov so'rovi muvaffaqiyatli qabul qilindi"}
     raise HTTPException(status_code=400, detail="Noto'g'ri amal")
+
+
+@app.get("/api/slide-credits")
+def api_slide_credits(user_id: int):
+    add_user_to_db(user_id)
+    return {"status": "ok", "balance": get_credit_balance(user_id), "packages": list(get_slide_credit_packages().values())}
+
+
+@app.get("/api/slide-credit-history")
+def api_slide_credit_history(user_id: int, limit: int = 20):
+    add_user_to_db(user_id)
+    return {"status": "ok", "history": get_credit_history(user_id, limit)}
+
+
+@app.get("/api/slides/config")
+def api_slides_config():
+    """Frontend uchun maxfiy bo'lmagan slayd/kredit sozlamalari."""
+    enabled = os.getenv("SLIDES_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    credits_enabled = os.getenv("SLIDE_CREDITS_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    try:
+        per_slide = max(1, min(10000, int(os.getenv("SLIDE_CREDITS_PER_SLIDE", "1"))))
+    except Exception:
+        per_slide = 1
+    try:
+        options = [int(x.strip()) for x in os.getenv("SLIDE_COUNT_OPTIONS", "5,10,15,20").split(",") if x.strip()]
+        options = sorted({x for x in options if 1 <= x <= 100}) or [5, 10, 15, 20]
+    except Exception:
+        options = [5, 10, 15, 20]
+    return {"status": "ok", "enabled": enabled, "credits_enabled": credits_enabled,
+            "credits_per_slide": per_slide, "slide_count_options": options}
+
+
+@app.get("/api/slides/credits")
+def api_slides_credits_compat(user_id: int):
+    """UI bilan mos endpoint; tarix ham shu javobda qaytariladi."""
+    add_user_to_db(user_id)
+    return {"status": "ok", "balance": get_credit_balance(user_id),
+            "transactions": get_credit_history(user_id, 20),
+            "packages": list(get_slide_credit_packages().values())}
+
+
+def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi"):
+    """Kreditlarni atomik va takrorlanmaydigan tarzda hisobga qo'shish."""
+    amount = int(amount)
+    if amount <= 0 or amount > 1000000 or not str(reference).strip():
+        return False
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), int(time.time())))
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, updated_at=? WHERE user_id=?", (amount, int(time.time()), int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) VALUES (?,?, 'refund', ?, ?, ?)", (int(user_id), amount, str(reference), str(description)[:200], int(time.time())))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return False
+    except Exception:
+        conn.rollback()
+        logging.exception("Slayd kreditini qaytarishda xato")
+        return False
+    finally:
+        conn.close()
+
+
+def _extract_slide_source(contents, filename):
+    """PDF yoki DOCX manbasidan matn ajratadi; fayl RAM ichida qayta ishlanadi."""
+    ext = Path(filename or "").suffix.lower()
+    if ext == ".pdf":
+        if pymupdf is not None:
+            with pymupdf.open(stream=contents, filetype="pdf") as pdf_doc:
+                if pdf_doc.page_count > int(os.getenv("SLIDE_MAX_PDF_PAGES", "50")):
+                    raise ValueError("source_too_many_pages")
+                return "\n".join(page.get_text("text") or "" for page in pdf_doc)
+        reader = PdfReader(BytesIO(contents))
+        if len(reader.pages) > int(os.getenv("SLIDE_MAX_PDF_PAGES", "50")):
+            raise ValueError("source_too_many_pages")
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if ext == ".docx":
+        document = docx.Document(BytesIO(contents))
+        parts = [para.text for para in document.paragraphs if para.text.strip()]
+        for table in document.tables:
+            for row in table.rows:
+                parts.append(" | ".join(cell.text for cell in row.cells))
+        return "\n".join(parts)
+    raise ValueError("unsupported_source")
+
+
+def _build_slide_pptx(deck, theme="modern"):
+    """Gemini tuzilmasidan PowerPoint faylini xotirada yaratadi."""
+    themes = {
+        "modern": ((12, 25, 48), (42, 183, 210), (245, 248, 252)),
+        "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
+        "academic": ((28, 48, 72), (190, 155, 80), (248, 247, 242)),
+        "creative": ((43, 24, 75), (232, 92, 150), (250, 246, 252)),
+    }
+    bg, accent, fg = themes.get(theme, themes["modern"])
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
+    blank = prs.slide_layouts[6]
+
+    def add_text(slide, x, y, w, h, value, size, color, bold=False, align=None):
+        shape = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = shape.text_frame
+        tf.clear(); tf.word_wrap = True
+        tf.margin_left = Inches(.05); tf.margin_right = Inches(.05)
+        tf.margin_top = Inches(.03); tf.margin_bottom = Inches(.03)
+        para = tf.paragraphs[0]
+        para.text = str(value)
+        para.font.name = "Aptos"; para.font.size = Pt(size)
+        para.font.bold = bold; para.font.color.rgb = RGBColor(*color)
+        if align is not None: para.alignment = align
+        return shape
+
+    for index, item in enumerate(deck.slides):
+        slide = prs.slides.add_slide(blank)
+        slide.background.fill.solid(); slide.background.fill.fore_color.rgb = RGBColor(*bg)
+        bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(.16), prs.slide_height)
+        bar.fill.solid(); bar.fill.fore_color.rgb = RGBColor(*accent); bar.line.fill.background()
+        if index == 0:
+            add_text(slide, .9, 1.5, 11.4, 2, deck.presentation_title, 34, fg, True, PP_ALIGN.CENTER)
+            if deck.subtitle: add_text(slide, 1.2, 3.7, 10.8, .9, deck.subtitle, 19, accent, False, PP_ALIGN.CENTER)
+            add_text(slide, 1, 6.6, 11.2, .4, "QUIZ AI  •  AI PRESENTATION", 10, fg, False, PP_ALIGN.CENTER)
+            continue
+        add_text(slide, .8, .48, 11.8, .95, item.title, 27, accent, True)
+        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(.85), Inches(1.48), Inches(1.2), Inches(.055))
+        line.fill.solid(); line.fill.fore_color.rgb = RGBColor(*accent); line.line.fill.background()
+        y = 1.9
+        for bullet in item.bullets:
+            dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1), Inches(y + .13), Inches(.12), Inches(.12))
+            dot.fill.solid(); dot.fill.fore_color.rgb = RGBColor(*accent); dot.line.fill.background()
+            add_text(slide, 1.35, y, 10.7, .72, bullet, 19, fg)
+            y += .88
+        add_text(slide, 11.8, 7, .7, .25, f"{index+1:02d}", 10, accent, True, PP_ALIGN.RIGHT)
+        if item.speaker_notes:
+            try: slide.notes_slide.notes_text_frame.text = item.speaker_notes
+            except Exception: pass
+    output = BytesIO(); prs.save(output)
+    return output.getvalue()
+
+
+@app.post("/api/slides/generate")
+def api_generate_slides(
+    request: Request,
+    user_id: int = Form(...),
+    topic: str = Form(""),
+    slide_count: int = Form(...),
+    theme: str = Form("modern"),
+    file: Optional[UploadFile] = File(None),
+):
+    """Yangi slayd generatori; mavjud quiz yaratish oqimidan mustaqil."""
+    if getattr(request.state, "telegram_user_id", None) != int(user_id):
+        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
+    if os.getenv("SLIDES_ENABLED", "true").lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=503, detail="Slaydlar xizmati hozircha o'chirilgan")
+    if os.getenv("SLIDE_CREDITS_ENABLED", "true").lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=503, detail="Kredit tizimi hozircha o'chirilgan")
+    if not GOOGLE_API_KEYS:
+        raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
+    min_count = max(1, int(os.getenv("SLIDE_MIN_COUNT", "5")))
+    max_count = max(min_count, min(100, int(os.getenv("SLIDE_MAX_COUNT", "20"))))
+    per_slide = max(1, min(10000, int(os.getenv("SLIDE_CREDITS_PER_SLIDE", "1"))))
+    max_file_mb = max(1, min(30, int(os.getenv("SLIDE_MAX_FILE_MB", "10"))))
+    max_source_chars = max(1000, min(200000, int(os.getenv("SLIDE_MAX_SOURCE_CHARS", "50000"))))
+    max_topic_chars = max(20, min(5000, int(os.getenv("SLIDE_MAX_TOPIC_CHARS", "1000"))))
+    if not min_count <= slide_count <= max_count:
+        raise HTTPException(status_code=400, detail=f"Slaydlar soni {min_count}-{max_count} oralig'ida bo'lishi kerak")
+    topic = (topic or "").strip()[:max_topic_chars]
+    source_text = ""
+    if file is not None:
+        raw = file.file.read()
+        if len(raw) > max_file_mb * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Fayl hajmi ruxsat etilgan limitdan katta")
+        try: source_text = _extract_slide_source(raw, Path(file.filename or "").name)
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+        except Exception:
+            logging.exception("Slayd manba faylini o'qishda xato")
+            raise HTTPException(status_code=400, detail="PDF/DOCX faylni o'qib bo'lmadi")
+    if not topic and not source_text.strip():
+        raise HTTPException(status_code=400, detail="Mavzu kiriting yoki PDF/DOCX fayl yuklang")
+    source_text = source_text[:max_source_chars]
+    cost = slide_count * per_slide
+    job_id = uuid.uuid4().hex
+    spent, reason = spend_slide_credits(user_id, cost, f"slides:{job_id}", f"AI taqdimot — {slide_count} slayd")
+    if not spent:
+        if reason == "insufficient_credits": raise HTTPException(status_code=402, detail="Kredit yetarli emas")
+        raise HTTPException(status_code=409, detail="Kredit operatsiyasini bajarib bo'lmadi")
+    prompt = (
+        "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
+        f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
+        "Qolgan slaydlarda 2-6 ta aniq, qisqa bullet yozing. Takrorlanish va manbada yo'q faktlarni qo'shmang. "
+        "Matn tilini foydalanuvchi bergan matn tiliga moslang. Speaker notes qisqa bo'lsin.\n"
+        f"Mavzu: {topic or 'Manba material asosida'}\nManba matni:\n{source_text}"
+    )
+    deadline = time.monotonic() + max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
+    deck = None; last_error = None
+    start_index = _next_generation_key_start(len(GOOGLE_API_KEYS))
+    try:
+        acquired = gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic()))
+        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        try:
+            for offset in range(len(GOOGLE_API_KEYS)):
+                if time.monotonic() >= deadline: break
+                key_index = (start_index + offset) % len(GOOGLE_API_KEYS)
+                try:
+                    client = genai.Client(api_key=GOOGLE_API_KEYS[key_index], http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000))))
+                    response = client.models.generate_content(
+                        model=os.getenv("SLIDE_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
+                        config=genai_types.GenerateContentConfig(response_mime_type="application/json", response_schema=SlideDeckSchema, temperature=.35, max_output_tokens=12000),
+                    )
+                    if not response or not response.text: raise RuntimeError("AI bo'sh javob qaytardi")
+                    deck = SlideDeckSchema.model_validate_json(response.text)
+                    if len(deck.slides) != slide_count: raise RuntimeError(f"Slaydlar soni mos emas: {len(deck.slides)}/{slide_count}")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning("Slayd Gemini urinish muvaffaqiyatsiz | kalit_indeksi=%s | sabab=%s", key_index+1, _safe_ai_error_text(exc))
+        finally:
+            gemini_semaphore.release()
+        if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        pptx_bytes = _build_slide_pptx(deck, theme if theme in ("modern", "minimal", "academic", "creative") else "modern")
+        safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deck.presentation_title).strip("_")[:60] or "quiz_ai_slides"
+        headers = {"Content-Disposition": f'attachment; filename="{safe_title}.pptx"', "X-Slides-Credits-Spent": str(cost), "X-Slides-Job-Id": job_id}
+        return Response(content=pptx_bytes, media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers=headers)
+    except Exception as exc:
+        add_slide_credits(user_id, cost, f"slides-refund:{job_id}", "Slayd yaratish amalga oshmadi — kredit qaytarildi")
+        logging.exception("AI slayd yaratishda xato | user_id=%s | job_id=%s | sabab=%s", user_id, job_id, _safe_ai_error_text(exc))
+        raise HTTPException(status_code=502, detail="Taqdimot yaratilmadi. Sarflangan kreditlar balansga qaytarildi.")
 
 
 @app.get("/api/premium-status")
