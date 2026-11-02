@@ -21,6 +21,7 @@ MAX_BACKOFF = max(10, min(3600, int(os.getenv("HYBRID_MAX_BACKOFF", "300"))))
 _ENABLED = bool(PG_URL)
 _pg_pool = None
 _worker_started = False
+_worker_thread = None
 _stop = threading.Event()
 _lock = threading.Lock()
 
@@ -294,9 +295,17 @@ def _migrate_outbox(conn):
             updated_at INTEGER NOT NULL,
             next_retry_at INTEGER NOT NULL DEFAULT 0,
             last_error TEXT,
+            revision INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (table_name, pk_name, pk_value)
         )
     """)
+    # Safe in-place migration for installations that already have the V2 outbox.
+    outbox_columns = {row[1] for row in conn.execute(
+        "PRAGMA table_info(hybrid_sync_outbox_v2)"
+    ).fetchall()}
+    if "revision" not in outbox_columns:
+        conn.execute("ALTER TABLE hybrid_sync_outbox_v2 ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_hybrid_v2_ready
         ON hybrid_sync_outbox_v2(next_retry_at, updated_at)
@@ -327,6 +336,14 @@ def _migrate_outbox(conn):
     """)
 
 def _install_v2_triggers(conn):
+    # Recreate triggers so an existing installation receives the latest revision logic.
+    old_triggers = conn.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='trigger' AND name LIKE 'hybrid_v2_%'
+    """).fetchall()
+    for row in old_triggers:
+        conn.execute('DROP TRIGGER IF EXISTS "{}"'.format(row[0].replace('"', '""')))
+
     for table in _tables(conn):
         pk = _single_pk(_columns(conn, table))
         if not pk:
@@ -340,12 +357,13 @@ def _install_v2_triggers(conn):
                 AFTER {op} ON "{table}"
                 BEGIN
                     INSERT INTO hybrid_sync_outbox_v2
-                    (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error)
+                    (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error,revision)
                     VALUES ('{table_lit}','{pk_lit}',CAST({ref}."{pk}" AS TEXT),
-                            '{op}',0,CAST(strftime('%s','now') AS INTEGER),0,NULL)
+                            '{op}',0,CAST(strftime('%s','now') AS INTEGER),0,NULL,1)
                     ON CONFLICT(table_name,pk_name,pk_value) DO UPDATE SET
                         operation=excluded.operation, attempts=0,
-                        updated_at=excluded.updated_at,next_retry_at=0,last_error=NULL;
+                        updated_at=excluded.updated_at,next_retry_at=0,last_error=NULL,
+                        revision=hybrid_sync_outbox_v2.revision+1;
                 END
             """.format(
                 trigger=trigger, op=op,
@@ -366,11 +384,12 @@ def _initial_enqueue_v2(conn):
             pk.replace('"','""'), table.replace('"','""'))).fetchall()
         conn.executemany("""
             INSERT INTO hybrid_sync_outbox_v2
-            (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error)
-            VALUES (?,?,?,'UPSERT',0,?,0,NULL)
+            (table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,last_error,revision)
+            VALUES (?,?,?,'UPSERT',0,?,0,NULL,1)
             ON CONFLICT(table_name,pk_name,pk_value) DO UPDATE SET
                 operation='UPSERT',attempts=0,updated_at=excluded.updated_at,
-                next_retry_at=0,last_error=NULL
+                next_retry_at=0,last_error=NULL,
+                revision=hybrid_sync_outbox_v2.revision+1
         """, [(table, pk, str(r[0]), now) for r in rows])
         total += len(rows)
     conn.execute("""
@@ -413,20 +432,24 @@ def _sync_item(sqlite_conn, pg_conn, item):
         _upsert_one(cur, table, pk, names, values)
 
 def _mark_success(conn, item):
+    # A newer SQLite write may have refreshed this outbox row while PostgreSQL
+    # was processing the older snapshot. Acknowledge only the exact revision
+    # that was read; never delete a newer pending change.
     conn.execute("""
         DELETE FROM hybrid_sync_outbox_v2
-        WHERE table_name=? AND pk_name=? AND pk_value=?
-    """, (item["table_name"], item["pk_name"], item["pk_value"]))
+        WHERE table_name=? AND pk_name=? AND pk_value=? AND revision=?
+    """, (item["table_name"], item["pk_name"], item["pk_value"], item["revision"]))
 
 def _mark_failure(conn, item, error):
     attempts = int(item["attempts"] or 0) + 1
     delay = min(MAX_BACKOFF, 2 ** min(attempts, 8))
+    # Do not apply an old failure/backoff to a row that has since been changed.
     conn.execute("""
         UPDATE hybrid_sync_outbox_v2
         SET attempts=?,next_retry_at=?,last_error=?
-        WHERE table_name=? AND pk_name=? AND pk_value=?
+        WHERE table_name=? AND pk_name=? AND pk_value=? AND revision=?
     """, (attempts, int(time.time()) + delay, str(error)[:1000],
-          item["table_name"], item["pk_name"], item["pk_value"]))
+          item["table_name"], item["pk_name"], item["pk_value"], item["revision"]))
 
 def sync_once(path):
     """Sync one bounded batch with one PostgreSQL transaction.
@@ -451,7 +474,7 @@ def sync_once(path):
 
     try:
         rows = sc.execute("""
-            SELECT table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at
+            SELECT table_name,pk_name,pk_value,operation,attempts,updated_at,next_retry_at,revision
             FROM hybrid_sync_outbox_v2
             WHERE next_retry_at<=?
             ORDER BY updated_at LIMIT ?
@@ -732,9 +755,26 @@ def start(path):
     except Exception as exc:
         _log("exception", "initialization failed; SQLite continues normally: %s", exc)
         return False
+    global _worker_thread
     with _lock:
         if not _worker_started:
+            _stop.clear()
             _worker_started = True
-            threading.Thread(target=_worker, args=(path,), daemon=True,
-                             name="QuizPilotHybridV2").start()
+            _worker_thread = threading.Thread(target=_worker, args=(path,), daemon=True,
+                                              name="QuizPilotHybridV2")
+            _worker_thread.start()
     return True
+
+
+def stop(timeout=5):
+    """Hybrid Sync workeriga shutdown signali yuboradi va belgilangan muddat kutadi."""
+    global _worker_started
+    _stop.set()
+    worker = globals().get("_worker_thread")
+    if worker and worker.is_alive():
+        worker.join(timeout=max(0, float(timeout)))
+    if worker and worker.is_alive():
+        _log("warning", "worker did not stop before timeout; daemon shutdown will continue")
+    else:
+        _log("info", "worker stopped")
+    _worker_started = False
