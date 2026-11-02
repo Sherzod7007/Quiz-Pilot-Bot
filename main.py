@@ -2813,6 +2813,42 @@ def admin_bonus_teacher_command(message):
         pass
 
 
+@bot.message_handler(commands=["bonus_credits"])
+def admin_bonus_credits_command(message):
+    """Admin-only: grant slide credits independently from Premium/test bonuses."""
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) != 3:
+        bot.send_message(message.chat.id, "Format: /bonus_credits USER_ID KREDIT\nMisol: /bonus_credits 123456789 50")
+        return
+    try:
+        target_id, amount = int(parts[1]), int(parts[2])
+        if target_id <= 0 or amount <= 0 or amount > 1000000:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID musbat son, kredit miqdori esa 1–1 000 000 oralig‘ida bo‘lishi kerak.")
+        return
+    add_user_to_db(target_id)
+    admin_id = int(message.from_user.id)
+    reference = f"admin-credit:{admin_id}:{target_id}:{uuid.uuid4().hex}"
+    description = f"Admin bonusi; admin_id={admin_id}"
+    if not add_slide_credits(target_id, amount, reference, description, transaction_type="admin_bonus"):
+        bot.send_message(message.chat.id, "❌ Kredit qo‘shilmadi. Baza yoki tranzaksiya xatosini tekshiring.")
+        return
+    bot.send_message(message.chat.id, f"💎 Kredit bonusi berildi.\n👤 User: {target_id}\n➕ Kredit: {amount}\n🛡 Admin: {admin_id}")
+    try:
+        lang = get_user_lang(target_id)
+        texts = {
+            "uz": f"🎁 Sizga administrator tomonidan {amount} ta Slayd krediti berildi!\n💎 Kredit balansingiz yangilandi.",
+            "ru": f"🎁 Администратор начислил вам {amount} кредитов для слайдов!\n💎 Баланс обновлён.",
+            "en": f"🎁 The administrator granted you {amount} slide credits!\n💎 Your balance has been updated.",
+        }
+        bot.send_message(target_id, texts.get(lang, texts["uz"]))
+    except Exception:
+        logging.exception("Admin kredit bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
+
+
 @bot.message_handler(commands=["bonus_revoke"])
 def admin_bonus_revoke_command(message):
     if not _admin_only(message):
@@ -3220,7 +3256,7 @@ def api_slides_credits_compat(user_id: int):
             "packages": list(get_slide_credit_packages().values())}
 
 
-def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi"):
+def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi", transaction_type="refund"):
     """Kreditlarni atomik va takrorlanmaydigan tarzda hisobga qo'shish."""
     amount = int(amount)
     if amount <= 0 or amount > 1000000 or not str(reference).strip():
@@ -3230,7 +3266,7 @@ def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), int(time.time())))
         conn.execute("UPDATE credit_wallets SET balance=balance+?, updated_at=? WHERE user_id=?", (amount, int(time.time()), int(user_id)))
-        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) VALUES (?,?, 'refund', ?, ?, ?)", (int(user_id), amount, str(reference), str(description)[:200], int(time.time())))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) VALUES (?,?, ?, ?, ?, ?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], int(time.time())))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -3274,6 +3310,10 @@ def _build_slide_pptx(deck, theme="modern"):
         "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
         "academic": ((28, 48, 72), (190, 155, 80), (248, 247, 242)),
         "creative": ((43, 24, 75), (232, 92, 150), (250, 246, 252)),
+        "tech": ((7, 21, 34), (0, 217, 255), (239, 249, 255)),
+        "business": ((23, 32, 44), (212, 173, 98), (248, 246, 240)),
+        "infographic": ((243, 247, 251), (36, 166, 160), (35, 55, 68)),
+        "nature": ((18, 56, 46), (127, 189, 114), (244, 250, 239)),
     }
     bg, accent, fg = themes.get(theme, themes["modern"])
     prs = Presentation()
@@ -3399,7 +3439,7 @@ def api_generate_slides(
         finally:
             gemini_semaphore.release()
         if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
-        pptx_bytes = _build_slide_pptx(deck, theme if theme in ("modern", "minimal", "academic", "creative") else "modern")
+        pptx_bytes = _build_slide_pptx(deck, theme if theme in ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature") else "modern")
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deck.presentation_title).strip("_")[:60] or "quiz_ai_slides"
         headers = {"Content-Disposition": f'attachment; filename="{safe_title}.pptx"', "X-Slides-Credits-Spent": str(cost), "X-Slides-Job-Id": job_id}
         return Response(content=pptx_bytes, media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers=headers)
@@ -6388,6 +6428,7 @@ def _admin_panel_bonus_markup():
     markup.add(
         telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
         telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
+        telebot.types.InlineKeyboardButton("💎 Slayd kreditlari bonusi", callback_data="adminpanel:guide:bonus_credits"),
         telebot.types.InlineKeyboardButton("🗑 Bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
         telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
     )
@@ -6408,7 +6449,7 @@ def admin_help_panel_command(message):
         "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
         "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
         "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
-        "🎁 Bonuslar — buyruq formati bo‘yicha yordam.\n\n"
+        "🎁 Bonuslar — Premium, Teacher va Slayd kreditlarini alohida boshqarish.\n\n"
         "🔐 Ushbu menyu faqat administrator uchun ochiq."
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
@@ -6449,6 +6490,7 @@ def admin_help_panel_callback(call):
         guide_texts = {
             "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
             "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
+            "bonus_credits": "💎 <b>Slayd kreditlari bonusi</b>\nFormat: <code>/bonus_credits USER_ID KREDIT</code>\nMisol: <code>/bonus_credits 123456789 50</code>\nBu bonus Premium va test limitlaridan alohida hisoblanadi.",
             "bonus_revoke": "🗑 <b>Bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
         }
         bot.answer_callback_query(call.id)
