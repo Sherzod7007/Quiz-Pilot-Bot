@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import docx
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import re
 from io import BytesIO
@@ -34,6 +35,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 import sqlite3
 import telebot
@@ -3239,10 +3241,10 @@ def api_slides_config():
     except Exception:
         per_slide = 1
     try:
-        options = [int(x.strip()) for x in os.getenv("SLIDE_COUNT_OPTIONS", "5,10,15,20").split(",") if x.strip()]
-        options = sorted({x for x in options if 1 <= x <= 100}) or [5, 10, 15, 20]
+        options = [int(x.strip()) for x in os.getenv("SLIDE_COUNT_OPTIONS", "6,8,10,12,16,20").split(",") if x.strip()]
+        options = sorted({x for x in options if 1 <= x <= 100}) or [6, 8, 10, 12, 16, 20]
     except Exception:
-        options = [5, 10, 15, 20]
+        options = [6, 8, 10, 12, 16, 20]
     return {"status": "ok", "enabled": enabled, "credits_enabled": credits_enabled,
             "credits_per_slide": per_slide, "slide_count_options": options}
 
@@ -3360,6 +3362,89 @@ def _build_slide_pptx(deck, theme="modern"):
     return output.getvalue()
 
 
+def _build_slide_pdf(deck, theme="modern"):
+    """Taqdimot mazmunidan yengil, landscape PDF nusxasini xotirada yaratadi."""
+    theme_colors = {
+        "modern": ((12, 25, 48), (42, 183, 210), (245, 248, 252)),
+        "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
+        "academic": ((28, 48, 72), (190, 155, 80), (248, 247, 242)),
+        "creative": ((43, 24, 75), (232, 92, 150), (250, 246, 252)),
+        "tech": ((7, 21, 34), (0, 217, 255), (239, 249, 255)),
+        "business": ((23, 32, 44), (212, 173, 98), (248, 246, 240)),
+        "infographic": ((243, 247, 251), (36, 166, 160), (35, 55, 68)),
+        "nature": ((18, 56, 46), (127, 189, 114), (244, 250, 239)),
+    }
+    bg, accent, fg = theme_colors.get(theme, theme_colors["modern"])
+    page_w, page_h = 13.333 * 72, 7.5 * 72
+    output = BytesIO()
+    pdf = pdf_canvas.Canvas(output, pagesize=(page_w, page_h), pageCompression=1)
+    regular_ok, bold_ok = _register_pdf_font()
+    regular = "QuizPilotFont" if regular_ok else "Helvetica"
+    bold = "QuizPilotFontBold" if bold_ok else (regular if regular_ok else "Helvetica-Bold")
+
+    def rgb(value):
+        return tuple(channel / 255.0 for channel in value)
+
+    def draw_wrapped(text, x, y, max_width, font_name, font_size, color, leading):
+        pdf.setFillColorRGB(*rgb(color))
+        pdf.setFont(font_name, font_size)
+        words = str(text or "").split()
+        line = ""
+        for word in words:
+            candidate = (line + " " + word).strip()
+            if line and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+                pdf.drawString(x, y, line)
+                y -= leading
+                line = word
+            else:
+                line = candidate
+        if line:
+            pdf.drawString(x, y, line)
+            y -= leading
+        return y
+
+    for index, item in enumerate(deck.slides):
+        pdf.setFillColorRGB(*rgb(bg))
+        pdf.rect(0, 0, page_w, page_h, fill=1, stroke=0)
+        pdf.setFillColorRGB(*rgb(accent))
+        pdf.rect(0, 0, 12, page_h, fill=1, stroke=0)
+        if index == 0:
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(bold, 30)
+            title_lines = []
+            words = str(deck.presentation_title).split()
+            current = ""
+            for word in words:
+                candidate = (current + " " + word).strip()
+                if current and pdfmetrics.stringWidth(candidate, bold, 30) > page_w - 150:
+                    title_lines.append(current); current = word
+                else:
+                    current = candidate
+            if current: title_lines.append(current)
+            y = page_h * .62 + (len(title_lines)-1) * 38
+            for line in title_lines[:3]:
+                pdf.drawCentredString(page_w/2, y, line); y -= 38
+            if deck.subtitle:
+                draw_wrapped(deck.subtitle, 85, page_h*.39, page_w-170, regular, 16, accent, 23)
+            pdf.setFont(regular, 9)
+            pdf.drawCentredString(page_w/2, 28, "QUIZ AI  •  AI PRESENTATION")
+        else:
+            draw_wrapped(item.title, 55, page_h-62, page_w-105, bold, 23, accent, 30)
+            pdf.setFillColorRGB(*rgb(accent))
+            pdf.roundRect(58, page_h-112, 82, 4, 2, fill=1, stroke=0)
+            y = page_h - 155
+            for bullet in item.bullets:
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.circle(67, y+4, 3.5, fill=1, stroke=0)
+                y = draw_wrapped(bullet, 88, y, page_w-145, regular, 15, fg, 22) - 15
+            pdf.setFillColorRGB(*rgb(accent))
+            pdf.setFont(bold, 9)
+            pdf.drawRightString(page_w-35, 25, f"{index+1:02d}")
+        pdf.showPage()
+    pdf.save()
+    return output.getvalue()
+
+
 @app.post("/api/slides/generate")
 def api_generate_slides(
     request: Request,
@@ -3367,6 +3452,8 @@ def api_generate_slides(
     topic: str = Form(""),
     slide_count: int = Form(...),
     theme: str = Form("modern"),
+    university_recipient: str = Form(""),
+    student_group: str = Form(""),
     file: Optional[UploadFile] = File(None),
 ):
     """Yangi slayd generatori; mavjud quiz yaratish oqimidan mustaqil."""
@@ -3378,15 +3465,22 @@ def api_generate_slides(
         raise HTTPException(status_code=503, detail="Kredit tizimi hozircha o'chirilgan")
     if not GOOGLE_API_KEYS:
         raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
-    min_count = max(1, int(os.getenv("SLIDE_MIN_COUNT", "5")))
+    min_count = max(1, int(os.getenv("SLIDE_MIN_COUNT", "6")))
     max_count = max(min_count, min(100, int(os.getenv("SLIDE_MAX_COUNT", "20"))))
+    try:
+        allowed_counts = {int(x.strip()) for x in os.getenv("SLIDE_COUNT_OPTIONS", "6,8,10,12,16,20").split(",") if x.strip()}
+    except Exception:
+        allowed_counts = {6, 8, 10, 12, 16, 20}
+    allowed_counts = {x for x in allowed_counts if min_count <= x <= max_count} or {6, 8, 10, 12, 16, 20}
     per_slide = max(1, min(10000, int(os.getenv("SLIDE_CREDITS_PER_SLIDE", "1"))))
     max_file_mb = max(1, min(30, int(os.getenv("SLIDE_MAX_FILE_MB", "10"))))
     max_source_chars = max(1000, min(200000, int(os.getenv("SLIDE_MAX_SOURCE_CHARS", "50000"))))
     max_topic_chars = max(20, min(5000, int(os.getenv("SLIDE_MAX_TOPIC_CHARS", "1000"))))
-    if not min_count <= slide_count <= max_count:
-        raise HTTPException(status_code=400, detail=f"Slaydlar soni {min_count}-{max_count} oralig'ida bo'lishi kerak")
+    if slide_count not in allowed_counts:
+        raise HTTPException(status_code=400, detail="Ruxsat etilgan slayd sonlaridan birini tanlang")
     topic = (topic or "").strip()[:max_topic_chars]
+    university_recipient = (university_recipient or "").strip()[:180]
+    student_group = (student_group or "").strip()[:120]
     source_text = ""
     if file is not None:
         raw = file.file.read()
@@ -3411,7 +3505,11 @@ def api_generate_slides(
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
         "Qolgan slaydlarda 2-6 ta aniq, qisqa bullet yozing. Takrorlanish va manbada yo'q faktlarni qo'shmang. "
         "Matn tilini foydalanuvchi bergan matn tiliga moslang. Speaker notes qisqa bo'lsin.\n"
-        f"Mavzu: {topic or 'Manba material asosida'}\nManba matni:\n{source_text}"
+        f"Mavzu: {topic or 'Manba material asosida'}\\n"
+        f"Tituldagi universitet/qabul qiluvchi: {university_recipient or 'Ko‘rsatilmagan'}\\n"
+        f"Tituldagi talaba/guruh: {student_group or 'Ko‘rsatilmagan'}\\n"
+        "Agar titul ma'lumotlari berilgan bo'lsa, birinchi slayd subtitle qismiga ixcham va tartibli joylashtiring.\\n"
+        f"Manba matni:\\n{source_text}"
     )
     deadline = time.monotonic() + max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
     deck = None; last_error = None
@@ -3439,10 +3537,20 @@ def api_generate_slides(
         finally:
             gemini_semaphore.release()
         if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
-        pptx_bytes = _build_slide_pptx(deck, theme if theme in ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature") else "modern")
+        safe_theme = theme if theme in ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature") else "modern"
+        pptx_bytes = _build_slide_pptx(deck, safe_theme)
+        pdf_bytes = _build_slide_pdf(deck, safe_theme)
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deck.presentation_title).strip("_")[:60] or "quiz_ai_slides"
-        headers = {"Content-Disposition": f'attachment; filename="{safe_title}.pptx"', "X-Slides-Credits-Spent": str(cost), "X-Slides-Job-Id": job_id}
-        return Response(content=pptx_bytes, media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers=headers)
+        return JSONResponse(content={
+            "status": "ok",
+            "title": deck.presentation_title,
+            "job_id": job_id,
+            "credits_spent": cost,
+            "files": {
+                "pptx": {"filename": f"{safe_title}.pptx", "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "data": base64.b64encode(pptx_bytes).decode("ascii")},
+                "pdf": {"filename": f"{safe_title}.pdf", "mime": "application/pdf", "data": base64.b64encode(pdf_bytes).decode("ascii")}
+            }
+        })
     except Exception as exc:
         add_slide_credits(user_id, cost, f"slides-refund:{job_id}", "Slayd yaratish amalga oshmadi — kredit qaytarildi")
         logging.exception("AI slayd yaratishda xato | user_id=%s | job_id=%s | sabab=%s", user_id, job_id, _safe_ai_error_text(exc))
