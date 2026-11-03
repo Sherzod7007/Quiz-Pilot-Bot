@@ -16384,17 +16384,40 @@ body.slides-generation-active #ai-generation-overlay .ai-loader-orbit{animation:
 </html>
 
 <style id="quiz-ai-slides-count-layout-fix">
+/* Slayd soni: barcha 6 variant bitta qatorda, ixcham joylashadi. */
 #slides-count-options.slides-count-options{
     display:grid !important;
-    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
-    gap:8px !important;
+    grid-template-columns:repeat(6,minmax(0,1fr)) !important;
+    gap:6px !important;
 }
 #slides-count-options .slides-count-option{
     display:flex !important;
     visibility:visible !important;
     opacity:1 !important;
-    min-height:48px;
+    min-width:0 !important;
+    min-height:46px !important;
+    padding:10px 2px !important;
     align-items:center;
     justify-content:center;
+    font-size:14px !important;
+}
+/* Tugma odatiy holatda faol va yorqin ko'rinadi. */
+#slides-generate-button.slides-generate-btn{
+    opacity:1 !important;
+    filter:none !important;
+    cursor:pointer !important;
+    box-shadow:0 4px 18px rgba(0,164,239,.48),0 0 12px rgba(0,210,255,.18),inset 0 1px 0 rgba(255,255,255,.45) !important;
+}
+#slides-generate-button.slides-generate-btn:active{
+    opacity:1 !important;
+    transform:scale(.985);
+}
+#slides-generate-button.slides-generate-btn:disabled{
+    opacity:.78 !important;
+    cursor:wait !important;
+}
+@media(max-width:360px){
+    #slides-count-options.slides-count-options{gap:4px !important;}
+    #slides-count-options .slides-count-option{font-size:13px !important;padding-left:1px !important;padding-right:1px !important;}
 }
 </style>
