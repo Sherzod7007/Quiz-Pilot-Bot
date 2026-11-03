@@ -16127,8 +16127,8 @@ window.onload = function() {
   box-sizing:border-box !important;
   width:100% !important;
   min-width:0 !important;
-  height:132px !important;
-  min-height:132px !important;
+  height:112px !important;
+  min-height:112px !important;
   margin:0 !important;
   padding:15px 10px !important;
   display:flex !important;
@@ -16165,7 +16165,14 @@ window.onload = function() {
 #create-screen .create-tools-row .create-tool-icon {font-size:32px !important;line-height:1.15 !important;margin:0 0 2px !important;}
 #create-screen .create-tools-row .create-tool-title {font-size:15px !important;line-height:1.2 !important;}
 #create-screen .create-tools-row .create-tool-desc {font-size:12px !important;line-height:1.3 !important;}
-#create-screen .create-tools-row .slides-premium-tag {z-index:2;}
+#create-screen .create-tools-row .slides-premium-tag {
+  z-index:2 !important;
+  top:6px !important; right:6px !important;
+  padding:2px 6px !important; border-radius:12px !important;
+  font-size:8px !important; line-height:1.15 !important;
+  letter-spacing:.2px !important;
+  white-space:nowrap !important;
+}
 .slides-screen-header {
   display:flex !important;
   align-items:center !important;
@@ -16185,7 +16192,10 @@ window.onload = function() {
   display:grid !important;
   place-items:center !important;
   line-height:1 !important;
-  font-size:23px !important;
+  font-size:20px !important;
+  text-align:center !important;
+  text-indent:0 !important;
+  transform:translateY(-1px) !important;
 }
 .slides-screen-header h1 {flex:1 1 auto !important;min-width:0 !important;margin:0 !important;text-align:left !important;}
 .slides-screen-header .slides-header-crown {flex:0 0 auto !important;margin-left:auto !important;}
@@ -16198,7 +16208,7 @@ window.onload = function() {
 }
 @media (max-width:380px) {
   #create-screen .create-tools-row {gap:8px !important;margin-bottom:8px !important;}
-  #create-screen .create-tools-row .create-tool-card {height:124px !important;min-height:124px !important;padding:12px 7px !important;}
+  #create-screen .create-tools-row .create-tool-card {height:108px !important;min-height:108px !important;padding:10px 7px !important;}
   #create-screen .create-tools-row .create-tool-icon {font-size:29px !important;}
   #create-screen .create-tools-row .create-tool-title {font-size:13px !important;}
   #create-screen .create-tools-row .create-tool-desc {font-size:11px !important;}
