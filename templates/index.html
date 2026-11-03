@@ -16357,8 +16357,8 @@ window.onload = function() {
             <div class="slides-result-icon">🎉</div>
             <h2 id="slides-result-title">Quiz AI</h2>
             <p id="slides-result-subtitle">Taqdimotingiz tayyor! Kerakli formatni tanlab yuklab oling.</p>
-            <button type="button" class="slides-download-btn slides-download-pptx" onclick="downloadSlidesFile('pptx')"><span>📊</span><span>PowerPoint (.PPTX) yuklab olish</span></button>
-            <button type="button" class="slides-download-btn slides-download-pdf" onclick="downloadSlidesFile('pdf')"><span>📕</span><span>PDF yuklab olish</span></button>
+            <button type="button" class="slides-download-btn slides-download-pptx" onclick="downloadSlidesFile('pptx')"><span>📊</span><span data-slides-result-label="pptx">PowerPoint (.PPTX) yuklab olish</span></button>
+            <button type="button" class="slides-download-btn slides-download-pdf" onclick="downloadSlidesFile('pdf')"><span>📕</span><span data-slides-result-label="pdf">PDF yuklab olish</span></button>
             <button type="button" class="slides-result-close" onclick="closeSlidesResult()">✕</button>
         </div>
     </div>
@@ -16380,6 +16380,33 @@ body.slides-generation-active #ai-generation-overlay .ai-loader-orbit{animation:
 .slides-result-close{position:absolute;right:10px;top:10px;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.2);color:#fff;font-size:15px}
 @media(max-width:380px){.slides-result-card{padding:21px 15px 16px}.slides-download-btn{font-size:13px}}
 </style>
+
+<style id="quiz-ai-slides-requested-ui-fixes">
+/* Slaydlar: chiqish strelkasini tugma markaziga aniq joylash. */
+#slides-screen .slides-screen-header > .slides-back-btn {
+    box-sizing:border-box !important;
+    flex:0 0 40px !important;
+    width:40px !important;
+    min-width:40px !important;
+    max-width:40px !important;
+    height:40px !important;
+    min-height:40px !important;
+    max-height:40px !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    padding:0 !important;
+    margin:0 !important;
+    line-height:1 !important;
+    text-align:center !important;
+    text-indent:0 !important;
+    transform:none !important;
+}
+#slides-screen .slides-screen-header > .slides-back-btn::first-letter {
+    line-height:1 !important;
+}
+</style>
+
 </body>
 </html>
 
