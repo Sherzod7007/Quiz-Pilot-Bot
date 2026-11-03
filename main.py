@@ -1150,6 +1150,21 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     if not path.startswith("/api/") or request.method == "OPTIONS":
         return await call_next(request)
 
+    # Slayd yuklash tokeni Telegram Android downloader uchun imzolangan initData'siz ishlaydi.
+    # Token tasodifiy va qisqa muddatli; bir nechta GET urinishiga ruxsat beriladi.
+    if path.startswith("/api/slides/download/") and request.method == "GET":
+        parts = path.rstrip("/").split("/")
+        download_token = parts[-2] if len(parts) >= 2 else ""
+        with _SLIDES_DOWNLOAD_LOCK:
+            slide_ticket = _SLIDES_DOWNLOAD_FILES.get(download_token)
+            ticket_valid = bool(slide_ticket and slide_ticket.get("expires_at", 0) >= time.time())
+            if ticket_valid:
+                slide_ticket["uses"] = slide_ticket.get("uses", 0) + 1
+                ticket_valid = slide_ticket["uses"] <= 10
+        if not ticket_valid:
+            return JSONResponse(status_code=401, content={"detail": "Slayd yuklash havolasi yaroqsiz yoki muddati tugagan."})
+        return await call_next(request)
+
     # Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida va qisqa muddat ishlaydi.
     # Telegram/Android downloader bir fayl uchun bir nechta GET yuborishi mumkin;
     # shu sababli chipta birinchi GET'dan keyin bekor qilinmaydi.
@@ -3445,6 +3460,33 @@ def _build_slide_pdf(deck, theme="modern"):
     return output.getvalue()
 
 
+# Slayd fayllari Telegram WebView'da barqaror yuklanishi uchun qisqa muddatli saqlanadi.
+_SLIDES_DOWNLOAD_FILES = {}
+_SLIDES_DOWNLOAD_LOCK = threading.Lock()
+_SLIDES_DOWNLOAD_TTL = 30 * 60
+
+
+@app.get("/api/slides/download/{token}/{file_format}")
+def api_download_slides_file(token: str, file_format: str):
+    if file_format not in ("pptx", "pdf"):
+        raise HTTPException(status_code=404, detail="Fayl topilmadi")
+    now = time.time()
+    with _SLIDES_DOWNLOAD_LOCK:
+        expired = [key for key, value in _SLIDES_DOWNLOAD_FILES.items() if value["expires_at"] <= now]
+        for key in expired:
+            _SLIDES_DOWNLOAD_FILES.pop(key, None)
+        entry = _SLIDES_DOWNLOAD_FILES.get(token)
+        file_item = entry.get(file_format) if entry else None
+    if not file_item:
+        raise HTTPException(status_code=404, detail="Fayl muddati tugagan yoki topilmadi")
+    filename = file_item["filename"].replace('"', "")
+    return Response(
+        content=file_item["data"],
+        media_type=file_item["mime"],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
 @app.post("/api/slides/generate")
 def api_generate_slides(
     request: Request,
@@ -3541,14 +3583,33 @@ def api_generate_slides(
         pptx_bytes = _build_slide_pptx(deck, safe_theme)
         pdf_bytes = _build_slide_pdf(deck, safe_theme)
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deck.presentation_title).strip("_")[:60] or "quiz_ai_slides"
+        download_token = secrets.token_urlsafe(32)
+        with _SLIDES_DOWNLOAD_LOCK:
+            now = time.time()
+            expired = [key for key, value in _SLIDES_DOWNLOAD_FILES.items() if value["expires_at"] <= now]
+            for key in expired:
+                _SLIDES_DOWNLOAD_FILES.pop(key, None)
+            _SLIDES_DOWNLOAD_FILES[download_token] = {
+                "expires_at": now + _SLIDES_DOWNLOAD_TTL,
+                "pptx": {
+                    "filename": f"{safe_title}.pptx",
+                    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "data": pptx_bytes,
+                },
+                "pdf": {
+                    "filename": f"{safe_title}.pdf",
+                    "mime": "application/pdf",
+                    "data": pdf_bytes,
+                },
+            }
         return JSONResponse(content={
             "status": "ok",
             "title": deck.presentation_title,
             "job_id": job_id,
             "credits_spent": cost,
             "files": {
-                "pptx": {"filename": f"{safe_title}.pptx", "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "data": base64.b64encode(pptx_bytes).decode("ascii")},
-                "pdf": {"filename": f"{safe_title}.pdf", "mime": "application/pdf", "data": base64.b64encode(pdf_bytes).decode("ascii")}
+                "pptx": {"filename": f"{safe_title}.pptx", "url": f"/api/slides/download/{download_token}/pptx"},
+                "pdf": {"filename": f"{safe_title}.pdf", "url": f"/api/slides/download/{download_token}/pdf"},
             }
         })
     except Exception as exc:
