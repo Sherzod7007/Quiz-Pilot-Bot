@@ -1764,7 +1764,7 @@
         .slides-theme-preview:before,.slides-theme-preview:after { content:""; position:absolute; border-radius:3px; background:rgba(255,255,255,.72); height:5px; left:9px; top:12px; width:42%; box-shadow:0 10px 0 rgba(255,255,255,.35),0 20px 0 rgba(255,255,255,.22); }
         .slides-theme-preview:after { left:auto; right:9px; top:10px; width:25%; height:34px; opacity:.65; box-shadow:none; }
         .slides-theme-name { display:block; font-size:12px; font-weight:750; }
-        .slides-count-options { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:8px 0 14px; }
+        .slides-count-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:8px 0 14px; }
         .slides-count-option { border:1px solid var(--aero-border); border-radius:10px; padding:13px 4px; background:rgba(0,0,0,.24); color:var(--text-main); font-weight:800; font-size:16px; cursor:pointer; }
         .slides-count-option[aria-pressed="true"] { background:rgba(0,190,220,.18); border:2px solid #35d6f5; padding:12px 3px; color:#72e8ff; }
         .slides-file-picker { display:flex; align-items:center; gap:10px; padding:12px; border:1px solid var(--aero-border); border-radius:12px; background:rgba(0,0,0,.28); text-align:left; }
@@ -13389,9 +13389,11 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             <input type="hidden" id="slides-theme-select" value="modern">
             <label data-lang="slides_count_label">Slaydlar soni</label>
             <div id="slides-count-options" class="slides-count-options" role="group" aria-label="Number of slides">
-                <button type="button" class="slides-count-option" data-count="5" aria-pressed="false" onclick="selectSlidesCount(5)">5</button>
+                <button type="button" class="slides-count-option" data-count="6" aria-pressed="false" onclick="selectSlidesCount(6)">6</button>
+                <button type="button" class="slides-count-option" data-count="8" aria-pressed="false" onclick="selectSlidesCount(8)">8</button>
                 <button type="button" class="slides-count-option" data-count="10" aria-pressed="true" onclick="selectSlidesCount(10)">10</button>
-                <button type="button" class="slides-count-option" data-count="15" aria-pressed="false" onclick="selectSlidesCount(15)">15</button>
+                <button type="button" class="slides-count-option" data-count="12" aria-pressed="false" onclick="selectSlidesCount(12)">12</button>
+                <button type="button" class="slides-count-option" data-count="16" aria-pressed="false" onclick="selectSlidesCount(16)">16</button>
                 <button type="button" class="slides-count-option" data-count="20" aria-pressed="false" onclick="selectSlidesCount(20)">20</button>
             </div>
             <input type="hidden" id="slides-count-select" value="10">
@@ -14489,7 +14491,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 if (data.enabled === false) return;
                 slidesCreditsPerSlide = Math.max(1, Number(data.credits_per_slide) || 1);
                 const allowed = Array.isArray(data.slide_count_options) ? data.slide_count_options.map(Number) : [5,10,15,20];
-                const valid = allowed.filter(n => [5,10,15,20].includes(n));
+                const valid = allowed.filter(n => [6,8,10,12,16,20].includes(n));
                 document.querySelectorAll('.slides-count-option').forEach(btn => { btn.hidden = !valid.includes(Number(btn.dataset.count)); });
                 const current = Number(document.getElementById('slides-count-select')?.value || 10);
                 selectSlidesCount(valid.includes(current) ? current : (valid.includes(10) ? 10 : valid[0] || 10));
@@ -14611,6 +14613,61 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 ? langPack[currentLang].slides_file_selected + slidesSourceInput.files[0].name : langPack[currentLang].slides_no_file;
         });
 
+        let slidesGeneratedFiles = null;
+
+        function showSlidesResult(files, title) {
+            slidesGeneratedFiles = files || null;
+            const overlay = document.getElementById('slides-result-overlay');
+            const titleNode = document.getElementById('slides-result-title');
+            const subtitleNode = document.getElementById('slides-result-subtitle');
+            if (titleNode) titleNode.textContent = title || 'Quiz AI';
+            const copy = {
+                uz: 'Taqdimotingiz tayyor! Kerakli formatni tanlab yuklab oling.',
+                ru: 'Ваша презентация готова! Выберите формат для скачивания.',
+                en: 'Your presentation is ready! Choose a format to download.'
+            };
+            if (subtitleNode) subtitleNode.textContent = copy[currentLang] || copy.uz;
+            const buttonLabels = {
+                uz: {pptx:'PowerPoint (.PPTX) yuklab olish', pdf:'PDF yuklab olish'},
+                ru: {pptx:'Скачать PowerPoint (.PPTX)', pdf:'Скачать PDF'},
+                en: {pptx:'Download PowerPoint (.PPTX)', pdf:'Download PDF'}
+            };
+            const labels = buttonLabels[currentLang] || buttonLabels.uz;
+            document.querySelectorAll('[data-slides-result-label]').forEach(node => {
+                const format = node.getAttribute('data-slides-result-label');
+                if (labels[format]) node.textContent = labels[format];
+            });
+            if (overlay) { overlay.classList.add('active'); overlay.setAttribute('aria-hidden','false'); }
+        }
+
+        function closeSlidesResult() {
+            const overlay = document.getElementById('slides-result-overlay');
+            if (overlay) { overlay.classList.remove('active'); overlay.setAttribute('aria-hidden','true'); }
+            slidesGeneratedFiles = null;
+        }
+
+        function downloadSlidesFile(format) {
+            const item = slidesGeneratedFiles && slidesGeneratedFiles[format];
+            if (!item || !item.data) return;
+            try {
+                const raw = atob(item.data);
+                const bytes = new Uint8Array(raw.length);
+                for (let i=0; i<raw.length; i++) bytes[i] = raw.charCodeAt(i);
+                const blob = new Blob([bytes], {type:item.mime || 'application/octet-stream'});
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = item.filename || (format === 'pdf' ? 'Quiz_AI_Slides.pdf' : 'Quiz_AI_Slides.pptx');
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } catch (error) {
+                console.warn('Taqdimot faylini yuklab olishda xato:', error);
+                showAppAlert('⚠️', currentLang === 'ru' ? 'Не удалось загрузить файл. Попробуйте ещё раз.' : currentLang === 'en' ? 'Could not download the file. Please try again.' : 'Faylni yuklab bo‘lmadi. Qayta urinib ko‘ring.');
+            }
+        }
+
         async function generateSlidesPresentation() {
             const topicNode = document.getElementById('slides-topic-input');
             const countNode = document.getElementById('slides-count-select');
@@ -14638,8 +14695,9 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             form.append('university_recipient', (document.getElementById('slides-university-input')?.value || '').trim());
             form.append('student_group', (document.getElementById('slides-student-input')?.value || '').trim());
             if (sourceFile) form.append('file', sourceFile);
-            if (button) { button.disabled = true; button.dataset.originalText = button.innerText; button.innerText = langPack[currentLang].slides_generating; }
+            if (button) button.disabled = true;
             if (status) { status.textContent = langPack[currentLang].slides_generating; status.style.color = ''; }
+            setAIGenerationLock(true, 'slides');
             try {
                 const response = await fetch(`${BASE_URL}/api/slides/generate`, {method:'POST', body:form});
                 if (!response.ok) {
@@ -14647,26 +14705,25 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     try { const err = await response.json(); detail = err.detail || ''; } catch (_) {}
                     throw new Error(detail || 'slide_generation_failed');
                 }
-                const blob = await response.blob();
-                const disposition = response.headers.get('Content-Disposition') || '';
-                const match = disposition.match(/filename="?([^";]+)"?/i);
-                const filename = match ? match[1] : 'Quiz_AI_Slides.pptx';
-                const url = URL.createObjectURL(blob);
-                const anchor = document.createElement('a');
-                anchor.href = url; anchor.download = filename;
-                document.body.appendChild(anchor); anchor.click(); anchor.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 30000);
-                if (status) { status.textContent = langPack[currentLang].slides_generate_success; status.style.color = '#4ade80'; }
+                const data = await response.json();
+                if (!data || data.status !== 'ok' || !data.files || !data.files.pptx || !data.files.pdf) {
+                    throw new Error('slide_generation_failed');
+                }
                 if (topicNode) topicNode.value = '';
                 if (fileNode) fileNode.value = '';
-                const fileLabel = document.getElementById('slides-source-file-name'); if (fileLabel) fileLabel.textContent = '';
+                const fileLabel = document.getElementById('slides-source-file-name');
+                if (fileLabel) fileLabel.textContent = langPack[currentLang].slides_no_file;
+                if (status) { status.textContent = langPack[currentLang].slides_generate_success; status.style.color = '#4ade80'; }
                 await loadSlidesCredits();
+                setAIGenerationLock(false, 'slides');
+                showSlidesResult(data.files, data.title);
             } catch (error) {
                 console.warn('Slayd yaratishda xatolik:', error);
                 if (status) { status.textContent = error.message && error.message !== 'slide_generation_failed' ? error.message : langPack[currentLang].slides_generate_error; status.style.color = '#fb7185'; }
                 await loadSlidesCredits();
+                setAIGenerationLock(false, 'slides');
             } finally {
-                if (button) { button.disabled = false; button.innerHTML = `<span data-lang="slides_generate_btn">${langPack[currentLang].slides_generate_btn || 'Taqdimot yaratish'}</span> 🚀`; }
+                if (button) button.disabled = false;
             }
         }
 
@@ -14839,21 +14896,32 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
 
         let aiGenerationLocked = false;
 
-        function setAIGenerationLock(locked) {
+        function setAIGenerationLock(locked, mode = 'quiz') {
             aiGenerationLocked = !!locked;
             const overlay = document.getElementById('ai-generation-overlay');
             if (!overlay) return;
-
             const title = document.getElementById('ai-generation-title');
             const subtitle = document.getElementById('ai-generation-subtitle');
             const note = document.getElementById('ai-generation-lock-note');
-            if (title) title.innerText = langPack[currentLang].ai_generation_title;
-            if (subtitle) subtitle.innerText = langPack[currentLang].ai_generation_subtitle;
-            if (note) note.innerText = langPack[currentLang].ai_generation_lock_note;
-
+            const slideText = {
+                uz: {title:'Taqdimot tayyorlanmoqda...', subtitle:'Mavzu tahlil qilinmoqda va slaydlar tayyorlanmoqda.', note:'Taqdimotlar tayyorlanayapti, iltimos bir oz kuting. Taqdimotlar yaratilgunicha ilova boshqaruvi vaqtincha bloklangan.'},
+                ru: {title:'Презентация готовится...', subtitle:'Анализируем тему и формируем слайды.', note:'Презентации готовятся, пожалуйста, подождите. До завершения создания управление приложением временно заблокировано.'},
+                en: {title:'Preparing your presentation...', subtitle:'Your topic is being analyzed and slides are being created.', note:'Your presentations are being prepared. Please wait. App controls are temporarily locked until the presentation is ready.'}
+            };
+            if (mode === 'slides') {
+                const copy = slideText[currentLang] || slideText.uz;
+                if (title) title.innerText = copy.title;
+                if (subtitle) subtitle.innerText = copy.subtitle;
+                if (note) note.innerText = copy.note;
+            } else {
+                if (title) title.innerText = langPack[currentLang].ai_generation_title;
+                if (subtitle) subtitle.innerText = langPack[currentLang].ai_generation_subtitle;
+                if (note) note.innerText = langPack[currentLang].ai_generation_lock_note;
+            }
             overlay.classList.toggle('active', aiGenerationLocked);
             overlay.setAttribute('aria-hidden', aiGenerationLocked ? 'false' : 'true');
             document.body.classList.toggle('ai-generation-active', aiGenerationLocked);
+            document.body.classList.toggle('slides-generation-active', aiGenerationLocked && mode === 'slides');
         }
 
         async function startGeneration() {
@@ -16274,5 +16342,35 @@ window.onload = function() {
 
 </style>
 
-</body>
+
+
+    <div id="slides-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="slides-result-card glass-panel">
+            <div class="slides-result-icon">🎉</div>
+            <h2 id="slides-result-title">Quiz AI</h2>
+            <p id="slides-result-subtitle">Taqdimotingiz tayyor! Kerakli formatni tanlab yuklab oling.</p>
+            <button type="button" class="slides-download-btn slides-download-pptx" onclick="downloadSlidesFile('pptx')"><span>📊</span><span>PowerPoint (.PPTX) yuklab olish</span></button>
+            <button type="button" class="slides-download-btn slides-download-pdf" onclick="downloadSlidesFile('pdf')"><span>📕</span><span>PDF yuklab olish</span></button>
+            <button type="button" class="slides-result-close" onclick="closeSlidesResult()">✕</button>
+        </div>
+    </div>
+
+
+<style id="quiz-ai-slides-loader-download">
+body.slides-generation-active #ai-generation-overlay{background:rgba(3,12,22,.91)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.slides-generation-active #ai-generation-overlay .ai-generation-card{animation:aiGenerationCardIn .16s ease-out;box-shadow:0 12px 34px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.14)}
+body.slides-generation-active #ai-generation-overlay .ai-loader-orbit{animation:ai-loader-breathe 2.2s ease-in-out infinite}
+.slides-result-overlay{position:fixed;inset:0;z-index:18100;display:none;align-items:center;justify-content:center;padding:22px;box-sizing:border-box;background:rgba(3,10,18,.82)}
+.slides-result-overlay.active{display:flex}
+.slides-result-card{width:min(390px,100%);padding:24px 20px 20px;text-align:center;position:relative;background:linear-gradient(145deg,rgba(19,48,62,.98),rgba(7,18,29,.99));border:1px solid rgba(115,210,230,.34);border-radius:20px;box-shadow:0 18px 48px rgba(0,0,0,.48)}
+.slides-result-icon{font-size:38px;line-height:1.2;margin-bottom:8px}
+.slides-result-card h2{font-size:19px;margin:4px 24px 8px;color:#fff;overflow-wrap:anywhere}
+.slides-result-card p{font-size:13px;line-height:1.45;color:var(--text-hint);margin:0 0 18px}
+.slides-download-btn{width:100%;min-height:50px;margin:8px 0;padding:10px 13px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;border:1px solid rgba(255,255,255,.18);font-size:14px;font-weight:800;color:#fff;cursor:pointer}
+.slides-download-pptx{background:linear-gradient(135deg,#176b9a,#12466c)}
+.slides-download-pdf{background:linear-gradient(135deg,#9d3d43,#6d252e)}
+.slides-result-close{position:absolute;right:10px;top:10px;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.2);color:#fff;font-size:15px}
+@media(max-width:380px){.slides-result-card{padding:21px 15px 16px}.slides-download-btn{font-size:13px}}
+</style>
+\n</body>
 </html>
