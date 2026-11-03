@@ -3377,6 +3377,55 @@ def _build_slide_pptx(deck, theme="modern"):
     return output.getvalue()
 
 
+def _register_slide_pdf_fonts():
+    """Slayd PDF eksporti uchun kirill va o'zbek belgilarini qo'llaydigan shriftlarni ulaydi."""
+    font_dir = Path(__file__).resolve().parent / "fonts"
+    regular_candidates = [
+        font_dir / "DejaVuSans.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+    ]
+    bold_candidates = [
+        font_dir / "DejaVuSans-Bold.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
+    ]
+
+    regular_name = "QuizAISlideRegular"
+    bold_name = "QuizAISlideBold"
+    regular_ok = bold_ok = False
+
+    if regular_name in pdfmetrics.getRegisteredFontNames():
+        regular_ok = True
+    else:
+        for font_path in regular_candidates:
+            if font_path.is_file():
+                try:
+                    pdfmetrics.registerFont(TTFont(regular_name, str(font_path)))
+                    regular_ok = True
+                    break
+                except Exception as exc:
+                    logging.warning("Slayd PDF oddiy shriftini ulab bo'lmadi | sabab=%s", exc)
+
+    if bold_name in pdfmetrics.getRegisteredFontNames():
+        bold_ok = True
+    else:
+        for font_path in bold_candidates:
+            if font_path.is_file():
+                try:
+                    pdfmetrics.registerFont(TTFont(bold_name, str(font_path)))
+                    bold_ok = True
+                    break
+                except Exception as exc:
+                    logging.warning("Slayd PDF qalin shriftini ulab bo'lmadi | sabab=%s", exc)
+
+    if not regular_ok:
+        raise RuntimeError(
+            "Slayd PDF uchun DejaVuSans.ttf topilmadi. Loyihada fonts/DejaVuSans.ttf bo'lishi kerak."
+        )
+    return regular_name, (bold_name if bold_ok else regular_name)
+
+
 def _build_slide_pdf(deck, theme="modern"):
     """Taqdimot mazmunidan yengil, landscape PDF nusxasini xotirada yaratadi."""
     theme_colors = {
@@ -3393,9 +3442,7 @@ def _build_slide_pdf(deck, theme="modern"):
     page_w, page_h = 13.333 * 72, 7.5 * 72
     output = BytesIO()
     pdf = pdf_canvas.Canvas(output, pagesize=(page_w, page_h), pageCompression=1)
-    regular_ok, bold_ok = _register_pdf_font()
-    regular = "QuizPilotFont" if regular_ok else "Helvetica"
-    bold = "QuizPilotFontBold" if bold_ok else (regular if regular_ok else "Helvetica-Bold")
+    regular, bold = _register_slide_pdf_fonts()
 
     def rgb(value):
         return tuple(channel / 255.0 for channel in value)
