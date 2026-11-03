@@ -56,6 +56,8 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
 import p2p_payment_ai
@@ -1236,11 +1238,16 @@ class SlideItemSchema(BaseModel):
     title: str = Field(min_length=1, max_length=180)
     bullets: List[str] = Field(min_length=2, max_length=6)
     speaker_notes: Optional[str] = Field(default="", max_length=1200)
+    visual_type: Optional[str] = Field(default="none", max_length=20)
+    visual_title: Optional[str] = Field(default="", max_length=120)
+    visual_labels: Optional[List[str]] = Field(default_factory=list, max_length=8)
+    visual_values: Optional[List[float]] = Field(default_factory=list, max_length=8)
 
 
 class SlideDeckSchema(BaseModel):
     presentation_title: str = Field(min_length=1, max_length=180)
     subtitle: Optional[str] = Field(default="", max_length=240)
+    design_theme: Optional[str] = Field(default="modern", max_length=24)
     slides: List[SlideItemSchema]
 
 
@@ -3331,6 +3338,7 @@ def _build_slide_pptx(deck, theme="modern"):
         "business": ((23, 32, 44), (212, 173, 98), (248, 246, 240)),
         "infographic": ((243, 247, 251), (36, 166, 160), (35, 55, 68)),
         "nature": ((18, 56, 46), (127, 189, 114), (244, 250, 239)),
+        "elegant": ((31, 29, 45), (205, 168, 112), (250, 247, 241)),
     }
     bg, accent, fg = themes.get(theme, themes["modern"])
     prs = Presentation()
@@ -3367,8 +3375,34 @@ def _build_slide_pptx(deck, theme="modern"):
         for bullet in item.bullets:
             dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1), Inches(y + .13), Inches(.12), Inches(.12))
             dot.fill.solid(); dot.fill.fore_color.rgb = RGBColor(*accent); dot.line.fill.background()
-            add_text(slide, 1.35, y, 10.7, .72, bullet, 19, fg)
+            has_data_visual = (item.visual_type or "none").lower() in ("bar", "column", "pie", "line")
+            add_text(slide, 1.35, y, 5.2 if has_data_visual else 10.7, .72, bullet, 17 if has_data_visual else 19, fg)
             y += .88
+        visual_type = (item.visual_type or "none").lower()
+        labels, values = item.visual_labels or [], item.visual_values or []
+        if visual_type in ("bar", "column", "pie", "line") and len(labels) >= 2 and len(labels) == len(values) and all(float(v) >= 0 for v in values):
+            try:
+                chart_data = CategoryChartData()
+                chart_data.categories = [str(v)[:32] for v in labels[:8]]
+                chart_data.add_series(item.visual_title or item.title, [float(v) for v in values[:8]])
+                kind = {"bar": XL_CHART_TYPE.BAR_CLUSTERED, "column": XL_CHART_TYPE.COLUMN_CLUSTERED, "pie": XL_CHART_TYPE.PIE, "line": XL_CHART_TYPE.LINE}[visual_type]
+                chart = slide.shapes.add_chart(kind, Inches(7.0), Inches(2.0), Inches(5.5), Inches(4.4), chart_data).chart
+                chart.has_legend = visual_type == "pie"
+                if chart.has_legend: chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+                if visual_type != "pie": chart.value_axis.has_major_gridlines = True
+            except Exception as chart_exc:
+                logging.warning("Slayd grafigi chizilmadi | slayd=%s | sabab=%s", index + 1, chart_exc)
+        elif visual_type in ("process", "timeline") and len(labels) >= 2:
+            steps = labels[:6]; box_w = min(1.65, 10.4 / len(steps))
+            for si, label in enumerate(steps):
+                x = .9 + si * (box_w + .12)
+                shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(3.1), Inches(box_w), Inches(1.05))
+                shape.fill.solid(); shape.fill.fore_color.rgb = RGBColor(*accent); shape.fill.transparency = 14
+                shape.line.color.rgb = RGBColor(*accent)
+                shape.text_frame.text = str(label)[:60]
+                shape.text_frame.paragraphs[0].font.size = Pt(12)
+                shape.text_frame.paragraphs[0].font.bold = True
+                shape.text_frame.paragraphs[0].font.color.rgb = RGBColor(*fg)
         add_text(slide, 11.8, 7, .7, .25, f"{index+1:02d}", 10, accent, True, PP_ALIGN.RIGHT)
         if item.speaker_notes:
             try: slide.notes_slide.notes_text_frame.text = item.speaker_notes
@@ -3437,6 +3471,7 @@ def _build_slide_pdf(deck, theme="modern"):
         "business": ((23, 32, 44), (212, 173, 98), (248, 246, 240)),
         "infographic": ((243, 247, 251), (36, 166, 160), (35, 55, 68)),
         "nature": ((18, 56, 46), (127, 189, 114), (244, 250, 239)),
+        "elegant": ((31, 29, 45), (205, 168, 112), (250, 247, 241)),
     }
     bg, accent, fg = theme_colors.get(theme, theme_colors["modern"])
     page_w, page_h = 13.333 * 72, 7.5 * 72
@@ -3592,7 +3627,10 @@ def api_generate_slides(
     prompt = (
         "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
-        "Qolgan slaydlarda 2-6 ta aniq, qisqa bullet yozing. Takrorlanish va manbada yo'q faktlarni qo'shmang. "
+        "Qolgan slaydlarda 2-5 ta aniq, qisqa bullet yozing. visual_type faqat none, bar, column, pie, line, process yoki timeline bo'lsin. "
+        "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa raqam to'qimang, process/timeline sxemasini tanlang. "
+        "Har 2-3 slayddan kamida bittasida mavzuga mos diagramma yoki sxema ishlating. design_theme ni modern, minimal, academic, creative, tech, business, infographic, nature yoki elegant dan tanlang. "
+        "Takrorlanish va manbada yo'q faktlarni qo'shmang. "
         "Matn tilini foydalanuvchi bergan matn tiliga moslang. Speaker notes qisqa bo'lsin.\n"
         f"Mavzu: {topic or 'Manba material asosida'}\\n"
         f"Tituldagi universitet/qabul qiluvchi: {university_recipient or 'Ko‘rsatilmagan'}\\n"
@@ -3626,7 +3664,8 @@ def api_generate_slides(
         finally:
             gemini_semaphore.release()
         if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
-        safe_theme = theme if theme in ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature") else "modern"
+        allowed_slide_themes = ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature", "elegant")
+        safe_theme = (deck.design_theme if deck.design_theme in allowed_slide_themes else "modern") if theme == "auto" else (theme if theme in allowed_slide_themes else "modern")
         pptx_bytes = _build_slide_pptx(deck, safe_theme)
         pdf_bytes = _build_slide_pdf(deck, safe_theme)
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deck.presentation_title).strip("_")[:60] or "quiz_ai_slides"
