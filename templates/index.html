@@ -14520,7 +14520,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             const requiredNode = document.getElementById('slides-credit-required');
             const statusNode = document.getElementById('slides-credit-affordability');
             if (!select || !requiredNode || !statusNode) return;
-            const count = Math.max(1, Number(select.value) || 10);
+            const count = [6, 8, 10, 12, 16, 20].includes(Number(select.value)) ? Number(select.value) : 10;
             const required = count * slidesCreditsPerSlide;
             requiredNode.textContent = required.toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ');
             const enough = slidesCurrentBalance >= required;
@@ -14648,20 +14648,28 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
 
         function downloadSlidesFile(format) {
             const item = slidesGeneratedFiles && slidesGeneratedFiles[format];
-            if (!item || !item.data) return;
+            if (!item || !item.url) {
+                showAppAlert('⚠️', currentLang === 'ru' ? 'Ссылка на файл недоступна. Создайте презентацию ещё раз.' : currentLang === 'en' ? 'The file link is unavailable. Please generate the presentation again.' : 'Fayl havolasi topilmadi. Taqdimotni qayta yarating.');
+                return;
+            }
+            const fileName = item.filename || (format === 'pdf' ? 'Quiz_AI_Slides.pdf' : 'Quiz_AI_Slides.pptx');
+            const downloadUrl = new URL(item.url, BASE_URL).href;
             try {
-                const raw = atob(item.data);
-                const bytes = new Uint8Array(raw.length);
-                for (let i=0; i<raw.length; i++) bytes[i] = raw.charCodeAt(i);
-                const blob = new Blob([bytes], {type:item.mime || 'application/octet-stream'});
-                const url = URL.createObjectURL(blob);
+                // Telegram WebApp API faylni Android tizim yuklash oynasi orqali saqlaydi.
+                if (tg && typeof tg.downloadFile === 'function') {
+                    tg.downloadFile({url: downloadUrl, file_name: fileName}, function(result) {
+                        if (result && result.status === 'cancelled') return;
+                    });
+                    return;
+                }
+                // Oddiy brauzerlar uchun serverdagi vaqtinchalik fayl havolasi.
                 const anchor = document.createElement('a');
-                anchor.href = url;
-                anchor.download = item.filename || (format === 'pdf' ? 'Quiz_AI_Slides.pdf' : 'Quiz_AI_Slides.pptx');
+                anchor.href = downloadUrl;
+                anchor.download = fileName;
+                anchor.rel = 'noopener';
                 document.body.appendChild(anchor);
                 anchor.click();
                 anchor.remove();
-                setTimeout(() => URL.revokeObjectURL(url), 60000);
             } catch (error) {
                 console.warn('Taqdimot faylini yuklab olishda xato:', error);
                 showAppAlert('⚠️', currentLang === 'ru' ? 'Не удалось загрузить файл. Попробуйте ещё раз.' : currentLang === 'en' ? 'Could not download the file. Please try again.' : 'Faylni yuklab bo‘lmadi. Qayta urinib ko‘ring.');
@@ -14681,7 +14689,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 if (status) { status.textContent = langPack[currentLang].slides_need_topic; status.style.color = '#fb7185'; }
                 return;
             }
-            const count = Math.max(1, Number(countNode?.value) || 10);
+            const count = [6, 8, 10, 12, 16, 20].includes(Number(countNode?.value)) ? Number(countNode.value) : 10;
             const required = count * slidesCreditsPerSlide;
             if (slidesCurrentBalance < required) {
                 if (status) { status.textContent = langPack[currentLang].slides_cost_insufficient; status.style.color = '#fb7185'; }
@@ -14706,7 +14714,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                     throw new Error(detail || 'slide_generation_failed');
                 }
                 const data = await response.json();
-                if (!data || data.status !== 'ok' || !data.files || !data.files.pptx || !data.files.pdf) {
+                if (!data || data.status !== 'ok' || !data.files || !data.files.pptx?.url || !data.files.pdf?.url) {
                     throw new Error('slide_generation_failed');
                 }
                 if (topicNode) topicNode.value = '';
@@ -16372,5 +16380,21 @@ body.slides-generation-active #ai-generation-overlay .ai-loader-orbit{animation:
 .slides-result-close{position:absolute;right:10px;top:10px;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.2);color:#fff;font-size:15px}
 @media(max-width:380px){.slides-result-card{padding:21px 15px 16px}.slides-download-btn{font-size:13px}}
 </style>
-\n</body>
+</body>
 </html>
+
+<style id="quiz-ai-slides-count-layout-fix">
+#slides-count-options.slides-count-options{
+    display:grid !important;
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+    gap:8px !important;
+}
+#slides-count-options .slides-count-option{
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    min-height:48px;
+    align-items:center;
+    justify-content:center;
+}
+</style>
