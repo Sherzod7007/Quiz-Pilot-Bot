@@ -3354,7 +3354,7 @@ def _slide_chart_palette(theme="modern"):
             (104, 157, 119), (160, 112, 170), (205, 105, 95),
         ]
     return [
-        cfg["accent"], cfg["fg"], (83, 157, 170),
+        cfg["accent"], (65, 105, 145), (83, 157, 170),
         (222, 171, 82), (126, 181, 119), (171, 137, 198),
     ]
 
@@ -3793,7 +3793,7 @@ def _build_slide_pptx(deck, theme="modern"):
                     Inches(row["width"] + .72), Inches(row["height"] + .08)
                 )
                 card.fill.solid()
-                card.fill.fore_color.rgb = RGBColor(255, 255, 255)
+                card.fill.fore_color.rgb = RGBColor(224, 242, 240)
                 card.fill.transparency = 10
                 card.line.color.rgb = RGBColor(*accent)
                 card.line.transparency = 72
@@ -3805,8 +3805,7 @@ def _build_slide_pptx(deck, theme="modern"):
             dot.fill.fore_color.rgb = RGBColor(*accent)
             dot.line.fill.background()
             add_text(slide, row["x"], row["y"], row["width"], row["height"],
-                     row["text"], row["font_size"],
-                     (0, 0, 0) if layout_name == "infographic" else fg)
+                     row["text"], row["font_size"], fg)
 
         if layout["type"] in ("bar", "column", "pie", "line"):
             try:
@@ -4217,7 +4216,7 @@ def _build_slide_pdf(deck, theme="modern"):
                 y = page_h - (row["y"] * 72)
                 if layout_name == "infographic":
                     pdf.saveState()
-                    pdf.setFillColorRGB(1, 1, 1)
+                    pdf.setFillColorRGB(224/255, 242/255, 240/255)
                     pdf.setFillAlpha(.10)
                     card_h = max(30, row["height"] * 72 + 7)
                     pdf.roundRect(62, y - card_h + 16, row["width"] * 72 + 52, card_h, 7, fill=1, stroke=0)
@@ -4227,8 +4226,7 @@ def _build_slide_pdf(deck, theme="modern"):
                 font_size = row["font_size"]
                 leading = font_size * 1.18
                 draw_wrapped(row["text"], row["x"] * 72, y, row["width"] * 72,
-                             regular, font_size,
-                             (0, 0, 0) if layout_name == "infographic" else fg, leading)
+                             regular, font_size, fg, leading)
             if layout["type"] in ("bar", "column", "pie", "line"):
                 try:
                     draw_chart(layout, item)
