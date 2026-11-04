@@ -13992,6 +13992,8 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 const names = item.names || {};
                 ['uz','ru','en'].forEach(lang => { if (names[lang]) tariffDetails[key][lang] = names[lang]; });
                 tariffDetails[key].duration = formatDuration(item.duration_value, item.duration_unit, currentLang);
+                const tariffCredits = Math.max(0, Number(item.slide_credits) || 0);
+                const creditLabel = currentLang === 'ru' ? ` • ${tariffCredits.toLocaleString('ru-RU')} кредитов на слайды` : currentLang === 'en' ? ` • ${tariffCredits.toLocaleString('en-US')} slide credits` : ` • ${tariffCredits.toLocaleString('uz-UZ')} ta slayd krediti`;
                 const priceNode = document.getElementById(`tariff-price-${key}`);
                 if (priceNode) priceNode.innerText = tariffDetails[key].price;
                 const card = document.getElementById(`card-${key}`);
@@ -14007,6 +14009,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                         if (currentLang === 'ru') desc.innerText = `${duration} безлимитного использования`;
                         else if (currentLang === 'en') desc.innerText = `${duration} of unlimited access`;
                         else desc.innerText = `${duration} davomida cheksiz foydalanish`;
+                        desc.innerText += creditLabel;
                     }
                 }
             });
@@ -14583,6 +14586,18 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 const data = await response.json();
                 if (data.status !== 'ok') throw new Error('credit_balance_unavailable');
                 balanceNode.textContent = Number(data.balance || 0).toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ');
+                let breakdownNode = document.getElementById('slides-credit-breakdown');
+                if (!breakdownNode && balanceNode.parentElement) {
+                    breakdownNode = document.createElement('div');
+                    breakdownNode.id = 'slides-credit-breakdown';
+                    breakdownNode.className = 'slides-credit-breakdown';
+                    balanceNode.parentElement.appendChild(breakdownNode);
+                }
+                if (breakdownNode) {
+                    const tariffPart = Number(data.tariff_balance || 0).toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ');
+                    const purchasedPart = Number(data.purchased_balance || 0).toLocaleString(currentLang === 'en' ? 'en-US' : currentLang === 'ru' ? 'ru-RU' : 'uz-UZ');
+                    breakdownNode.textContent = currentLang === 'ru' ? `По тарифу: ${tariffPart} · Куплено: ${purchasedPart}` : currentLang === 'en' ? `Plan credits: ${tariffPart} · Purchased: ${purchasedPart}` : `Tarif krediti: ${tariffPart} · Sotib olingan: ${purchasedPart}`;
+                }
                 slidesCurrentBalance = Math.max(0, Number(data.balance) || 0);
                 updateSlidesCreditEstimate();
                 renderSlidesCreditPackages(Array.isArray(data.packages) ? data.packages : []);
