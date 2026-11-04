@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
 import json
+import math
 import logging
 import os
 import hashlib
@@ -54,7 +55,7 @@ from datetime import datetime, timezone, timedelta
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
@@ -3327,8 +3328,82 @@ def _extract_slide_source(contents, filename):
     raise ValueError("unsupported_source")
 
 
+def _slide_visual_layout(item):
+    """PPTX va PDF uchun bir xil slayd joylashuvini qaytaradi."""
+    visual_type = (item.visual_type or "none").lower()
+    labels = list(item.visual_labels or [])[:8]
+    values = list(item.visual_values or [])[:8]
+    valid_chart = (
+        visual_type in ("bar", "column", "pie", "line")
+        and len(labels) >= 2 and len(labels) == len(values)
+    )
+    if valid_chart:
+        try:
+            valid_chart = all(float(value) >= 0 for value in values)
+        except (TypeError, ValueError):
+            valid_chart = False
+    valid_flow = visual_type in ("process", "timeline") and len(labels) >= 2
+    has_visual = valid_chart or valid_flow
+    return {
+        "type": visual_type if has_visual else "none",
+        "labels": labels if has_visual else [],
+        "values": values if valid_chart else [],
+        "has_visual": has_visual,
+        # Matn chap ustunda, vizual esa o'ng ustunda: hech qachon ustma-ust tushmaydi.
+        "bullet_x": 1.35,
+        "bullet_width": 5.25 if has_visual else 11.45,
+        "visual_x": 7.05,
+        "visual_y": 2.00,
+        "visual_width": 5.55,
+        "visual_height": 4.35,
+    }
+
+
+def _slide_bullet_layout(bullets, has_visual):
+    """Har bir bullet uchun ikki formatda ham bir xil qatorlar va koordinatalar."""
+    x = 1.35
+    width = 5.25 if has_visual else 11.45
+    font_size = 16 if has_visual else 18
+    max_chars = 49 if has_visual else 105
+    y = 1.92
+    bottom = 6.65
+    gap = 0.16
+    rows = []
+    for bullet in bullets or []:
+        words = str(bullet or "").split()
+        wrapped, line = [], ""
+        for word in words:
+            candidate = (line + " " + word).strip()
+            if line and len(candidate) > max_chars:
+                wrapped.append(line)
+                line = word
+            else:
+                line = candidate
+        if line:
+            wrapped.append(line)
+        wrapped = wrapped or [""]
+        line_height = 0.30 if font_size >= 18 else 0.27
+        height = max(0.42, len(wrapped) * line_height + 0.08)
+        rows.append({
+            "text": "\n".join(wrapped), "x": x, "y": y,
+            "width": width, "height": height, "font_size": font_size,
+        })
+        y += height + gap
+    # Juda uzun matnlar bo'lsa, qatorlar oralig'ini mutanosib qisqartiramiz.
+    if rows and rows[-1]["y"] + rows[-1]["height"] > bottom:
+        available = bottom - 1.92
+        total = sum(row["height"] for row in rows)
+        gaps = gap * max(0, len(rows) - 1)
+        scale = max(0.68, (available - gaps) / max(total, 0.01))
+        y = 1.92
+        for row in rows:
+            row["height"] *= scale
+            y += row["height"] + gap
+    return rows
+
+
 def _build_slide_pptx(deck, theme="modern"):
-    """Gemini tuzilmasidan PowerPoint faylini xotirada yaratadi."""
+    """PPTX eksporti; matn va vizuallar uchun yagona ikki ustunli maket."""
     themes = {
         "modern": ((12, 25, 48), (42, 183, 210), (245, 248, 252)),
         "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
@@ -3348,66 +3423,131 @@ def _build_slide_pptx(deck, theme="modern"):
     def add_text(slide, x, y, w, h, value, size, color, bold=False, align=None):
         shape = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
         tf = shape.text_frame
-        tf.clear(); tf.word_wrap = True
-        tf.margin_left = Inches(.05); tf.margin_right = Inches(.05)
-        tf.margin_top = Inches(.03); tf.margin_bottom = Inches(.03)
+        tf.clear()
+        tf.word_wrap = True
+        tf.margin_left = Inches(.05)
+        tf.margin_right = Inches(.05)
+        tf.margin_top = Inches(.03)
+        tf.margin_bottom = Inches(.03)
+        tf.vertical_anchor = MSO_ANCHOR.TOP
         para = tf.paragraphs[0]
         para.text = str(value)
-        para.font.name = "Aptos"; para.font.size = Pt(size)
-        para.font.bold = bold; para.font.color.rgb = RGBColor(*color)
-        if align is not None: para.alignment = align
+        para.font.name = "Aptos"
+        para.font.size = Pt(size)
+        para.font.bold = bold
+        para.font.color.rgb = RGBColor(*color)
+        if align is not None:
+            para.alignment = align
         return shape
+
+    def add_chart(slide, layout, item):
+        labels, values = layout["labels"], layout["values"]
+        data = CategoryChartData()
+        data.categories = [str(value)[:28] for value in labels]
+        data.add_series(item.visual_title or item.title, [float(value) for value in values])
+        kind = {
+            "bar": XL_CHART_TYPE.BAR_CLUSTERED,
+            "column": XL_CHART_TYPE.COLUMN_CLUSTERED,
+            "pie": XL_CHART_TYPE.PIE,
+            "line": XL_CHART_TYPE.LINE,
+        }[layout["type"]]
+        chart = slide.shapes.add_chart(
+            kind, Inches(layout["visual_x"]), Inches(layout["visual_y"]),
+            Inches(layout["visual_width"]), Inches(layout["visual_height"]), data
+        ).chart
+        chart.has_title = bool(item.visual_title)
+        if item.visual_title:
+            chart.chart_title.text_frame.text = str(item.visual_title)[:80]
+        chart.has_legend = layout["type"] == "pie"
+        if chart.has_legend:
+            chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+        if layout["type"] != "pie":
+            chart.value_axis.has_major_gridlines = True
+
+    def add_process(slide, layout):
+        labels = layout["labels"][:6]
+        x0, y0, total_w = layout["visual_x"], 3.15, layout["visual_width"]
+        gap = .12
+        box_w = (total_w - gap * (len(labels) - 1)) / len(labels)
+        for i, label in enumerate(labels):
+            x = x0 + i * (box_w + gap)
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y0),
+                Inches(box_w), Inches(1.15)
+            )
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = RGBColor(*accent)
+            shape.fill.transparency = 14
+            shape.line.color.rgb = RGBColor(*accent)
+            shape.text_frame.text = str(label)[:70]
+            shape.text_frame.word_wrap = True
+            shape.text_frame.margin_left = Inches(.06)
+            shape.text_frame.margin_right = Inches(.06)
+            shape.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            for para in shape.text_frame.paragraphs:
+                para.alignment = PP_ALIGN.CENTER
+                para.font.size = Pt(11)
+                para.font.bold = True
+                para.font.color.rgb = RGBColor(*fg)
+            if i < len(labels) - 1:
+                arrow = slide.shapes.add_shape(
+                    MSO_SHAPE.CHEVRON, Inches(x + box_w + .015),
+                    Inches(y0 + .42), Inches(gap - .02), Inches(.28)
+                )
+                arrow.fill.solid()
+                arrow.fill.fore_color.rgb = RGBColor(*accent)
+                arrow.line.fill.background()
 
     for index, item in enumerate(deck.slides):
         slide = prs.slides.add_slide(blank)
-        slide.background.fill.solid(); slide.background.fill.fore_color.rgb = RGBColor(*bg)
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = RGBColor(*bg)
         bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(.16), prs.slide_height)
-        bar.fill.solid(); bar.fill.fore_color.rgb = RGBColor(*accent); bar.line.fill.background()
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = RGBColor(*accent)
+        bar.line.fill.background()
         if index == 0:
             add_text(slide, .9, 1.5, 11.4, 2, deck.presentation_title, 34, fg, True, PP_ALIGN.CENTER)
-            if deck.subtitle: add_text(slide, 1.2, 3.7, 10.8, .9, deck.subtitle, 19, accent, False, PP_ALIGN.CENTER)
+            if deck.subtitle:
+                add_text(slide, 1.2, 3.7, 10.8, .9, deck.subtitle, 19, accent, False, PP_ALIGN.CENTER)
             add_text(slide, 1, 6.6, 11.2, .4, "QUIZ AI  •  AI PRESENTATION", 10, fg, False, PP_ALIGN.CENTER)
             continue
+
         add_text(slide, .8, .48, 11.8, .95, item.title, 27, accent, True)
         line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(.85), Inches(1.48), Inches(1.2), Inches(.055))
-        line.fill.solid(); line.fill.fore_color.rgb = RGBColor(*accent); line.line.fill.background()
-        y = 1.9
-        for bullet in item.bullets:
-            dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(1), Inches(y + .13), Inches(.12), Inches(.12))
-            dot.fill.solid(); dot.fill.fore_color.rgb = RGBColor(*accent); dot.line.fill.background()
-            has_data_visual = (item.visual_type or "none").lower() in ("bar", "column", "pie", "line")
-            add_text(slide, 1.35, y, 5.2 if has_data_visual else 10.7, .72, bullet, 17 if has_data_visual else 19, fg)
-            y += .88
-        visual_type = (item.visual_type or "none").lower()
-        labels, values = item.visual_labels or [], item.visual_values or []
-        if visual_type in ("bar", "column", "pie", "line") and len(labels) >= 2 and len(labels) == len(values) and all(float(v) >= 0 for v in values):
+        line.fill.solid()
+        line.fill.fore_color.rgb = RGBColor(*accent)
+        line.line.fill.background()
+
+        layout = _slide_visual_layout(item)
+        for row in _slide_bullet_layout(item.bullets, layout["has_visual"]):
+            dot_y = row["y"] + .12
+            dot = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL, Inches(1.0), Inches(dot_y), Inches(.10), Inches(.10)
+            )
+            dot.fill.solid()
+            dot.fill.fore_color.rgb = RGBColor(*accent)
+            dot.line.fill.background()
+            add_text(slide, row["x"], row["y"], row["width"], row["height"],
+                     row["text"], row["font_size"], fg)
+
+        if layout["type"] in ("bar", "column", "pie", "line"):
             try:
-                chart_data = CategoryChartData()
-                chart_data.categories = [str(v)[:32] for v in labels[:8]]
-                chart_data.add_series(item.visual_title or item.title, [float(v) for v in values[:8]])
-                kind = {"bar": XL_CHART_TYPE.BAR_CLUSTERED, "column": XL_CHART_TYPE.COLUMN_CLUSTERED, "pie": XL_CHART_TYPE.PIE, "line": XL_CHART_TYPE.LINE}[visual_type]
-                chart = slide.shapes.add_chart(kind, Inches(7.0), Inches(2.0), Inches(5.5), Inches(4.4), chart_data).chart
-                chart.has_legend = visual_type == "pie"
-                if chart.has_legend: chart.legend.position = XL_LEGEND_POSITION.BOTTOM
-                if visual_type != "pie": chart.value_axis.has_major_gridlines = True
+                add_chart(slide, layout, item)
             except Exception as chart_exc:
                 logging.warning("Slayd grafigi chizilmadi | slayd=%s | sabab=%s", index + 1, chart_exc)
-        elif visual_type in ("process", "timeline") and len(labels) >= 2:
-            steps = labels[:6]; box_w = min(1.65, 10.4 / len(steps))
-            for si, label in enumerate(steps):
-                x = .9 + si * (box_w + .12)
-                shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(3.1), Inches(box_w), Inches(1.05))
-                shape.fill.solid(); shape.fill.fore_color.rgb = RGBColor(*accent); shape.fill.transparency = 14
-                shape.line.color.rgb = RGBColor(*accent)
-                shape.text_frame.text = str(label)[:60]
-                shape.text_frame.paragraphs[0].font.size = Pt(12)
-                shape.text_frame.paragraphs[0].font.bold = True
-                shape.text_frame.paragraphs[0].font.color.rgb = RGBColor(*fg)
+        elif layout["type"] in ("process", "timeline"):
+            add_process(slide, layout)
+
         add_text(slide, 11.8, 7, .7, .25, f"{index+1:02d}", 10, accent, True, PP_ALIGN.RIGHT)
         if item.speaker_notes:
-            try: slide.notes_slide.notes_text_frame.text = item.speaker_notes
-            except Exception: pass
-    output = BytesIO(); prs.save(output)
+            try:
+                slide.notes_slide.notes_text_frame.text = item.speaker_notes
+            except Exception:
+                pass
+
+    output = BytesIO()
+    prs.save(output)
     return output.getvalue()
 
 
@@ -3461,7 +3601,7 @@ def _register_slide_pdf_fonts():
 
 
 def _build_slide_pdf(deck, theme="modern"):
-    """Taqdimot mazmunidan yengil, landscape PDF nusxasini xotirada yaratadi."""
+    """PDF eksporti PPTX bilan bir xil maket va vizual koordinatalardan foydalanadi."""
     theme_colors = {
         "modern": ((12, 25, 48), (42, 183, 210), (245, 248, 252)),
         "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
@@ -3482,23 +3622,151 @@ def _build_slide_pdf(deck, theme="modern"):
     def rgb(value):
         return tuple(channel / 255.0 for channel in value)
 
+    def wrap_lines(text, font_name, font_size, max_width):
+        lines, current = [], ""
+        for word in str(text or "").split():
+            candidate = (current + " " + word).strip()
+            if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines or [""]
+
     def draw_wrapped(text, x, y, max_width, font_name, font_size, color, leading):
         pdf.setFillColorRGB(*rgb(color))
         pdf.setFont(font_name, font_size)
-        words = str(text or "").split()
-        line = ""
-        for word in words:
-            candidate = (line + " " + word).strip()
-            if line and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
-                pdf.drawString(x, y, line)
-                y -= leading
-                line = word
-            else:
-                line = candidate
-        if line:
+        for line in wrap_lines(text, font_name, font_size, max_width):
             pdf.drawString(x, y, line)
             y -= leading
         return y
+
+    def draw_chart(layout, item):
+        x = layout["visual_x"] * 72
+        y_top = page_h - layout["visual_y"] * 72
+        w = layout["visual_width"] * 72
+        h = layout["visual_height"] * 72
+        labels, values = layout["labels"], [float(v) for v in layout["values"]]
+        kind = layout["type"]
+        title = item.visual_title or ""
+        if title:
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(bold, 12)
+            pdf.drawCentredString(x + w/2, y_top - 12, title[:70])
+        chart_top = y_top - (28 if title else 12)
+        chart_bottom = page_h - (layout["visual_y"] + layout["visual_height"]) * 72 + 36
+        chart_h = max(80, chart_top - chart_bottom)
+        chart_left, chart_right = x + 38, x + w - 12
+        chart_w = chart_right - chart_left
+        max_value = max(values) if values else 1
+        max_value = max(max_value, 1)
+
+        if kind == "pie":
+            total = sum(values) or 1
+            cx, cy = x + w * .43, chart_bottom + chart_h * .52
+            radius = min(chart_h * .38, w * .25)
+            palette = [accent, fg, (100, 160, 190), (220, 170, 90), (120, 190, 130), (170, 130, 200)]
+            angle = 0
+            for i, value in enumerate(values):
+                extent = 360 * value / total
+                # Sektorlarni markazdan yoy bo'ylab ko'p nuqtali poligon sifatida chizamiz.
+                # Bu ReportLab versiyalari orasida wedge() farqlarini oldini oladi.
+                path = pdf.beginPath()
+                path.moveTo(cx, cy)
+                steps = max(4, int(extent / 5))
+                for step in range(steps + 1):
+                    theta = math.radians(angle + extent * step / steps)
+                    px = cx + radius * math.cos(theta)
+                    py = cy + radius * math.sin(theta)
+                    path.lineTo(px, py)
+                path.close()
+                pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
+                pdf.drawPath(path, fill=1, stroke=0)
+                angle += extent
+            pdf.setFont(regular, 8)
+            for i, label in enumerate(labels):
+                ly = chart_bottom + chart_h - 12 - i * 17
+                pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
+                pdf.rect(x + w * .72, ly-2, 7, 7, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawString(x + w * .72 + 12, ly, str(label)[:22])
+            return
+
+        # Ustunli, gorizontal bar va chiziqli grafiklar.
+        pdf.setStrokeColorRGB(*rgb((130, 145, 160)))
+        pdf.setLineWidth(.6)
+        pdf.line(chart_left, chart_bottom, chart_right, chart_bottom)
+        if kind == "line":
+            points = []
+            for i, value in enumerate(values):
+                px = chart_left + (chart_w * i / max(1, len(values)-1))
+                py = chart_bottom + (value / max_value) * (chart_h - 35)
+                points.append((px, py))
+            pdf.setStrokeColorRGB(*rgb(accent))
+            pdf.setLineWidth(2.5)
+            for p1, p2 in zip(points, points[1:]):
+                pdf.line(p1[0], p1[1], p2[0], p2[1])
+            pdf.setFillColorRGB(*rgb(accent))
+            for px, py in points:
+                pdf.circle(px, py, 3.5, fill=1, stroke=0)
+            pdf.setFont(regular, 8)
+            for (px, _), label in zip(points, labels):
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawCentredString(px, chart_bottom - 14, str(label)[:16])
+        elif kind == "bar":
+            row_h = (chart_h - 18) / max(1, len(values))
+            for i, (label, value) in enumerate(zip(labels, values)):
+                cy = chart_top - 25 - i * row_h
+                bar_w = (value / max_value) * (chart_w - 105)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.setFont(regular, 8)
+                pdf.drawRightString(chart_left - 7, cy + 3, str(label)[:18])
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.roundRect(chart_left, cy - 2, max(1, bar_w), 13, 3, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawString(chart_left + bar_w + 5, cy + 1, f"{value:g}")
+        else:
+            slot = chart_w / max(1, len(values))
+            bar_w = min(42, slot * .58)
+            pdf.setFont(regular, 8)
+            for i, (label, value) in enumerate(zip(labels, values)):
+                bh = (value / max_value) * (chart_h - 45)
+                bx = chart_left + i * slot + (slot - bar_w) / 2
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.roundRect(bx, chart_bottom, bar_w, max(1, bh), 3, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawCentredString(bx + bar_w/2, chart_bottom + bh + 5, f"{value:g}")
+                pdf.drawCentredString(bx + bar_w/2, chart_bottom - 14, str(label)[:14])
+
+    def draw_process(layout):
+        labels = layout["labels"][:6]
+        x0 = layout["visual_x"] * 72
+        total_w = layout["visual_width"] * 72
+        gap = 8
+        box_w = (total_w - gap * (len(labels)-1)) / len(labels)
+        y = page_h - (3.15 + 1.15) * 72
+        box_h = 1.15 * 72
+        for i, label in enumerate(labels):
+            x = x0 + i * (box_w + gap)
+            pdf.setFillColorRGB(*rgb(accent))
+            pdf.roundRect(x, y, box_w, box_h, 8, fill=1, stroke=0)
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(bold, 9)
+            lines = wrap_lines(str(label)[:70], bold, 9, box_w - 12)
+            line_y = y + box_h/2 + (len(lines)-1)*6
+            for line in lines[:4]:
+                pdf.drawCentredString(x + box_w/2, line_y, line)
+                line_y -= 12
+            if i < len(labels)-1:
+                mid_y = y + box_h / 2
+                arrow_x = x + box_w + 1
+                pdf.setStrokeColorRGB(*rgb(accent))
+                pdf.setLineWidth(1.8)
+                pdf.line(arrow_x, mid_y, arrow_x + gap - 2, mid_y)
+                pdf.line(arrow_x + gap - 5, mid_y + 3, arrow_x + gap - 2, mid_y)
+                pdf.line(arrow_x + gap - 5, mid_y - 3, arrow_x + gap - 2, mid_y)
 
     for index, item in enumerate(deck.slides):
         pdf.setFillColorRGB(*rgb(bg))
@@ -3508,32 +3776,34 @@ def _build_slide_pdf(deck, theme="modern"):
         if index == 0:
             pdf.setFillColorRGB(*rgb(fg))
             pdf.setFont(bold, 30)
-            title_lines = []
-            words = str(deck.presentation_title).split()
-            current = ""
-            for word in words:
-                candidate = (current + " " + word).strip()
-                if current and pdfmetrics.stringWidth(candidate, bold, 30) > page_w - 150:
-                    title_lines.append(current); current = word
-                else:
-                    current = candidate
-            if current: title_lines.append(current)
+            title_lines = wrap_lines(deck.presentation_title, bold, 30, page_w - 150)
             y = page_h * .62 + (len(title_lines)-1) * 38
             for line in title_lines[:3]:
-                pdf.drawCentredString(page_w/2, y, line); y -= 38
+                pdf.drawCentredString(page_w/2, y, line)
+                y -= 38
             if deck.subtitle:
                 draw_wrapped(deck.subtitle, 85, page_h*.39, page_w-170, regular, 16, accent, 23)
+            pdf.setFillColorRGB(*rgb(fg))
             pdf.setFont(regular, 9)
             pdf.drawCentredString(page_w/2, 28, "QUIZ AI  •  AI PRESENTATION")
         else:
             draw_wrapped(item.title, 55, page_h-62, page_w-105, bold, 23, accent, 30)
             pdf.setFillColorRGB(*rgb(accent))
             pdf.roundRect(58, page_h-112, 82, 4, 2, fill=1, stroke=0)
-            y = page_h - 155
-            for bullet in item.bullets:
+            layout = _slide_visual_layout(item)
+            bullet_rows = _slide_bullet_layout(item.bullets, layout["has_visual"])
+            for row in bullet_rows:
+                y = page_h - (row["y"] * 72)
                 pdf.setFillColorRGB(*rgb(accent))
-                pdf.circle(67, y+4, 3.5, fill=1, stroke=0)
-                y = draw_wrapped(bullet, 88, y, page_w-145, regular, 15, fg, 22) - 15
+                pdf.circle(72, y + 5, 3.2, fill=1, stroke=0)
+                font_size = row["font_size"] * .78
+                leading = 20 if layout["has_visual"] else 22
+                draw_wrapped(row["text"], 88, y, row["width"] * 72,
+                             regular, font_size, fg, leading)
+            if layout["type"] in ("bar", "column", "pie", "line"):
+                draw_chart(layout, item)
+            elif layout["type"] in ("process", "timeline"):
+                draw_process(layout)
             pdf.setFillColorRGB(*rgb(accent))
             pdf.setFont(bold, 9)
             pdf.drawRightString(page_w-35, 25, f"{index+1:02d}")
