@@ -67,6 +67,13 @@ PAYMENT_OCR_RETRY_BASE_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_BASE_SE
 PAYMENT_OCR_RETRY_MAX_SECONDS = max(PAYMENT_OCR_RETRY_BASE_SECONDS, int(os.getenv("PAYMENT_OCR_RETRY_MAX_SECONDS", "600")))
 PAYMENT_OCR_RETRY_SCAN_SECONDS = max(5, int(os.getenv("PAYMENT_OCR_RETRY_SCAN_SECONDS", "10")))
 PAYMENT_OCR_PROCESSING_STALE_SECONDS = max(60, int(os.getenv("PAYMENT_OCR_PROCESSING_STALE_SECONDS", "900")))
+SLIDE_TARIFF_CREDITS = {}
+for _plan, _env_name in (("daily", "SLIDE_TARIFF_CREDITS_DAILY"), ("weekly", "SLIDE_TARIFF_CREDITS_WEEKLY"), ("monthly", "SLIDE_TARIFF_CREDITS_MONTHLY"), ("teachers", "SLIDE_TARIFF_CREDITS_TEACHERS")):
+    try:
+        SLIDE_TARIFF_CREDITS[_plan] = max(0, min(1000000, int(os.getenv(_env_name, "0"))))
+    except (TypeError, ValueError):
+        SLIDE_TARIFF_CREDITS[_plan] = 0
+
 P2P_CARD_NUMBER = re.sub(r"\D", "", os.getenv("P2P_CARD_NUMBER", "").strip())
 PAYMENT_CARDHOLDER = os.getenv("PAYMENT_CARDHOLDER", "").strip()
 PAYMENT_OCR_MAX_IMAGE_MB = max(1, int(os.getenv("PAYMENT_OCR_MAX_IMAGE_MB", "8")))
@@ -226,6 +233,17 @@ def init_db():
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN image_sha256 TEXT DEFAULT ''")
     if "processing_started_at" not in cols:
         conn.execute("ALTER TABLE p2p_receipts ADD COLUMN processing_started_at INTEGER DEFAULT 0")
+
+    wallet_cols = [r[1] for r in conn.execute("PRAGMA table_info(credit_wallets)").fetchall()]
+    for col in ("tariff_balance", "purchased_balance"):
+        if col not in wallet_cols:
+            conn.execute(f"ALTER TABLE credit_wallets ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE credit_wallets SET purchased_balance=balance WHERE purchased_balance=0 AND tariff_balance=0 AND balance>0")
+    tx_cols = [r[1] for r in conn.execute("PRAGMA table_info(credit_transactions)").fetchall()]
+    for col in ("tariff_amount", "purchased_amount"):
+        if col not in tx_cols:
+            conn.execute(f"ALTER TABLE credit_transactions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE credit_transactions SET purchased_amount=amount WHERE purchased_amount=0 AND tariff_amount=0 AND amount>0")
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_status ON p2p_receipts(status, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_p2p_receipts_retry ON p2p_receipts(status, next_retry_at)")
@@ -980,17 +998,17 @@ def _approve(tx_id, user_id):
                 conn.rollback()
                 return False, "invalid_credit_amount"
             cur.execute(
-                "INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) "
+                "INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) "
                 "ON CONFLICT(user_id) DO NOTHING", (int(user_id), now)
             )
             cur.execute(
-                "UPDATE credit_wallets SET balance=balance+?, updated_at=? WHERE user_id=?",
-                (credits, now, int(user_id))
+                "UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?",
+                (credits, credits, now, int(user_id))
             )
             cur.execute(
-                "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) "
-                "VALUES (?,?, 'purchase', ?, ?, ?)",
-                (int(user_id), credits, f"payment:{tx_id}", pay["tariff_name"] or "Kredit xaridi", now)
+                "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) "
+                "VALUES (?,?, 'purchase', ?, ?, ?, 0, ?)",
+                (int(user_id), credits, f"payment:{tx_id}", pay["tariff_name"] or "Kredit xaridi", now, credits)
             )
             if receipt:
                 cur.execute(
@@ -999,6 +1017,7 @@ def _approve(tx_id, user_id):
                     (now, tx_id, int(user_id))
                 )
             conn.commit()
+            logging.info("Alohida kredit xaridi tasdiqlandi | foydalanuvchi=%s | kredit=%s | buyurtma=%s", user_id, credits, tx_id)
             return True, credits
 
         # Premium approval path — mavjud biznes mantiqini saqlaymiz.
@@ -1036,6 +1055,17 @@ def _approve(tx_id, user_id):
         if cur.rowcount != 1:
             conn.rollback()
             return False, "user_not_found"
+        grant_amount = int(SLIDE_TARIFF_CREDITS.get(plan, 0))
+        if grant_amount > 0:
+            grant_reference = f"tariff-credit:{tx_id}"
+            already_granted = cur.execute("SELECT 1 FROM credit_transactions WHERE reference=?", (grant_reference,)).fetchone()
+            if not already_granted:
+                cur.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+                cur.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, updated_at=? WHERE user_id=?", (grant_amount, grant_amount, now, int(user_id)))
+                cur.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'tariff_grant', ?, ?, ?, ?, 0)", (int(user_id), grant_amount, grant_reference, f"{plan} tarifi uchun taqdimot krediti", now, grant_amount))
+                logging.info("Tarif taqdimot krediti berildi | tarif=%s | miqdor=%s | foydalanuvchi=%s", plan, grant_amount, user_id)
+        else:
+            logging.info("Tarif taqdimot krediti berilmadi: Railway miqdori 0 | tarif=%s | foydalanuvchi=%s", plan, user_id)
         if receipt:
             cur.execute(
                 "UPDATE p2p_receipts SET status='approved', reason='To‘lov tasdiqlandi', "
