@@ -379,6 +379,17 @@ TARIFFS = {
 logging.info("Tariflar Railway'dan yuklandi | kunlik=%s/%s soat | haftalik=%s/%s kun | oylik=%s/%s kun | o'qituvchilar=%s/%s kun",
              TARIFFS['daily']['price'], _daily_hours, TARIFFS['weekly']['price'], _weekly_days,
              TARIFFS['monthly']['price'], _monthly_days, TARIFFS['teachers']['price'], _teachers_days)
+# AI taqdimot uchun tarif krediti: barcha miqdorlar Railway Variables orqali boshqariladi.
+SLIDE_TARIFF_CREDITS = {
+    "daily": _env_positive_int("SLIDE_TARIFF_CREDITS_DAILY", 0, minimum=0),
+    "weekly": _env_positive_int("SLIDE_TARIFF_CREDITS_WEEKLY", 0, minimum=0),
+    "monthly": _env_positive_int("SLIDE_TARIFF_CREDITS_MONTHLY", 0, minimum=0),
+    "teachers": _env_positive_int("SLIDE_TARIFF_CREDITS_TEACHERS", 0, minimum=0),
+}
+logging.info("Taqdimot tarif kreditlari Railway'dan yuklandi | kunlik=%s | haftalik=%s | oylik=%s | o'qituvchilar=%s",
+             SLIDE_TARIFF_CREDITS["daily"], SLIDE_TARIFF_CREDITS["weekly"],
+             SLIDE_TARIFF_CREDITS["monthly"], SLIDE_TARIFF_CREDITS["teachers"])
+
 # Bepul limitlar: musbat son = limit, -1 = cheksiz. 0 va boshqa manfiy qiymatlar yaroqsiz.
 def _env_free_limit(name, default=3):
     raw = os.getenv(name, str(default))
@@ -753,6 +764,18 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount INTEGER NOT NULL,
         transaction_type TEXT NOT NULL, reference TEXT NOT NULL UNIQUE, description TEXT DEFAULT '',
         created_at INTEGER NOT NULL)""")
+    # Kredit manbalarini ajratish: eski umumiy balans xarid qilingan kredit sifatida saqlanadi.
+    wallet_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_wallets)").fetchall()}
+    for column in ("tariff_balance", "purchased_balance"):
+        if column not in wallet_columns:
+            cursor.execute(f"ALTER TABLE credit_wallets ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+    cursor.execute("UPDATE credit_wallets SET purchased_balance=balance WHERE purchased_balance=0 AND tariff_balance=0 AND balance>0")
+    transaction_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_transactions)").fetchall()}
+    for column in ("tariff_amount", "purchased_amount"):
+        if column not in transaction_columns:
+            cursor.execute(f"ALTER TABLE credit_transactions ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+    # Tarixiy yozuvlar eski balansdan kelgani uchun ularning manbasi xarid qilingan kredit deb belgilanadi.
+    cursor.execute("UPDATE credit_transactions SET purchased_amount=amount WHERE purchased_amount=0 AND tariff_amount=0 AND amount>0")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
         id TEXT PRIMARY KEY,
@@ -1549,9 +1572,11 @@ def process_expired_paid_limits():
         for row in rows:
             user_id = row["user_id"]
             expiry = row["premium_until"] or 0
-            if (row["paid_limit_notice_until"] or 0) == expiry:
-                continue
             plan_key = row["plan_key"] or get_plan_key(row["status"] or "")
+            expire_tariff_slide_credits(conn, user_id, now)
+            if (row["paid_limit_notice_until"] or 0) == expiry:
+                cur.execute("UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0 WHERE user_id=? AND premium_until=?", (user_id, expiry))
+                continue
             cur.execute(
                 "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=? "
                 "WHERE user_id=? AND premium_until=?",
@@ -1706,17 +1731,21 @@ def trigger_credit_payment_flow(user_id, package_id):
         return False
 
 
-def get_credit_balance(user_id):
+def get_credit_wallet(user_id):
     conn = _connect_db()
     try:
-        row = conn.execute("SELECT balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
-        return int(row[0]) if row else 0
+        row = conn.execute("SELECT balance, tariff_balance, purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+        if not row:
+            return {"balance": 0, "tariff_balance": 0, "purchased_balance": 0}
+        return {"balance": int(row[0] or 0), "tariff_balance": int(row[1] or 0), "purchased_balance": int(row[2] or 0)}
     finally:
         conn.close()
 
+def get_credit_balance(user_id):
+    return get_credit_wallet(user_id)["balance"]
 
 def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"):
-    """Atomar kredit yechish; takroriy reference va manfiy balansga yo'l qo'ymaydi."""
+    """Avval muddati bor tarif kreditini, keyin xarid qilingan kreditni atomar sarflaydi."""
     try:
         amount = int(amount)
         if amount <= 0 or amount > 1000000 or not str(reference).strip():
@@ -1724,23 +1753,18 @@ def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"
         conn = _connect_db()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) "
-                "ON CONFLICT(user_id) DO NOTHING", (int(user_id), int(time.time()))
-            )
-            cur = conn.execute(
-                "UPDATE credit_wallets SET balance=balance-?, updated_at=? "
-                "WHERE user_id=? AND balance>=?",
-                (amount, int(time.time()), int(user_id), amount)
-            )
-            if cur.rowcount != 1:
+            now = int(time.time())
+            conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+            row = conn.execute("SELECT balance,tariff_balance,purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+            if int(row[0] or 0) < amount:
                 conn.rollback()
                 return False, "insufficient_credits"
-            conn.execute(
-                "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) "
-                "VALUES (?,?, 'spend', ?, ?, ?)",
-                (int(user_id), -amount, str(reference), str(description)[:200], int(time.time()))
-            )
+            tariff_spent = min(int(row[1] or 0), amount)
+            purchased_spent = amount - tariff_spent
+            conn.execute("UPDATE credit_wallets SET balance=balance-?, tariff_balance=tariff_balance-?, purchased_balance=purchased_balance-?, updated_at=? WHERE user_id=?",
+                         (amount, tariff_spent, purchased_spent, now, int(user_id)))
+            conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'spend', ?, ?, ?, ?, ?)",
+                         (int(user_id), -amount, str(reference), str(description)[:200], now, -tariff_spent, -purchased_spent))
             conn.commit()
             return True, get_credit_balance(user_id)
         except sqlite3.IntegrityError:
@@ -1748,22 +1772,74 @@ def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"
             return False, "duplicate_reference"
         finally:
             conn.close()
-    except Exception as exc:
-        logging.exception("Kredit yechishda xato: %s", exc)
+    except Exception:
+        logging.exception("Slayd yaratish uchun kredit yechishda xatolik")
         return False, "internal_error"
+
+def refund_slide_credits(user_id, amount, spend_reference, refund_reference, description):
+    """Muvaffaqiyatsiz taqdimot xarajatini aynan yechilgan manbalarga qaytaradi."""
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        spent = conn.execute("SELECT tariff_amount,purchased_amount FROM credit_transactions WHERE user_id=? AND reference=? AND transaction_type='spend'", (int(user_id), str(spend_reference))).fetchone()
+        if not spent:
+            conn.rollback(); logging.error("Kredit qaytarilmadi: sarf yozuvi topilmadi | foydalanuvchi=%s", user_id); return False
+        tariff_refund = max(0, -int(spent[0] or 0)); purchased_refund = max(0, -int(spent[1] or 0))
+        total = tariff_refund + purchased_refund
+        if total != int(amount):
+            conn.rollback(); logging.error("Kredit qaytarilmadi: qaytariladigan miqdor mos emas | foydalanuvchi=%s", user_id); return False
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (total, tariff_refund, purchased_refund, int(time.time()), int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'refund', ?, ?, ?, ?, ?)", (int(user_id), total, str(refund_reference), str(description)[:200], int(time.time()), tariff_refund, purchased_refund))
+        conn.commit(); return True
+    except sqlite3.IntegrityError:
+        conn.rollback(); return False
+    except Exception:
+        conn.rollback(); logging.exception("Taqdimot krediti asl manbasiga qaytarishda xatolik"); return False
+    finally:
+        conn.close()
+
+def grant_tariff_slide_credits(conn, user_id, plan_key, payment_reference, now=None):
+    """Premium to'lovi uchun tarif kreditini bir marta beradi; chaqiruvchi tranzaksiyani boshqaradi."""
+    amount = int(SLIDE_TARIFF_CREDITS.get(plan_key, 0))
+    if amount <= 0:
+        logging.info("Tarif bo'yicha taqdimot krediti berilmadi: Railway miqdori 0 | tarif=%s | foydalanuvchi=%s", plan_key, user_id)
+        return 0
+    now = int(now or time.time())
+    reference = f"tariff-credit:{payment_reference}"
+    exists = conn.execute("SELECT 1 FROM credit_transactions WHERE reference=?", (reference,)).fetchone()
+    if exists:
+        logging.warning("Tarif krediti takroran berilmadi | tarif=%s | foydalanuvchi=%s", plan_key, user_id)
+        return 0
+    conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+    conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
+    conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'tariff_grant', ?, ?, ?, ?, 0)", (int(user_id), amount, reference, f"{plan_key} tarifi uchun taqdimot krediti", now, amount))
+    logging.info("Tarif taqdimot krediti berildi | tarif=%s | miqdor=%s | foydalanuvchi=%s", plan_key, amount, user_id)
+    return amount
+
+def expire_tariff_slide_credits(conn, user_id, now=None):
+    """Faqat tarif kreditining qolganini bekor qiladi; xarid qilingan kredit saqlanadi."""
+    row = conn.execute("SELECT tariff_balance,purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+    if not row or int(row[0] or 0) <= 0:
+        return 0
+    amount = int(row[0]); now = int(now or time.time())
+    conn.execute("UPDATE credit_wallets SET balance=MAX(0,balance-?), tariff_balance=0, updated_at=? WHERE user_id=?", (amount, now, int(user_id)))
+    reference = f"tariff-expiry:{int(user_id)}:{now}"
+    conn.execute("INSERT OR IGNORE INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'tariff_expiry', ?, ?, ?, ?, 0)", (int(user_id), -amount, reference, "Tarif muddati tugadi — qolgan tarif kreditlari bekor qilindi", now, -amount))
+    logging.info("Tarif muddati tugadi: qolgan tarif kreditlari bekor qilindi | foydalanuvchi=%s | miqdor=%s", user_id, amount)
+    return amount
 
 
 def get_credit_history(user_id, limit=20):
     conn = _connect_db()
     try:
         rows = conn.execute(
-            "SELECT amount,transaction_type,reference,description,created_at "
+            "SELECT amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount "
             "FROM credit_transactions WHERE user_id=? ORDER BY id DESC LIMIT ?",
             (int(user_id), max(1, min(int(limit), 100)))
         ).fetchall()
         return [dict(row) if isinstance(row, sqlite3.Row) else {
             "amount": row[0], "transaction_type": row[1], "reference": row[2],
-            "description": row[3], "created_at": row[4]
+            "description": row[3], "created_at": row[4], "tariff_amount": row[5], "purchased_amount": row[6]
         } for row in rows]
     finally:
         conn.close()
@@ -3017,6 +3093,7 @@ def handle_admin_decision(call):
             "UPDATE users SET status = ?, plan_key = ?, premium_until = ?, premium_source = ? WHERE user_id = ?",
             (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, "paid", user_id),
         )
+        grant_tariff_slide_credits(conn, user_id, plan_key, tx_id, current_time)
         conn.commit()
 
         bot.answer_callback_query(call.id, "To'lov tasdiqlandi!")
@@ -3209,6 +3286,7 @@ def get_tariff_config():
                 "duration_value": item["duration_value"],
                 "duration_unit": item["duration_unit"],
                 "names": item["names"],
+                "slide_credits": SLIDE_TARIFF_CREDITS.get(key, 0),
             }
             for key, item in TARIFFS.items()
         },
@@ -3245,7 +3323,8 @@ def api_payment_intent(req: PaymentIntentRequest):
 @app.get("/api/slide-credits")
 def api_slide_credits(user_id: int):
     add_user_to_db(user_id)
-    return {"status": "ok", "balance": get_credit_balance(user_id), "packages": list(get_slide_credit_packages().values())}
+    wallet = get_credit_wallet(user_id)
+    return {"status": "ok", **wallet, "packages": list(get_slide_credit_packages().values())}
 
 
 @app.get("/api/slide-credit-history")
@@ -3269,14 +3348,16 @@ def api_slides_config():
     except Exception:
         options = [6, 8, 10, 12, 16, 20]
     return {"status": "ok", "enabled": enabled, "credits_enabled": credits_enabled,
-            "credits_per_slide": per_slide, "slide_count_options": options}
+            "credits_per_slide": per_slide, "slide_count_options": options,
+            "tariff_credits": SLIDE_TARIFF_CREDITS}
 
 
 @app.get("/api/slides/credits")
 def api_slides_credits_compat(user_id: int):
     """UI bilan mos endpoint; tarix ham shu javobda qaytariladi."""
     add_user_to_db(user_id)
-    return {"status": "ok", "balance": get_credit_balance(user_id),
+    wallet = get_credit_wallet(user_id)
+    return {"status": "ok", **wallet,
             "transactions": get_credit_history(user_id, 20),
             "packages": list(get_slide_credit_packages().values())}
 
@@ -3289,9 +3370,10 @@ def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi
     conn = _connect_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        conn.execute("INSERT INTO credit_wallets (user_id,balance,updated_at) VALUES (?,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), int(time.time())))
-        conn.execute("UPDATE credit_wallets SET balance=balance+?, updated_at=? WHERE user_id=?", (amount, int(time.time()), int(user_id)))
-        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at) VALUES (?,?, ?, ?, ?, ?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], int(time.time())))
+        now = int(time.time())
+        conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?,?,?,?,?,0,?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], now, amount))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -4412,7 +4494,7 @@ def api_generate_slides(
             }
         })
     except Exception as exc:
-        add_slide_credits(user_id, cost, f"slides-refund:{job_id}", "Slayd yaratish amalga oshmadi — kredit qaytarildi")
+        refund_slide_credits(user_id, cost, f"slides:{job_id}", f"slides-refund:{job_id}", "Slayd yaratish amalga oshmadi — kreditlar avvalgi hisoblariga qaytarildi")
         logging.exception("AI slayd yaratishda xato | user_id=%s | job_id=%s | sabab=%s", user_id, job_id, _safe_ai_error_text(exc))
         raise HTTPException(status_code=502, detail="Taqdimot yaratilmadi. Sarflangan kreditlar balansga qaytarildi.")
 
@@ -4461,6 +4543,7 @@ def get_premium_status(user_id: int):
     if is_active_paid_status(user_status, premium_until):
         pass
     elif "PRO" in user_status and premium_until > 0 and now > premium_until:
+        expire_tariff_slide_credits(conn, user_id, now)
         cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0, premium_source = 'paid' WHERE user_id = ?", (user_id,))
         conn.commit()
         user_status, plan_key, premium_until = "Oddiy foydalanuvchi", "", 0
@@ -4564,6 +4647,7 @@ async def create_quiz_web(
             and premium_until > 0
             and current_now > premium_until
         ):
+            expire_tariff_slide_credits(conn_check, user_id, current_now)
             cursor_check.execute(
                 "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
                 (user_id,),
