@@ -1763,6 +1763,38 @@
         .slides-theme-preview { display:block; height:54px; border-radius:7px; margin-bottom:6px; overflow:hidden; position:relative; }
         .slides-theme-preview:before,.slides-theme-preview:after { content:""; position:absolute; border-radius:3px; background:rgba(255,255,255,.72); height:5px; left:9px; top:12px; width:42%; box-shadow:0 10px 0 rgba(255,255,255,.35),0 20px 0 rgba(255,255,255,.22); }
         .slides-theme-preview:after { left:auto; right:9px; top:10px; width:25%; height:34px; opacity:.65; box-shadow:none; }
+        /* Har bir slayd shabloni uchun alohida miniatyura kompozitsiyasi. */
+        .slides-theme-preview { background-size:cover; }
+        .slides-theme-option[data-theme="auto"] .slides-theme-preview { background:linear-gradient(135deg,#102b45 0 48%,#35d6f5 49% 100%) !important; }
+        .slides-theme-option[data-theme="auto"] .slides-theme-preview:before { width:48%;height:4px;left:9px;top:12px;box-shadow:0 9px 0 rgba(255,255,255,.55),0 18px 0 rgba(255,255,255,.3); }
+        .slides-theme-option[data-theme="auto"] .slides-theme-preview:after { width:27%;height:29px;right:9px;top:12px;border:2px solid rgba(255,255,255,.65);background:rgba(255,255,255,.16); }
+        .slides-theme-option[data-theme="modern"] .slides-theme-preview { background:#0c1930 !important; }
+        .slides-theme-option[data-theme="modern"] .slides-theme-preview:before { left:0;top:0;width:5px;height:100%;background:#2ab7d2;box-shadow:0 0 9px #2ab7d2;border-radius:0; }
+        .slides-theme-option[data-theme="modern"] .slides-theme-preview:after { right:10px;top:12px;width:28%;height:30px;background:linear-gradient(135deg,#2ab7d2,#4b8eae); }
+        .slides-theme-option[data-theme="minimal"] .slides-theme-preview { background:#fafaf8 !important;border:1px solid #d7dedf; }
+        .slides-theme-option[data-theme="minimal"] .slides-theme-preview:before { left:10px;top:9px;width:72%;height:3px;background:#235569;box-shadow:0 12px 0 rgba(35,85,105,.35),0 23px 0 rgba(35,85,105,.2); }
+        .slides-theme-option[data-theme="minimal"] .slides-theme-preview:after { right:10px;top:42px;width:35%;height:2px;background:#235569; }
+        .slides-theme-option[data-theme="academic"] .slides-theme-preview { background:#1c3048 !important; }
+        .slides-theme-option[data-theme="academic"] .slides-theme-preview:before { left:0;top:0;width:100%;height:9px;background:#be9b50;border-radius:0;box-shadow:none; }
+        .slides-theme-option[data-theme="academic"] .slides-theme-preview:after { left:10px;right:auto;top:17px;width:4px;height:31px;background:#be9b50; }
+        .slides-theme-option[data-theme="creative"] .slides-theme-preview { background:linear-gradient(120deg,#2b184b 0 58%,#e85c96 59%) !important; }
+        .slides-theme-option[data-theme="creative"] .slides-theme-preview:before { left:auto;right:12px;top:-15px;width:55px;height:55px;border-radius:50%;background:rgba(255,255,255,.18);box-shadow:none; }
+        .slides-theme-option[data-theme="creative"] .slides-theme-preview:after { left:auto;right:25px;top:17px;width:20px;height:20px;border-radius:50%;background:#f5b3d0; }
+        .slides-theme-option[data-theme="tech"] .slides-theme-preview { background-color:#071522 !important;background-image:linear-gradient(rgba(0,217,255,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(0,217,255,.13) 1px,transparent 1px) !important;background-size:13px 13px !important; }
+        .slides-theme-option[data-theme="tech"] .slides-theme-preview:before { left:10px;top:11px;width:45%;height:4px;background:#00d9ff;box-shadow:0 10px 0 rgba(0,217,255,.6),0 20px 0 rgba(0,217,255,.3); }
+        .slides-theme-option[data-theme="tech"] .slides-theme-preview:after { right:10px;top:12px;width:26%;height:29px;border:1px solid #00d9ff;background:rgba(0,217,255,.14); }
+        .slides-theme-option[data-theme="business"] .slides-theme-preview { background:#17202c !important; }
+        .slides-theme-option[data-theme="business"] .slides-theme-preview:before { left:0;top:0;width:100%;height:6px;background:#d4ad62;border-radius:0;box-shadow:none; }
+        .slides-theme-option[data-theme="business"] .slides-theme-preview:after { right:10px;top:14px;width:30%;height:27px;border:1px solid #d4ad62;background:rgba(212,173,98,.15); }
+        .slides-theme-option[data-theme="infographic"] .slides-theme-preview { background:#f3f7fb !important; }
+        .slides-theme-option[data-theme="infographic"] .slides-theme-preview:before { left:8px;top:10px;width:24%;height:34px;background:#24a6a0;box-shadow:34px 0 0 #6da9bb,68px 0 0 #e2b66b;border-radius:4px; }
+        .slides-theme-option[data-theme="infographic"] .slides-theme-preview:after { right:8px;top:10px;width:22%;height:34px;background:#dce9ef;border:1px solid #24a6a0; }
+        .slides-theme-option[data-theme="nature"] .slides-theme-preview { background:linear-gradient(135deg,#12382e,#1e654a) !important; }
+        .slides-theme-option[data-theme="nature"] .slides-theme-preview:before { left:auto;right:9px;top:-12px;width:56px;height:56px;border-radius:50%;background:rgba(127,189,114,.42);box-shadow:none; }
+        .slides-theme-option[data-theme="nature"] .slides-theme-preview:after { left:12px;right:auto;top:14px;width:27%;height:27px;background:#7fbd72;border-radius:70% 0 70% 0; }
+        .slides-theme-option[data-theme="elegant"] .slides-theme-preview { background:#1f1d2d !important;border:1px solid #cda870; }
+        .slides-theme-option[data-theme="elegant"] .slides-theme-preview:before { left:9px;top:9px;width:calc(100% - 18px);height:35px;border:1px solid rgba(205,168,112,.65);background:transparent;box-shadow:none; }
+        .slides-theme-option[data-theme="elegant"] .slides-theme-preview:after { left:17px;right:auto;top:16px;width:38%;height:3px;background:#cda870; }
         .slides-theme-name { display:block; font-size:12px; font-weight:750; }
         .slides-count-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:8px 0 14px; }
         .slides-count-option { border:1px solid var(--aero-border); border-radius:10px; padding:13px 4px; background:rgba(0,0,0,.24); color:var(--text-main); font-weight:800; font-size:16px; cursor:pointer; }
