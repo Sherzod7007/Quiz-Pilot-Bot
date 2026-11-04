@@ -3530,17 +3530,30 @@ def _build_slide_pptx(deck, theme="modern"):
             "pie": XL_CHART_TYPE.PIE,
             "line": XL_CHART_TYPE.LINE,
         }[layout["type"]]
+        # Pie diagrammada native legenda PowerPoint/LibreOffice versiyasiga qarab
+        # diagramma ustiga chiqib ketishi mumkin. Shu sababli pie uchun
+        # diagramma maydonini toraytirib, legendani alohida PPTX obyektlari bilan chizamiz.
+        is_pie = layout["type"] == "pie"
+        chart_width = layout["visual_width"] * 0.72 if is_pie else layout["visual_width"]
+        chart_y = layout["visual_y"] + (0.42 if is_pie and item.visual_title else 0)
+        chart_height = layout["visual_height"] - (0.42 if is_pie and item.visual_title else 0)
         chart = slide.shapes.add_chart(
-            kind, Inches(layout["visual_x"]), Inches(layout["visual_y"]),
-            Inches(layout["visual_width"]), Inches(layout["visual_height"]), data
+            kind, Inches(layout["visual_x"]), Inches(chart_y),
+            Inches(chart_width), Inches(chart_height), data
         ).chart
 
         # Diagramma maydonining barcha matnlari fon rangiga mos kontrastda.
         chart.font.name = font_name
         chart.font.size = Pt(9)
         chart.font.color.rgb = RGBColor(*fg)
-        chart.has_title = bool(item.visual_title)
-        if item.visual_title:
+        chart.has_title = bool(item.visual_title) and not is_pie
+        if item.visual_title and is_pie:
+            add_text(
+                slide, layout["visual_x"], layout["visual_y"] + 0.02,
+                layout["visual_width"], 0.32, str(item.visual_title)[:80],
+                12, fg, bold=True, align=PP_ALIGN.CENTER, font=font_name
+            )
+        elif item.visual_title:
             chart.chart_title.text_frame.text = str(item.visual_title)[:80]
             for paragraph in chart.chart_title.text_frame.paragraphs:
                 paragraph.font.name = font_name
@@ -3548,13 +3561,10 @@ def _build_slide_pptx(deck, theme="modern"):
                 paragraph.font.bold = True
                 paragraph.font.color.rgb = RGBColor(*fg)
 
-        chart.has_legend = layout["type"] == "pie"
-        if chart.has_legend:
-            chart.legend.position = XL_LEGEND_POSITION.RIGHT
-            chart.legend.include_in_layout = True
-            chart.legend.font.name = font_name
-            chart.legend.font.size = Pt(9)
-            chart.legend.font.color.rgb = RGBColor(*fg)
+        # Pie chart native legendasini o'chiramiz: ayrim PowerPoint/LibreOffice
+        # rendererlarida RIGHT joylashuvi include_in_layout=True bo'lsa ham
+        # diagramma ustiga chiqib ketadi.
+        chart.has_legend = False
 
         plot = chart.plots[0]
         if layout["type"] == "pie":
@@ -3563,6 +3573,24 @@ def _build_slide_pptx(deck, theme="modern"):
                 point.format.fill.fore_color.rgb = RGBColor(*chart_palette[point_index % len(chart_palette)])
                 point.format.line.color.rgb = RGBColor(*bg)
                 point.format.line.width = Pt(1)
+
+            # PDF dagi kabi legenda uchun mustaqil, oldindan ajratilgan ustun.
+            legend_x = layout["visual_x"] + layout["visual_width"] * 0.79
+            legend_y = layout["visual_y"] + 2.05
+            for point_index, label in enumerate(labels):
+                item_y = legend_y + point_index * 0.38
+                swatch = slide.shapes.add_shape(
+                    MSO_SHAPE.ROUNDED_RECTANGLE,
+                    Inches(legend_x), Inches(item_y + 0.035),
+                    Inches(0.11), Inches(0.11)
+                )
+                swatch.fill.solid()
+                swatch.fill.fore_color.rgb = RGBColor(*chart_palette[point_index % len(chart_palette)])
+                swatch.line.fill.background()
+                add_text(
+                    slide, legend_x + 0.17, item_y, 1.10, 0.30,
+                    str(label)[:28], 9, fg, font=font_name
+                )
         else:
             series = plot.series[0]
             series.format.fill.solid()
