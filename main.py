@@ -3328,6 +3328,37 @@ def _extract_slide_source(contents, filename):
     raise ValueError("unsupported_source")
 
 
+
+def _slide_theme_config(theme="modern"):
+    """Slayd shablonining ranglari va maket turini yagona manbadan beradi."""
+    themes = {
+        "modern": {"bg": (12, 25, 48), "accent": (42, 183, 210), "fg": (245, 248, 252), "layout": "rail", "font": "Aptos"},
+        "minimal": {"bg": (250, 250, 248), "accent": (35, 85, 105), "fg": (35, 42, 52), "layout": "minimal", "font": "Aptos"},
+        "academic": {"bg": (28, 48, 72), "accent": (190, 155, 80), "fg": (248, 247, 242), "layout": "academic", "font": "Georgia"},
+        "creative": {"bg": (43, 24, 75), "accent": (232, 92, 150), "fg": (250, 246, 252), "layout": "creative", "font": "Aptos"},
+        "tech": {"bg": (7, 21, 34), "accent": (0, 217, 255), "fg": (239, 249, 255), "layout": "tech", "font": "Aptos"},
+        "business": {"bg": (23, 32, 44), "accent": (212, 173, 98), "fg": (248, 246, 240), "layout": "business", "font": "Aptos"},
+        "infographic": {"bg": (243, 247, 251), "accent": (36, 166, 160), "fg": (35, 55, 68), "layout": "infographic", "font": "Aptos"},
+        "nature": {"bg": (18, 56, 46), "accent": (127, 189, 114), "fg": (244, 250, 239), "layout": "nature", "font": "Aptos"},
+        "elegant": {"bg": (31, 29, 45), "accent": (205, 168, 112), "fg": (250, 247, 241), "layout": "elegant", "font": "Georgia"},
+    }
+    return themes.get(theme, themes["modern"])
+
+
+def _slide_chart_palette(theme="modern"):
+    """PPTX va PDF diagrammalarida bir xil, fon bilan kontrast ranglar."""
+    cfg = _slide_theme_config(theme)
+    if cfg["layout"] == "minimal" or cfg["layout"] == "infographic":
+        return [
+            cfg["accent"], (65, 105, 145), (225, 155, 65),
+            (104, 157, 119), (160, 112, 170), (205, 105, 95),
+        ]
+    return [
+        cfg["accent"], cfg["fg"], (83, 157, 170),
+        (222, 171, 82), (126, 181, 119), (171, 137, 198),
+    ]
+
+
 def _slide_visual_layout(item):
     """PPTX va PDF uchun bir xil slayd joylashuvini qaytaradi."""
     visual_type = (item.visual_type or "none").lower()
@@ -3402,25 +3433,19 @@ def _slide_bullet_layout(bullets, has_visual):
     return rows
 
 
+
 def _build_slide_pptx(deck, theme="modern"):
-    """PPTX eksporti; matn va vizuallar uchun yagona ikki ustunli maket."""
-    themes = {
-        "modern": ((12, 25, 48), (42, 183, 210), (245, 248, 252)),
-        "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
-        "academic": ((28, 48, 72), (190, 155, 80), (248, 247, 242)),
-        "creative": ((43, 24, 75), (232, 92, 150), (250, 246, 252)),
-        "tech": ((7, 21, 34), (0, 217, 255), (239, 249, 255)),
-        "business": ((23, 32, 44), (212, 173, 98), (248, 246, 240)),
-        "infographic": ((243, 247, 251), (36, 166, 160), (35, 55, 68)),
-        "nature": ((18, 56, 46), (127, 189, 114), (244, 250, 239)),
-        "elegant": ((31, 29, 45), (205, 168, 112), (250, 247, 241)),
-    }
-    bg, accent, fg = themes.get(theme, themes["modern"])
+    """PPTX eksporti: har bir tema o'z kompozitsiyasiga ega, grafiklar kontrastli."""
+    cfg = _slide_theme_config(theme)
+    bg, accent, fg = cfg["bg"], cfg["accent"], cfg["fg"]
+    layout_name, font_name = cfg["layout"], cfg["font"]
+    chart_palette = _slide_chart_palette(theme)
+
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
     blank = prs.slide_layouts[6]
 
-    def add_text(slide, x, y, w, h, value, size, color, bold=False, align=None):
+    def add_text(slide, x, y, w, h, value, size, color, bold=False, align=None, font=None):
         shape = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
         tf = shape.text_frame
         tf.clear()
@@ -3432,13 +3457,67 @@ def _build_slide_pptx(deck, theme="modern"):
         tf.vertical_anchor = MSO_ANCHOR.TOP
         para = tf.paragraphs[0]
         para.text = str(value)
-        para.font.name = "Aptos"
+        para.font.name = font or font_name
         para.font.size = Pt(size)
         para.font.bold = bold
         para.font.color.rgb = RGBColor(*color)
         if align is not None:
             para.alignment = align
         return shape
+
+    def add_decor(slide, slide_index):
+        """Mavzuga xos bezaklar; asosiy matn va grafik maydoniga kirmaydi."""
+        def shape(kind, x, y, w, h, fill=None, line=None, transparency=0, line_width=1):
+            obj = slide.shapes.add_shape(kind, Inches(x), Inches(y), Inches(w), Inches(h))
+            if fill:
+                obj.fill.solid()
+                obj.fill.fore_color.rgb = RGBColor(*fill)
+                obj.fill.transparency = transparency
+            else:
+                obj.fill.background()
+            if line:
+                obj.line.color.rgb = RGBColor(*line)
+                obj.line.width = Pt(line_width)
+            else:
+                obj.line.fill.background()
+            return obj
+
+        if layout_name == "rail":
+            shape(MSO_SHAPE.RECTANGLE, 0, 0, .16, 7.5, accent)
+            shape(MSO_SHAPE.OVAL, 11.95, .22, .72, .72, accent, transparency=78)
+        elif layout_name == "minimal":
+            shape(MSO_SHAPE.RECTANGLE, .68, .30, 11.95, .025, accent)
+            shape(MSO_SHAPE.RECTANGLE, .68, 7.12, 11.95, .018, accent, transparency=35)
+        elif layout_name == "academic":
+            shape(MSO_SHAPE.RECTANGLE, 0, 0, 13.333, .16, accent)
+            shape(MSO_SHAPE.RECTANGLE, .72, 1.42, .07, 5.55, accent, transparency=12)
+            shape(MSO_SHAPE.RECTANGLE, 11.92, 6.92, .68, .035, accent)
+        elif layout_name == "creative":
+            shape(MSO_SHAPE.OVAL, 11.25, -.38, 2.45, 2.45, accent, transparency=76)
+            shape(MSO_SHAPE.OVAL, 10.95, .35, .82, .82, fg, transparency=84)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.15, .07, accent)
+        elif layout_name == "tech":
+            # Dekorativ panjara chap chetda qoladi, grafik maydoniga kirmaydi.
+            for gx in (.28, .48, .68):
+                shape(MSO_SHAPE.RECTANGLE, gx, 1.85, .012, 5.25, accent, transparency=82)
+            for gy in (2.0, 2.65, 3.3, 3.95, 4.6, 5.25, 5.9, 6.55, 7.0):
+                shape(MSO_SHAPE.RECTANGLE, .25, gy, .48, .012, accent, transparency=82)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, .95, .055, accent)
+        elif layout_name == "business":
+            shape(MSO_SHAPE.RECTANGLE, 0, 0, 13.333, .13, accent)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.25, .045, accent)
+            shape(MSO_SHAPE.RECTANGLE, .82, 6.92, 11.7, .018, accent, transparency=45)
+        elif layout_name == "infographic":
+            shape(MSO_SHAPE.ROUNDED_RECTANGLE, .72, 1.72, 11.92, 5.15, None, accent, line_width=1.1)
+            shape(MSO_SHAPE.RECTANGLE, .72, 1.72, .09, 5.15, accent)
+        elif layout_name == "nature":
+            shape(MSO_SHAPE.OVAL, 11.55, -.35, 2.0, 2.0, accent, transparency=82)
+            shape(MSO_SHAPE.OVAL, -.55, 6.25, 1.55, 1.55, accent, transparency=84)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.05, .06, accent)
+        elif layout_name == "elegant":
+            shape(MSO_SHAPE.RECTANGLE, .35, .32, 12.62, 6.86, None, accent, line_width=.8)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.05, .025, accent)
+            shape(MSO_SHAPE.RECTANGLE, 11.45, 6.88, .95, .025, accent)
 
     def add_chart(slide, layout, item):
         labels, values = layout["labels"], layout["values"]
@@ -3455,14 +3534,55 @@ def _build_slide_pptx(deck, theme="modern"):
             kind, Inches(layout["visual_x"]), Inches(layout["visual_y"]),
             Inches(layout["visual_width"]), Inches(layout["visual_height"]), data
         ).chart
+
+        # Diagramma maydonining barcha matnlari fon rangiga mos kontrastda.
+        chart.font.name = font_name
+        chart.font.size = Pt(9)
+        chart.font.color.rgb = RGBColor(*fg)
         chart.has_title = bool(item.visual_title)
         if item.visual_title:
             chart.chart_title.text_frame.text = str(item.visual_title)[:80]
+            for paragraph in chart.chart_title.text_frame.paragraphs:
+                paragraph.font.name = font_name
+                paragraph.font.size = Pt(12)
+                paragraph.font.bold = True
+                paragraph.font.color.rgb = RGBColor(*fg)
+
         chart.has_legend = layout["type"] == "pie"
         if chart.has_legend:
-            chart.legend.position = XL_LEGEND_POSITION.BOTTOM
-        if layout["type"] != "pie":
-            chart.value_axis.has_major_gridlines = True
+            chart.legend.position = XL_LEGEND_POSITION.RIGHT
+            chart.legend.include_in_layout = True
+            chart.legend.font.name = font_name
+            chart.legend.font.size = Pt(9)
+            chart.legend.font.color.rgb = RGBColor(*fg)
+
+        plot = chart.plots[0]
+        if layout["type"] == "pie":
+            for point_index, point in enumerate(plot.series[0].points):
+                point.format.fill.solid()
+                point.format.fill.fore_color.rgb = RGBColor(*chart_palette[point_index % len(chart_palette)])
+                point.format.line.color.rgb = RGBColor(*bg)
+                point.format.line.width = Pt(1)
+        else:
+            series = plot.series[0]
+            series.format.fill.solid()
+            series.format.fill.fore_color.rgb = RGBColor(*accent)
+            series.format.line.color.rgb = RGBColor(*accent)
+            if layout["type"] in ("bar", "column"):
+                for axis in (chart.category_axis, chart.value_axis):
+                    axis.tick_labels.font.name = font_name
+                    axis.tick_labels.font.size = Pt(8)
+                    axis.tick_labels.font.color.rgb = RGBColor(*fg)
+                chart.value_axis.has_major_gridlines = True
+                try:
+                    chart.value_axis.major_gridlines.format.line.color.rgb = RGBColor(*accent)
+                    chart.value_axis.major_gridlines.format.line.transparency = 78
+                except Exception:
+                    pass
+            elif layout["type"] == "line":
+                chart.category_axis.tick_labels.font.color.rgb = RGBColor(*fg)
+                chart.value_axis.tick_labels.font.color.rgb = RGBColor(*fg)
+                chart.value_axis.has_major_gridlines = True
 
     def add_process(slide, layout):
         labels = layout["labels"][:6]
@@ -3486,6 +3606,7 @@ def _build_slide_pptx(deck, theme="modern"):
             shape.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
             for para in shape.text_frame.paragraphs:
                 para.alignment = PP_ALIGN.CENTER
+                para.font.name = font_name
                 para.font.size = Pt(11)
                 para.font.bold = True
                 para.font.color.rgb = RGBColor(*fg)
@@ -3502,28 +3623,49 @@ def _build_slide_pptx(deck, theme="modern"):
         slide = prs.slides.add_slide(blank)
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = RGBColor(*bg)
-        bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(.16), prs.slide_height)
-        bar.fill.solid()
-        bar.fill.fore_color.rgb = RGBColor(*accent)
-        bar.line.fill.background()
+        add_decor(slide, index)
+
         if index == 0:
-            add_text(slide, .9, 1.5, 11.4, 2, deck.presentation_title, 34, fg, True, PP_ALIGN.CENTER)
+            # Har bir titul sahifasi ham tanlangan dizayn uslubiga mos kompozitsiyaga ega.
+            if layout_name in ("minimal", "business"):
+                title_x, title_y, title_w, title_align = .95, 1.72, 11.1, PP_ALIGN.LEFT
+            elif layout_name in ("academic", "elegant"):
+                title_x, title_y, title_w, title_align = 1.0, 1.85, 11.0, PP_ALIGN.CENTER
+            else:
+                title_x, title_y, title_w, title_align = .9, 1.62, 11.4, PP_ALIGN.CENTER
+            add_text(slide, title_x, title_y, title_w, 2.0, deck.presentation_title, 34, fg, True, title_align)
             if deck.subtitle:
-                add_text(slide, 1.2, 3.7, 10.8, .9, deck.subtitle, 19, accent, False, PP_ALIGN.CENTER)
-            add_text(slide, 1, 6.6, 11.2, .4, "QUIZ AI  •  AI PRESENTATION", 10, fg, False, PP_ALIGN.CENTER)
+                add_text(slide, 1.15, 3.72, 11.0, 1.15, deck.subtitle, 18, accent, False, PP_ALIGN.CENTER)
+            add_text(slide, 1.0, 6.65, 11.2, .35, "QUIZ AI  •  AI PRESENTATION", 10, fg, False, PP_ALIGN.CENTER)
             continue
 
-        add_text(slide, .8, .48, 11.8, .95, item.title, 27, accent, True)
-        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(.85), Inches(1.48), Inches(1.2), Inches(.055))
-        line.fill.solid()
-        line.fill.fore_color.rgb = RGBColor(*accent)
-        line.line.fill.background()
-
+        title_align = PP_ALIGN.LEFT
+        title_x = .88
+        if layout_name in ("academic", "elegant"):
+            title_x = 1.05
+        add_text(slide, title_x, .48, 11.45, .95, item.title, 27, accent, True, title_align)
+        title_rule = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.85), Inches(1.48), Inches(1.15), Inches(.055)
+        )
+        title_rule.fill.solid()
+        title_rule.fill.fore_color.rgb = RGBColor(*accent)
+        title_rule.line.fill.background()
         layout = _slide_visual_layout(item)
         for row in _slide_bullet_layout(item.bullets, layout["has_visual"]):
-            dot_y = row["y"] + .12
+            # Infografika uslubida punktlar yengil kartochka ichida ko'rsatiladi.
+            if layout_name == "infographic":
+                card = slide.shapes.add_shape(
+                    MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.88), Inches(row["y"] - .045),
+                    Inches(row["width"] + .72), Inches(row["height"] + .08)
+                )
+                card.fill.solid()
+                card.fill.fore_color.rgb = RGBColor(255, 255, 255)
+                card.fill.transparency = 10
+                card.line.color.rgb = RGBColor(*accent)
+                card.line.transparency = 72
+            dot_x = .98 if layout_name != "infographic" else 1.04
             dot = slide.shapes.add_shape(
-                MSO_SHAPE.OVAL, Inches(1.0), Inches(dot_y), Inches(.10), Inches(.10)
+                MSO_SHAPE.OVAL, Inches(dot_x), Inches(row["y"] + .12), Inches(.10), Inches(.10)
             )
             dot.fill.solid()
             dot.fill.fore_color.rgb = RGBColor(*accent)
@@ -3602,18 +3744,10 @@ def _register_slide_pdf_fonts():
 
 def _build_slide_pdf(deck, theme="modern"):
     """PDF eksporti PPTX bilan bir xil maket va vizual koordinatalardan foydalanadi."""
-    theme_colors = {
-        "modern": ((12, 25, 48), (42, 183, 210), (245, 248, 252)),
-        "minimal": ((250, 250, 248), (35, 85, 105), (35, 42, 52)),
-        "academic": ((28, 48, 72), (190, 155, 80), (248, 247, 242)),
-        "creative": ((43, 24, 75), (232, 92, 150), (250, 246, 252)),
-        "tech": ((7, 21, 34), (0, 217, 255), (239, 249, 255)),
-        "business": ((23, 32, 44), (212, 173, 98), (248, 246, 240)),
-        "infographic": ((243, 247, 251), (36, 166, 160), (35, 55, 68)),
-        "nature": ((18, 56, 46), (127, 189, 114), (244, 250, 239)),
-        "elegant": ((31, 29, 45), (205, 168, 112), (250, 247, 241)),
-    }
-    bg, accent, fg = theme_colors.get(theme, theme_colors["modern"])
+    cfg = _slide_theme_config(theme)
+    bg, accent, fg = cfg["bg"], cfg["accent"], cfg["fg"]
+    layout_name = cfg["layout"]
+    chart_palette = _slide_chart_palette(theme)
     page_w, page_h = 13.333 * 72, 7.5 * 72
     output = BytesIO()
     pdf = pdf_canvas.Canvas(output, pagesize=(page_w, page_h), pageCompression=1)
@@ -3643,6 +3777,66 @@ def _build_slide_pdf(deck, theme="modern"):
             y -= leading
         return y
 
+    def draw_theme_decor(slide_index):
+        """PDF uchun shablon bezaklari; PPTX dagi theme kompozitsiyasiga mos."""
+        pdf.saveState()
+        pdf.setFillColorRGB(*rgb(accent))
+        pdf.setStrokeColorRGB(*rgb(accent))
+        if layout_name == "rail":
+            pdf.rect(0, 0, 12, page_h, fill=1, stroke=0)
+            pdf.setFillAlpha(.18)
+            pdf.circle(page_w - 42, page_h - 42, 26, fill=1, stroke=0)
+        elif layout_name == "minimal":
+            pdf.setFillAlpha(1)
+            pdf.rect(49, page_h - 23, page_w - 98, 1.5, fill=1, stroke=0)
+            pdf.setFillAlpha(.35)
+            pdf.rect(49, 22, page_w - 98, 1, fill=1, stroke=0)
+        elif layout_name == "academic":
+            pdf.rect(0, page_h - 11, page_w, 11, fill=1, stroke=0)
+            pdf.setFillAlpha(.9)
+            pdf.rect(52, 38, 5, page_h - 175, fill=1, stroke=0)
+            pdf.rect(page_w - 86, 35, 42, 2, fill=1, stroke=0)
+        elif layout_name == "creative":
+            pdf.setFillAlpha(.17)
+            pdf.circle(page_w - 18, page_h + 4, 88, fill=1, stroke=0)
+            pdf.setFillAlpha(.12)
+            pdf.circle(page_w - 100, page_h - 50, 32, fill=1, stroke=0)
+            pdf.setFillAlpha(1)
+            pdf.roundRect(59, page_h - 108, 82, 5, 2, fill=1, stroke=0)
+        elif layout_name == "tech":
+            pdf.setFillAlpha(.12)
+            pdf.setLineWidth(.45)
+            for gx in (18, 34, 50):
+                pdf.line(gx, 26, gx, page_h-133)
+            for gy in range(145, int(page_h-130), 47):
+                pdf.line(17, gy, 57, gy)
+            pdf.setFillAlpha(1)
+            pdf.rect(59, page_h - 108, 70, 4, fill=1, stroke=0)
+        elif layout_name == "business":
+            pdf.rect(0, page_h - 10, page_w, 10, fill=1, stroke=0)
+            pdf.setFillAlpha(.45)
+            pdf.rect(59, 27, page_w-100, 1, fill=1, stroke=0)
+            pdf.setFillAlpha(1)
+            pdf.rect(59, page_h - 108, 88, 3, fill=1, stroke=0)
+        elif layout_name == "infographic":
+            pdf.setFillAlpha(.9)
+            pdf.setLineWidth(1)
+            pdf.roundRect(48, 35, page_w-96, page_h-150, 10, fill=0, stroke=1)
+            pdf.rect(48, 35, 6, page_h-150, fill=1, stroke=0)
+        elif layout_name == "nature":
+            pdf.setFillAlpha(.16)
+            pdf.circle(page_w - 28, page_h + 5, 74, fill=1, stroke=0)
+            pdf.circle(-15, 18, 58, fill=1, stroke=0)
+            pdf.setFillAlpha(1)
+            pdf.roundRect(59, page_h - 108, 74, 4, 2, fill=1, stroke=0)
+        elif layout_name == "elegant":
+            pdf.setFillAlpha(.9)
+            pdf.setLineWidth(.7)
+            pdf.rect(25, 24, page_w-50, page_h-48, fill=0, stroke=1)
+            pdf.rect(59, page_h - 108, 74, 1.5, fill=1, stroke=0)
+            pdf.rect(page_w-125, 28, 66, 1.5, fill=1, stroke=0)
+        pdf.restoreState()
+
     def draw_chart(layout, item):
         x = layout["visual_x"] * 72
         y_top = page_h - layout["visual_y"] * 72
@@ -3665,9 +3859,9 @@ def _build_slide_pdf(deck, theme="modern"):
 
         if kind == "pie":
             total = sum(values) or 1
-            cx, cy = x + w * .43, chart_bottom + chart_h * .52
-            radius = min(chart_h * .38, w * .25)
-            palette = [accent, fg, (100, 160, 190), (220, 170, 90), (120, 190, 130), (170, 130, 200)]
+            cx, cy = x + w * .48, chart_bottom + chart_h * .48
+            radius = min(chart_h * .51, w * .32)
+            palette = chart_palette
             angle = 0
             for i, value in enumerate(values):
                 extent = 360 * value / total
@@ -3685,13 +3879,14 @@ def _build_slide_pdf(deck, theme="modern"):
                 pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
                 pdf.drawPath(path, fill=1, stroke=0)
                 angle += extent
-            pdf.setFont(regular, 8)
+            pdf.setFont(regular, 9)
             for i, label in enumerate(labels):
-                ly = chart_bottom + chart_h - 12 - i * 17
+                ly = chart_bottom + chart_h - 24 - i * 22
                 pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
-                pdf.rect(x + w * .72, ly-2, 7, 7, fill=1, stroke=0)
+                pdf.roundRect(x + w * .82, ly-2, 9, 9, 2, fill=1, stroke=0)
                 pdf.setFillColorRGB(*rgb(fg))
-                pdf.drawString(x + w * .72 + 12, ly, str(label)[:22])
+                pdf.setFont(regular, 9)
+                pdf.drawString(x + w * .82 + 14, ly, str(label)[:15])
             return
 
         # Ustunli, gorizontal bar va chiziqli grafiklar.
@@ -3771,34 +3966,48 @@ def _build_slide_pdf(deck, theme="modern"):
     for index, item in enumerate(deck.slides):
         pdf.setFillColorRGB(*rgb(bg))
         pdf.rect(0, 0, page_w, page_h, fill=1, stroke=0)
-        pdf.setFillColorRGB(*rgb(accent))
-        pdf.rect(0, 0, 12, page_h, fill=1, stroke=0)
+        draw_theme_decor(index)
         if index == 0:
             pdf.setFillColorRGB(*rgb(fg))
-            pdf.setFont(bold, 30)
-            title_lines = wrap_lines(deck.presentation_title, bold, 30, page_w - 150)
-            y = page_h * .62 + (len(title_lines)-1) * 38
+            pdf.setFont(bold, 34)
+            title_lines = wrap_lines(deck.presentation_title, bold, 34, page_w - 150)
+            y = page_h * .62 + (len(title_lines)-1) * 40
             for line in title_lines[:3]:
                 pdf.drawCentredString(page_w/2, y, line)
-                y -= 38
+                y -= 40
             if deck.subtitle:
-                draw_wrapped(deck.subtitle, 85, page_h*.39, page_w-170, regular, 16, accent, 23)
+                subtitle_lines = []
+                for paragraph in str(deck.subtitle).replace("\r", "\n").split("\n"):
+                    subtitle_lines.extend(wrap_lines(paragraph, regular, 18, page_w - 190))
+                subtitle_y = page_h * .39 + (len(subtitle_lines) - 1) * 25
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.setFont(regular, 18)
+                for subtitle_line in subtitle_lines[:5]:
+                    pdf.drawCentredString(page_w / 2, subtitle_y, subtitle_line)
+                    subtitle_y -= 25
             pdf.setFillColorRGB(*rgb(fg))
-            pdf.setFont(regular, 9)
+            pdf.setFont(regular, 10)
             pdf.drawCentredString(page_w/2, 28, "QUIZ AI  •  AI PRESENTATION")
         else:
-            draw_wrapped(item.title, 55, page_h-62, page_w-105, bold, 23, accent, 30)
+            draw_wrapped(item.title, 55, page_h-62, page_w-105, bold, 27, accent, 32)
             pdf.setFillColorRGB(*rgb(accent))
             pdf.roundRect(58, page_h-112, 82, 4, 2, fill=1, stroke=0)
             layout = _slide_visual_layout(item)
             bullet_rows = _slide_bullet_layout(item.bullets, layout["has_visual"])
             for row in bullet_rows:
                 y = page_h - (row["y"] * 72)
+                if layout_name == "infographic":
+                    pdf.saveState()
+                    pdf.setFillColorRGB(1, 1, 1)
+                    pdf.setFillAlpha(.10)
+                    card_h = max(30, row["height"] * 72 + 7)
+                    pdf.roundRect(62, y - card_h + 16, row["width"] * 72 + 52, card_h, 7, fill=1, stroke=0)
+                    pdf.restoreState()
                 pdf.setFillColorRGB(*rgb(accent))
                 pdf.circle(72, y + 5, 3.2, fill=1, stroke=0)
-                font_size = row["font_size"] * .78
-                leading = 20 if layout["has_visual"] else 22
-                draw_wrapped(row["text"], 88, y, row["width"] * 72,
+                font_size = row["font_size"]
+                leading = font_size * 1.18
+                draw_wrapped(row["text"], row["x"] * 72, y, row["width"] * 72,
                              regular, font_size, fg, leading)
             if layout["type"] in ("bar", "column", "pie", "line"):
                 draw_chart(layout, item)
@@ -3899,7 +4108,10 @@ def api_generate_slides(
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
         "Qolgan slaydlarda 2-5 ta aniq, qisqa bullet yozing. visual_type faqat none, bar, column, pie, line, process yoki timeline bo'lsin. "
         "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa raqam to'qimang, process/timeline sxemasini tanlang. "
-        "Har 2-3 slayddan kamida bittasida mavzuga mos diagramma yoki sxema ishlating. design_theme ni modern, minimal, academic, creative, tech, business, infographic, nature yoki elegant dan tanlang. "
+        "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column. "
+        "Bir-biriga yaqin slaydlarda bir xil diagramma turini ketma-ket takrorlamang; mos ma'lumot bo'lmasa sun'iy xilma-xillik yaratmang. "
+        "Har 2-3 slayddan kamida bittasida mavzuga mos diagramma yoki sxema ishlating. design_theme ni faqat ilovada mavjud bo'lgan modern, minimal, academic, creative, tech, business, infographic, nature yoki elegant shablonlaridan tanlang. "
+        "Mavzu va materialga eng mos bitta shablonni tanlang; internetdan shablon qidirmang va mavjud bo'lmagan nom kiritmang. "
         "Takrorlanish va manbada yo'q faktlarni qo'shmang. "
         "Matn tilini foydalanuvchi bergan matn tiliga moslang. Speaker notes qisqa bo'lsin.\n"
         f"Mavzu: {topic or 'Manba material asosida'}\\n"
