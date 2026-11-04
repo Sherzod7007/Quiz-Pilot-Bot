@@ -3805,7 +3805,8 @@ def _build_slide_pptx(deck, theme="modern"):
             dot.fill.fore_color.rgb = RGBColor(*accent)
             dot.line.fill.background()
             add_text(slide, row["x"], row["y"], row["width"], row["height"],
-                     row["text"], row["font_size"], fg)
+                     row["text"], row["font_size"],
+                     (0, 0, 0) if layout_name == "infographic" else fg)
 
         if layout["type"] in ("bar", "column", "pie", "line"):
             try:
@@ -4226,7 +4227,8 @@ def _build_slide_pdf(deck, theme="modern"):
                 font_size = row["font_size"]
                 leading = font_size * 1.18
                 draw_wrapped(row["text"], row["x"] * 72, y, row["width"] * 72,
-                             regular, font_size, fg, leading)
+                             regular, font_size,
+                             (0, 0, 0) if layout_name == "infographic" else fg, leading)
             if layout["type"] in ("bar", "column", "pie", "line"):
                 try:
                     draw_chart(layout, item)
