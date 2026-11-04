@@ -3370,10 +3370,13 @@ def _slide_visual_layout(item):
     )
     if valid_chart:
         try:
-            valid_chart = all(float(value) >= 0 for value in values)
+            numeric_values = [float(value) for value in values]
+            valid_chart = all(value >= 0 for value in numeric_values)
+            if visual_type == "pie" and sum(numeric_values) <= 0:
+                valid_chart = False
         except (TypeError, ValueError):
             valid_chart = False
-    valid_flow = visual_type in ("process", "timeline") and len(labels) >= 2
+    valid_flow = visual_type in ("process", "timeline", "cards", "cycle", "pyramid", "funnel") and len(labels) >= 2
     has_visual = valid_chart or valid_flow
     return {
         "type": visual_type if has_visual else "none",
@@ -3388,6 +3391,30 @@ def _slide_visual_layout(item):
         "visual_width": 5.55,
         "visual_height": 4.35,
     }
+
+
+def _ensure_slide_visuals(deck):
+    """Coverdan tashqari har bir slaydda mazmuniy vizual bo'lishini kafolatlaydi."""
+    fallback_types = ("cards", "cycle", "pyramid", "funnel", "process", "timeline")
+    used_types = []
+    for index, item in enumerate(deck.slides[1:], start=0):
+        layout = _slide_visual_layout(item)
+        if layout["has_visual"]:
+            used_types.append(layout["type"])
+            continue
+
+        # Grafik uchun haqiqiy sonlar bo'lmasa, bulletlardan sxema tuzamiz.
+        # Hech qanday sun'iy qiymat yoki statistik ma'lumot yaratilmaydi.
+        candidate = fallback_types[index % len(fallback_types)]
+        if used_types and candidate == used_types[-1]:
+            candidate = fallback_types[(fallback_types.index(candidate) + 1) % len(fallback_types)]
+        item.visual_type = candidate
+        item.visual_title = item.title[:120]
+        item.visual_labels = [str(value).strip()[:90] for value in (item.bullets or [])[:6] if str(value).strip()]
+        item.visual_values = []
+        used_types.append(candidate)
+
+    return deck
 
 
 def _slide_bullet_layout(bullets, has_visual):
@@ -3647,6 +3674,85 @@ def _build_slide_pptx(deck, theme="modern"):
                 arrow.fill.fore_color.rgb = RGBColor(*accent)
                 arrow.line.fill.background()
 
+    def add_rich_diagram(slide, layout, item):
+        """Raqamsiz mazmuniy diagrammalar: kartalar, sikl, piramida va funnel."""
+        labels = layout["labels"][:6]
+        x0, y0, total_w = layout["visual_x"], 2.55, layout["visual_width"]
+        palette = chart_palette
+        kind = layout["type"]
+
+        if kind == "cards":
+            cols = 2
+            rows = (len(labels) + cols - 1) // cols
+            gap_x, gap_y = .16, .16
+            box_w = (total_w - gap_x) / cols
+            box_h = min(1.05, (3.65 - gap_y * max(0, rows - 1)) / max(1, rows))
+            for i, label in enumerate(labels):
+                col, row = i % cols, i // cols
+                x, y = x0 + col * (box_w + gap_x), y0 + row * (box_h + gap_y)
+                shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(box_w), Inches(box_h))
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = RGBColor(*palette[i % len(palette)])
+                shape.fill.transparency = 10
+                shape.line.color.rgb = RGBColor(*accent)
+                tf = shape.text_frame
+                tf.clear(); tf.word_wrap = True
+                tf.margin_left = Inches(.10); tf.margin_right = Inches(.10)
+                tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+                para = tf.paragraphs[0]; para.text = str(label)[:90]
+                para.alignment = PP_ALIGN.CENTER
+                para.font.name = font_name; para.font.size = Pt(10); para.font.bold = True
+                para.font.color.rgb = RGBColor(*fg)
+            return
+
+        if kind == "cycle":
+            # Doiraviy siklni 3-6 tugun bilan, markaziy bo'shliqni saqlagan holda chizamiz.
+            from math import cos, sin, pi
+            cx, cy = x0 + total_w / 2, 4.25
+            radius_x, radius_y = 1.85, 1.35
+            count = len(labels)
+            node_w, node_h = 1.42, .72
+            positions = []
+            for i, label in enumerate(labels):
+                angle = -pi / 2 + (2 * pi * i / count)
+                px, py = cx + radius_x * cos(angle), cy + radius_y * sin(angle)
+                positions.append((px, py))
+            for i, (px, py) in enumerate(positions):
+                node = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(px-node_w/2), Inches(py-node_h/2), Inches(node_w), Inches(node_h))
+                node.fill.solid(); node.fill.fore_color.rgb = RGBColor(*palette[i % len(palette)])
+                node.line.color.rgb = RGBColor(*accent)
+                tf=node.text_frame; tf.clear(); tf.word_wrap=True
+                tf.vertical_anchor=MSO_ANCHOR.MIDDLE
+                para=tf.paragraphs[0]; para.text=str(labels[i])[:65]
+                para.alignment=PP_ALIGN.CENTER; para.font.name=font_name
+                para.font.size=Pt(8); para.font.bold=True; para.font.color.rgb=RGBColor(*fg)
+            return
+
+        if kind in ("pyramid", "funnel"):
+            count = len(labels)
+            max_w, total_h = total_w * .82, 3.75
+            center_x = x0 + total_w / 2
+            seg_h = total_h / count
+            for i, label in enumerate(labels):
+                if kind == "pyramid":
+                    top_w = max_w * (count - i - 1) / count
+                    bottom_w = max_w * (count - i) / count
+                    if i == count - 1: top_w = max_w / count
+                else:
+                    top_w = max_w * (1 - .72 * i / max(1, count))
+                    bottom_w = max_w * (1 - .72 * (i + 1) / max(1, count))
+                top_w=max(.55,top_w); bottom_w=max(.55,bottom_w)
+                x=center_x-max(top_w,bottom_w)/2
+                y=y0+i*seg_h
+                # Trapezoid shape is native editable PowerPoint vector.
+                shp=slide.shapes.add_shape(MSO_SHAPE.TRAPEZOID, Inches(x), Inches(y), Inches(max(top_w,bottom_w)), Inches(seg_h-.04))
+                shp.fill.solid(); shp.fill.fore_color.rgb=RGBColor(*palette[i % len(palette)])
+                shp.line.color.rgb=RGBColor(*bg)
+                tf=shp.text_frame; tf.clear(); tf.word_wrap=True; tf.vertical_anchor=MSO_ANCHOR.MIDDLE
+                para=tf.paragraphs[0]; para.text=str(label)[:70]; para.alignment=PP_ALIGN.CENTER
+                para.font.name=font_name; para.font.size=Pt(9); para.font.bold=True; para.font.color.rgb=RGBColor(*fg)
+            return
+
     for index, item in enumerate(deck.slides):
         slide = prs.slides.add_slide(blank)
         slide.background.fill.solid()
@@ -3706,8 +3812,17 @@ def _build_slide_pptx(deck, theme="modern"):
                 add_chart(slide, layout, item)
             except Exception as chart_exc:
                 logging.warning("Slayd grafigi chizilmadi | slayd=%s | sabab=%s", index + 1, chart_exc)
+                fallback_layout = dict(layout)
+                fallback_layout.update({
+                    "type": "cards",
+                    "labels": [str(value)[:90] for value in (item.bullets or [])[:6]],
+                    "has_visual": True,
+                })
+                add_rich_diagram(slide, fallback_layout, item)
         elif layout["type"] in ("process", "timeline"):
             add_process(slide, layout)
+        elif layout["type"] in ("cards", "cycle", "pyramid", "funnel"):
+            add_rich_diagram(slide, layout, item)
 
         add_text(slide, 11.8, 7, .7, .25, f"{index+1:02d}", 10, accent, True, PP_ALIGN.RIGHT)
         if item.speaker_notes:
@@ -3991,6 +4106,81 @@ def _build_slide_pdf(deck, theme="modern"):
                 pdf.line(arrow_x + gap - 5, mid_y + 3, arrow_x + gap - 2, mid_y)
                 pdf.line(arrow_x + gap - 5, mid_y - 3, arrow_x + gap - 2, mid_y)
 
+    def draw_rich_diagram(layout, item):
+        """PPTX dagi cards/cycle/pyramid/funnel sxemalarining PDF muqobili."""
+        labels = layout["labels"][:6]
+        x0, y0, total_w = layout["visual_x"] * 72, page_h - 2.55 * 72, layout["visual_width"] * 72
+        palette = chart_palette
+        kind = layout["type"]
+        pdf.saveState()
+        if kind == "cards":
+            cols = 2
+            rows = (len(labels) + cols - 1) // cols
+            gap_x, gap_y = 12, 12
+            box_w = (total_w - gap_x) / cols
+            box_h = min(75, (3.65 * 72 - gap_y * max(0, rows - 1)) / max(1, rows))
+            for i, label in enumerate(labels):
+                col, row = i % cols, i // cols
+                x, y = x0 + col * (box_w + gap_x), y0 - row * (box_h + gap_y) - box_h
+                pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
+                pdf.roundRect(x, y, box_w, box_h, 9, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg)); pdf.setFont(bold, 9)
+                lines = wrap_lines(str(label)[:90], bold, 9, box_w - 18)
+                ty = y + box_h/2 + (len(lines)-1)*6
+                for line in lines[:4]:
+                    pdf.drawCentredString(x + box_w/2, ty, line); ty -= 12
+            pdf.restoreState(); return
+
+        if kind == "cycle":
+            from math import cos, sin, pi
+            cx, cy = x0 + total_w/2, page_h - 4.25*72
+            rx, ry = 1.85*72, 1.35*72
+            count=len(labels); positions=[]
+            for i,label in enumerate(labels):
+                angle=-pi/2 + 2*pi*i/count
+                positions.append((cx+rx*cos(angle),cy+ry*sin(angle)))
+            # Connect nodes with subtle arrows/lines first.
+            pdf.setStrokeColorRGB(*rgb(accent)); pdf.setLineWidth(2)
+            for i,(px,py) in enumerate(positions):
+                nx,ny=positions[(i+1)%count]
+                pdf.line(px,py,nx,ny)
+            for i,((px,py),label) in enumerate(zip(positions,labels)):
+                nw,nh=1.42*72,.72*72
+                pdf.setFillColorRGB(*rgb(palette[i%len(palette)]))
+                pdf.ellipse(px-nw/2,py-nh/2,px+nw/2,py+nh/2,fill=1,stroke=0)
+                pdf.setFillColorRGB(*rgb(fg)); pdf.setFont(bold,7.5)
+                lines=wrap_lines(str(label)[:65],bold,7.5,nw-12)
+                ty=py+(len(lines)-1)*5
+                for line in lines[:3]:
+                    pdf.drawCentredString(px,ty,line); ty-=10
+            pdf.restoreState(); return
+
+        if kind in ("pyramid", "funnel"):
+            count=len(labels); max_w=total_w*.82; total_h=3.75*72; cx=x0+total_w/2
+            seg_h=total_h/count
+            for i,label in enumerate(labels):
+                if kind=="pyramid":
+                    top_w=max_w*(count-i-1)/count
+                    bottom_w=max_w*(count-i)/count
+                    if i==count-1: top_w=max_w/count
+                else:
+                    top_w=max_w*(1-.72*i/max(1,count))
+                    bottom_w=max_w*(1-.72*(i+1)/max(1,count))
+                top_w=max(40,top_w); bottom_w=max(40,bottom_w)
+                y_top=y0-i*seg_h
+                path=pdf.beginPath()
+                path.moveTo(cx-top_w/2,y_top)
+                path.lineTo(cx+top_w/2,y_top)
+                path.lineTo(cx+bottom_w/2,y_top-seg_h+3)
+                path.lineTo(cx-bottom_w/2,y_top-seg_h+3)
+                path.close()
+                pdf.setFillColorRGB(*rgb(palette[i%len(palette)]))
+                pdf.drawPath(path,fill=1,stroke=0)
+                pdf.setFillColorRGB(*rgb(fg)); pdf.setFont(bold,8)
+                pdf.drawCentredString(cx,y_top-seg_h/2-3,str(label)[:70])
+            pdf.restoreState(); return
+        pdf.restoreState()
+
     for index, item in enumerate(deck.slides):
         pdf.setFillColorRGB(*rgb(bg))
         pdf.rect(0, 0, page_w, page_h, fill=1, stroke=0)
@@ -4038,9 +4228,21 @@ def _build_slide_pdf(deck, theme="modern"):
                 draw_wrapped(row["text"], row["x"] * 72, y, row["width"] * 72,
                              regular, font_size, fg, leading)
             if layout["type"] in ("bar", "column", "pie", "line"):
-                draw_chart(layout, item)
+                try:
+                    draw_chart(layout, item)
+                except Exception as chart_exc:
+                    logging.warning("PDF slayd grafigi chizilmadi | slayd=%s | sabab=%s", index + 1, chart_exc)
+                    fallback_layout = dict(layout)
+                    fallback_layout.update({
+                        "type": "cards",
+                        "labels": [str(value)[:90] for value in (item.bullets or [])[:6]],
+                        "has_visual": True,
+                    })
+                    draw_rich_diagram(fallback_layout, item)
             elif layout["type"] in ("process", "timeline"):
                 draw_process(layout)
+            elif layout["type"] in ("cards", "cycle", "pyramid", "funnel"):
+                draw_rich_diagram(layout, item)
             pdf.setFillColorRGB(*rgb(accent))
             pdf.setFont(bold, 9)
             pdf.drawRightString(page_w-35, 25, f"{index+1:02d}")
@@ -4134,11 +4336,11 @@ def api_generate_slides(
     prompt = (
         "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
-        "Qolgan slaydlarda 2-5 ta aniq, qisqa bullet yozing. visual_type faqat none, bar, column, pie, line, process yoki timeline bo'lsin. "
-        "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa raqam to'qimang, process/timeline sxemasini tanlang. "
-        "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column. "
-        "Bir-biriga yaqin slaydlarda bir xil diagramma turini ketma-ket takrorlamang; mos ma'lumot bo'lmasa sun'iy xilma-xillik yaratmang. "
-        "Har 2-3 slayddan kamida bittasida mavzuga mos diagramma yoki sxema ishlating. design_theme ni faqat ilovada mavjud bo'lgan modern, minimal, academic, creative, tech, business, infographic, nature yoki elegant shablonlaridan tanlang. "
+        "Qolgan HAR BIR slaydda 2-5 ta aniq, qisqa bullet va mazmunga mos kamida BITTA vizual diagramma/sxema bo'lishi SHART. visual_type faqat bar, column, pie, line, process, timeline, cards, cycle, pyramid yoki funnel bo'lsin; none ishlatmang. "
+        "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa hech qanday raqam to'qimang va cards/process/timeline/cycle/pyramid/funnel kabi mazmuniy sxemalardan foydalaning. "
+        "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column; mavzu bosqichlari uchun process/timeline, tarkibiy qismlar uchun cards, davriy jarayon uchun cycle, darajalar uchun pyramid, ketma-ket kamayish uchun funnel. "
+        "Bir xil vizual turini ketma-ket slaydlarda takrorlamang; butun taqdimot davomida chart va sxemalarni imkon qadar rang-barang taqsimlang. Mazmunga mos bo'lmagan grafikni majburan ishlatmang, lekin har bir kontent slaydida mazmuniy sxema bo'lsin. "
+        "design_theme ni faqat ilovada mavjud bo'lgan modern, minimal, academic, creative, tech, business, infographic, nature yoki elegant shablonlaridan tanlang. "
         "Mavzu va materialga eng mos bitta shablonni tanlang; internetdan shablon qidirmang va mavjud bo'lmagan nom kiritmang. "
         "Takrorlanish va manbada yo'q faktlarni qo'shmang. "
         "Matn tilini foydalanuvchi bergan matn tiliga moslang. Speaker notes qisqa bo'lsin.\n"
@@ -4174,6 +4376,7 @@ def api_generate_slides(
         finally:
             gemini_semaphore.release()
         if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        deck = _ensure_slide_visuals(deck)
         allowed_slide_themes = ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature", "elegant")
         safe_theme = (deck.design_theme if deck.design_theme in allowed_slide_themes else "modern") if theme == "auto" else (theme if theme in allowed_slide_themes else "modern")
         pptx_bytes = _build_slide_pptx(deck, safe_theme)
