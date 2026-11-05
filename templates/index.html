@@ -13890,10 +13890,10 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
                 premium_pro_title: "Quiz AI PRO 👑",
                 premium_pro_desc: "O'zingizga mos tarifni tanlang, karta raqamini ko'chirib to'lov qiling va chekni botga yuboring! Eslatma: «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring. ",
-                tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "Tarif ma’lumotlari yuklanmoqda…",
-                tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "Tarif ma’lumotlari yuklanmoqda…",
-                tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "Tarif ma’lumotlari yuklanmoqda…",
-                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "Tarif ma’lumotlari yuklanmoqda…",
+                tariff_daily_title: "⚡ Kunlik Cheksiz", tariff_daily_desc: "24 soat davomida cheksiz test yaratish",
+                tariff_weekly_title: "📅 Haftalik Cheksiz", tariff_weekly_desc: "7 kun davomida cheksiz foydalanish",
+                tariff_monthly_title: "🌙 Oylik Cheksiz", tariff_monthly_desc: "30 kun davomida cheksiz foydalanish",
+                tariff_teacher_title: "🧑‍🏫 O'qituvchilar Uchun", tariff_teacher_desc: "30 kun davomida guruhlar, sessiyalar va topshiriqlarni boshqarish",
                 explanation_label: "💡 Izoh:", active_users_suffix: "faol foydalanuvchi",
                 alert_limit_over: "🔒 Bepul limit tugadi. Test yaratishni davom ettirish uchun Premium tarifga o'ting. 👑",
                 public_limit_over: "🔒 Bepul limit tugadi. Ommaviy testlarni davom ettirish uchun Premium tarifga o'ting. 👑",
@@ -14476,6 +14476,10 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             document.querySelectorAll('#lang-uz, #lang-ru, #lang-en').forEach(b => b.classList.remove('active'));
             const activeBtn = document.getElementById(`lang-${currentLang}`);
             if(activeBtn) activeBtn.classList.add('active');
+
+            // Til matnlari yangilangach, API'dan kelgan tarif tavsiflarini qayta qo'llaymiz.
+            // Bu sahifa yuklanishidagi asinxron tartib sababli placeholder qolib ketishini oldini oladi.
+            if (window.currentTariffConfig) applyTariffConfig(window.currentTariffConfig);
         }
 
         let createPromoIndex = 0;
