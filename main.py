@@ -461,9 +461,9 @@ MESSAGES = {
     "uz": {
         "welcome": (
             "👋 *Salom, {name}!*\n"
-            "🎓 *Quiz AI* — AI yordamida savollarni tez va qulay testga aylantiruvchi ilova.\n\n"
+            "🎓 *Quiz AI* — Sunʼiy intellekt yordamida test va slaydlar yaratuvchi ilova.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
-            "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish.\n"
+            "🤖 SI yordamida matn, PDF yoki DOCX dan test va slaydlar yaratish.\n"
             "📚 Testlarni Kutubxona bo'limida saqlash va ishlash.\n"
             "🌐 Ommaviy testlardan foydalanish.\n"
             "🗂 Flash Kartochkalar orqali takrorlash.\n"
@@ -511,9 +511,9 @@ MESSAGES = {
     "ru": {
         "welcome": (
             "👋 *Привет, {name}!*\n"
-            "🎓 *Quiz AI* — Приложение, которое с помощью ИИ быстро и удобно превращает вопросы в тесты.\n\n"
+            "🎓 *Quiz AI* — Приложение, которое создает тесты и слайды с использованием искусственного интеллекта.\n\n"
             "✨ *Возможности приложения:*\n"
-            "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX.\n"
+            "🤖 Создавайте тесты и слайды из текста, PDF или DOCX с помощью ИИ.\n"
             "📚 Сохранение и прохождение тестов в разделе «Библиотека».\n"
             "🌐 Публичные тесты.\n"
             "🗂 Флеш-карточки для повторения материала.\n"
@@ -560,9 +560,9 @@ MESSAGES = {
     "en": {
         "welcome": (
             "👋 *Hello, {name}!*\n"
-            "🎓 *Quiz AI* — An application that uses AI to quickly and conveniently turn questions into tests.\n\n"
+            "🎓 *Quiz AI* — An app that creates tests and slides using artificial intelligence.\n\n"
             "✨ *App features:*\n"
-            "🤖 Create quizzes with AI from text, PDF or DOCX.\n"
+            "🤖 Create tests and slides from text, PDF or DOCX using AI.\n"
             "📚 Save and take quizzes in the Library.\n"
             "🌐 Public quizzes.\n"
             "🗂 Flashcards for revision.\n"
