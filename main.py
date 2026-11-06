@@ -526,7 +526,7 @@ MESSAGES = {
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Способы создания тестов, слайдов и получения Премиума в приложении опубликованы в нашей группе в виде видео, пожалуйста, ознакомьтесь.*\n\n"
+            "🔴 *Способы создания тестов, слайдов и получения Премиума в приложении опубликованы в нашей группе в виде видео, пожалуйста, ознакомьтесь.*\n\n"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -575,7 +575,7 @@ MESSAGES = {
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Methods for creating tests, slides and getting Premium in the app have been posted in our group as a video, please check them out.*\n\n"
+            "🔴 *Methods for creating tests, slides and getting Premium in the app have been posted in our group as a video, please check them out.*\n\n"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
