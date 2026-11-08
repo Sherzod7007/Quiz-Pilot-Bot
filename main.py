@@ -115,6 +115,32 @@ def is_admin_id(user_id):
 # --- ADMIN ERROR ALERTS ---
 # ERROR/CRITICAL log yozuvlarini administratorga Telegram orqali yuboradi.
 # Xabarlar ko'payib ketmasligi uchun 60 soniyada ko'pi bilan bitta alert yuboriladi.
+def _uzbek_error_summary(record, details):
+    """Administrator uchun xatolikning qisqa, tushunarli o'zbekcha izohini qaytaradi."""
+    error_text = f"{record.getMessage()}\n{details}".lower()
+
+    if any(term in error_text for term in (
+        "read timed out", "connecttimeout", "connection timeout", "timed out"
+    )):
+        return "Telegram yoki tashqi serverdan javob olish uchun ajratilgan vaqt tugadi. Ulanish qayta urinib ko'rilishi mumkin."
+    if any(term in error_text for term in (
+        "connection aborted", "remotedisconnected", "connection reset", "connectionerror",
+        "remote end closed connection", "connection refused"
+    )):
+        return "Telegram yoki tashqi server bilan aloqa uzildi. Tarmoq ulanishini tekshiring; tizim qayta ulanishga urinishi mumkin."
+    if "429" in error_text or "resource_exhausted" in error_text or "quota" in error_text:
+        return "AI xizmatining so'rovlar limiti yoki kvotasi vaqtincha tugagan. Keyinroq qayta urinib ko'rish kerak."
+    if "503" in error_text or "unavailable" in error_text:
+        return "AI yoki tashqi xizmat hozircha band yoki vaqtincha ishlamayapti. Keyinroq qayta urinib ko'rish kerak."
+    if any(term in error_text for term in ("sqlite", "database", "sqlalchemy", "psycopg")):
+        return "Ma'lumotlar bazasi bilan ishlashda xatolik yuz berdi. Bazaning ulanishi va holatini tekshiring."
+    if any(term in error_text for term in ("telegram api", "telebot", "bot api", "telegram")):
+        return "Telegram bot xizmatida xatolik yuz berdi. Telegram bilan ulanish va API javobini tekshiring."
+    if any(term in error_text for term in ("file not found", "filenotfounderror", "permission denied", "is a directory")):
+        return "Faylni topish yoki unga murojaat qilishda xatolik yuz berdi. Fayl yo'li va ruxsatlarni tekshiring."
+    return "Tizimning tegishli modulida kutilmagan xatolik yuz berdi. Asl texnik tafsilot quyida saqlangan."
+
+
 class AdminTelegramErrorHandler(logging.Handler):
     def __init__(self, cooldown_seconds=60):
         super().__init__(level=logging.ERROR)
@@ -141,11 +167,14 @@ class AdminTelegramErrorHandler(logging.Handler):
             details = self.format(record)
             # Telegram xabar uzunligi va maxfiy ma'lumotlar xavfini kamaytirish uchun qisqartiramiz.
             details = details[:2500]
+            summary = _uzbek_error_summary(record, details)
+            safe_details = details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             message = (
                 "🚨 <b>Quiz AI — Server xatoligi</b>\n"
                 f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n"
                 f"📍 Modul: <code>{record.name[:120]}</code>\n\n"
-                f"<pre>{details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')[:2500]}</pre>"
+                f"📝 <b>O‘zbekcha izoh:</b> {summary}\n\n"
+                f"🔧 <b>Asl texnik tafsilot:</b>\n<pre>{safe_details[:2200]}</pre>"
             )
             if suppressed:
                 message += f"\n\nℹ️ Oxirgi xabardan beri yana {suppressed} ta xatolik logi birlashtirildi."
