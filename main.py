@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import docx
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 import re
 from io import BytesIO
@@ -14,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from google import genai
 from google.genai import types as genai_types
 import json
+import math
 import logging
 import os
 import hashlib
@@ -34,6 +36,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 import sqlite3
 import telebot
@@ -48,6 +51,14 @@ from copy import deepcopy
 from pathlib import Path
 from deep_translator import GoogleTranslator
 from datetime import datetime, timezone, timedelta
+
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
 import p2p_payment_ai
@@ -104,6 +115,32 @@ def is_admin_id(user_id):
 # --- ADMIN ERROR ALERTS ---
 # ERROR/CRITICAL log yozuvlarini administratorga Telegram orqali yuboradi.
 # Xabarlar ko'payib ketmasligi uchun 60 soniyada ko'pi bilan bitta alert yuboriladi.
+def _uzbek_error_summary(record, details):
+    """Administrator uchun xatolikning qisqa, tushunarli o'zbekcha izohini qaytaradi."""
+    error_text = f"{record.getMessage()}\n{details}".lower()
+
+    if any(term in error_text for term in (
+        "read timed out", "connecttimeout", "connection timeout", "timed out"
+    )):
+        return "Telegram yoki tashqi serverdan javob olish uchun ajratilgan vaqt tugadi. Ulanish qayta urinib ko'rilishi mumkin."
+    if any(term in error_text for term in (
+        "connection aborted", "remotedisconnected", "connection reset", "connectionerror",
+        "remote end closed connection", "connection refused"
+    )):
+        return "Telegram yoki tashqi server bilan aloqa uzildi. Tarmoq ulanishini tekshiring; tizim qayta ulanishga urinishi mumkin."
+    if "429" in error_text or "resource_exhausted" in error_text or "quota" in error_text:
+        return "AI xizmatining so'rovlar limiti yoki kvotasi vaqtincha tugagan. Keyinroq qayta urinib ko'rish kerak."
+    if "503" in error_text or "unavailable" in error_text:
+        return "AI yoki tashqi xizmat hozircha band yoki vaqtincha ishlamayapti. Keyinroq qayta urinib ko'rish kerak."
+    if any(term in error_text for term in ("sqlite", "database", "sqlalchemy", "psycopg")):
+        return "Ma'lumotlar bazasi bilan ishlashda xatolik yuz berdi. Bazaning ulanishi va holatini tekshiring."
+    if any(term in error_text for term in ("telegram api", "telebot", "bot api", "telegram")):
+        return "Telegram bot xizmatida xatolik yuz berdi. Telegram bilan ulanish va API javobini tekshiring."
+    if any(term in error_text for term in ("file not found", "filenotfounderror", "permission denied", "is a directory")):
+        return "Faylni topish yoki unga murojaat qilishda xatolik yuz berdi. Fayl yo'li va ruxsatlarni tekshiring."
+    return "Tizimning tegishli modulida kutilmagan xatolik yuz berdi. Asl texnik tafsilot quyida saqlangan."
+
+
 class AdminTelegramErrorHandler(logging.Handler):
     def __init__(self, cooldown_seconds=60):
         super().__init__(level=logging.ERROR)
@@ -130,11 +167,14 @@ class AdminTelegramErrorHandler(logging.Handler):
             details = self.format(record)
             # Telegram xabar uzunligi va maxfiy ma'lumotlar xavfini kamaytirish uchun qisqartiramiz.
             details = details[:2500]
+            summary = _uzbek_error_summary(record, details)
+            safe_details = details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             message = (
                 "🚨 <b>Quiz AI — Server xatoligi</b>\n"
                 f"🕒 {datetime.now(timezone(timedelta(hours=5))).strftime('%d-%m-%Y %H:%M:%S')} (O‘zbekiston)\n"
                 f"📍 Modul: <code>{record.name[:120]}</code>\n\n"
-                f"<pre>{details.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')[:2500]}</pre>"
+                f"📝 <b>O‘zbekcha izoh:</b> {summary}\n\n"
+                f"🔧 <b>Asl texnik tafsilot:</b>\n<pre>{safe_details[:2200]}</pre>"
             )
             if suppressed:
                 message += f"\n\nℹ️ Oxirgi xabardan beri yana {suppressed} ta xatolik logi birlashtirildi."
@@ -368,6 +408,17 @@ TARIFFS = {
 logging.info("Tariflar Railway'dan yuklandi | kunlik=%s/%s soat | haftalik=%s/%s kun | oylik=%s/%s kun | o'qituvchilar=%s/%s kun",
              TARIFFS['daily']['price'], _daily_hours, TARIFFS['weekly']['price'], _weekly_days,
              TARIFFS['monthly']['price'], _monthly_days, TARIFFS['teachers']['price'], _teachers_days)
+# AI taqdimot uchun tarif krediti: barcha miqdorlar Railway Variables orqali boshqariladi.
+SLIDE_TARIFF_CREDITS = {
+    "daily": _env_positive_int("SLIDE_TARIFF_CREDITS_DAILY", 0, minimum=0),
+    "weekly": _env_positive_int("SLIDE_TARIFF_CREDITS_WEEKLY", 0, minimum=0),
+    "monthly": _env_positive_int("SLIDE_TARIFF_CREDITS_MONTHLY", 0, minimum=0),
+    "teachers": _env_positive_int("SLIDE_TARIFF_CREDITS_TEACHERS", 0, minimum=0),
+}
+logging.info("Taqdimot tarif kreditlari Railway'dan yuklandi | kunlik=%s | haftalik=%s | oylik=%s | o'qituvchilar=%s",
+             SLIDE_TARIFF_CREDITS["daily"], SLIDE_TARIFF_CREDITS["weekly"],
+             SLIDE_TARIFF_CREDITS["monthly"], SLIDE_TARIFF_CREDITS["teachers"])
+
 # Bepul limitlar: musbat son = limit, -1 = cheksiz. 0 va boshqa manfiy qiymatlar yaroqsiz.
 def _env_free_limit(name, default=3):
     raw = os.getenv(name, str(default))
@@ -439,9 +490,9 @@ MESSAGES = {
     "uz": {
         "welcome": (
             "👋 *Salom, {name}!*\n"
-            "🎓 *Quiz AI* — AI yordamida savollarni tez va qulay testga aylantiruvchi ilova.\n\n"
+            "🎓 *Quiz AI* — Sunʼiy intellekt yordamida test va slaydlar yaratuvchi ilova.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
-            "🤖 AI yordamida matn, PDF yoki DOCX dan test yaratish.\n"
+            "🤖 SI yordamida matn, PDF yoki DOCX dan test va slaydlar yaratish.\n"
             "📚 Testlarni Kutubxona bo'limida saqlash va ishlash.\n"
             "🌐 Ommaviy testlardan foydalanish.\n"
             "🗂 Flash Kartochkalar orqali takrorlash.\n"
@@ -454,7 +505,7 @@ MESSAGES = {
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Ilovada test yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan, tanishib chiqing.*\n\n"
+            "🔴 *Ilovada test, slaydlar yaratish va Premium olish usullari guruhimizga video shaklida joylashtirilgan, tanishib chiqing.*\n\n"
         ),
         "open_app": "Ilovani ochish 📱",
         "payment_prompt": (
@@ -484,14 +535,14 @@ MESSAGES = {
         "free_public_limit_notice": "🔒 *Bepul ommaviy test limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta ommaviy test limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "free_flashcard_limit_notice": "🔒 *Bepul Flash Kartochka limiti tugadi!*\n\nSiz 30 kunlik bepul {limit} ta Flash Kartochka limitidan foydalanib bo'ldingiz. Davom etish uchun 👑 *Premium tarif*ni tavsiya qilamiz.\n\n🚀 Premium bo'limidan tarifni tanlang.",
         "paid_limit_notice": "⏳ *Premium limitingiz tugadi!*\n\nSizning {tariff_name} tarifingiz muddati yakunlandi. 👑 Premium imkoniyatlardan yana foydalanish uchun tarifni yangilashni tavsiya qilamiz.\n\n{tariff_lines}\n\n🚀 Premium bo'limidan yangi tarifni tanlang.",
-        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi bepul limitlaringiz: AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}.\n\n🚀 Quiz Pilot Bot’dan foydalanishda davom eting!",
+        "free_limits_restored_notice": "🎉 *Bepul limitlaringiz qaytdi!*\n\nSizning 30 kunlik bepul limit davringiz yangilandi. Endi bepul limitlaringiz: AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}.\n\n🚀 Quiz AI Bot’dan foydalanishda davom eting!",
     },
     "ru": {
         "welcome": (
             "👋 *Привет, {name}!*\n"
-            "🎓 *Quiz AI* — Приложение, которое с помощью ИИ быстро и удобно превращает вопросы в тесты.\n\n"
+            "🎓 *Quiz AI* — Приложение, которое создает тесты и слайды с использованием искусственного интеллекта.\n\n"
             "✨ *Возможности приложения:*\n"
-            "🤖 Создание тестов с помощью ИИ из текста, PDF или DOCX.\n"
+            "🤖 Создавайте тесты и слайды из текста, PDF или DOCX с помощью ИИ.\n"
             "📚 Сохранение и прохождение тестов в разделе «Библиотека».\n"
             "🌐 Публичные тесты.\n"
             "🗂 Флеш-карточки для повторения материала.\n"
@@ -504,7 +555,7 @@ MESSAGES = {
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Способы создания тестов и получения Премиума в приложении опубликованы в нашей группе в виде видео, пожалуйста, ознакомьтесь.*\n\n"
+            "🔴 *Способы создания тестов, слайдов и получения Премиума в приложении опубликованы в нашей группе в виде видео, пожалуйста, ознакомьтесь.*\n\n"
         ),
         "open_app": "Открыть приложение 📱",
         "payment_prompt": (
@@ -533,14 +584,14 @@ MESSAGES = {
         "free_public_limit_notice": "🔒 *Бесплатный лимит публичных тестов исчерпан!*\n\nВы использовали {limit} бесплатных публичных тестов за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "free_flashcard_limit_notice": "🔒 *Бесплатный лимит флеш-карточек исчерпан!*\n\nВы использовали {limit} бесплатные флеш-карточки за 30 дней. Для продолжения рекомендуем 👑 *Premium тариф*.\n\n🚀 Выберите тариф в разделе Premium.",
         "paid_limit_notice": "⏳ *Срок Premium тарифа истёк!*\n\nВаш тариф {tariff_name} завершён. 👑 Рекомендуем продлить Premium, чтобы снова пользоваться всеми возможностями без ограничений.\n\n{tariff_lines}\n\n🚀 Выберите новый тариф в разделе Premium.",
-        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Ваши бесплатные лимиты: AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}.\n\n🚀 Продолжайте пользоваться Quiz Pilot Bot!",
+        "free_limits_restored_notice": "🎉 *Ваши бесплатные лимиты восстановлены!*\n\nВаш 30-дневный бесплатный период обновлён. Ваши бесплатные лимиты: AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}.\n\n🚀 Продолжайте пользоваться Quiz AI Bot!",
     },
     "en": {
         "welcome": (
             "👋 *Hello, {name}!*\n"
-            "🎓 *Quiz AI* — An application that uses AI to quickly and conveniently turn questions into tests.\n\n"
+            "🎓 *Quiz AI* — An app that creates tests and slides using artificial intelligence.\n\n"
             "✨ *App features:*\n"
-            "🤖 Create quizzes with AI from text, PDF or DOCX.\n"
+            "🤖 Create tests and slides from text, PDF or DOCX using AI.\n"
             "📚 Save and take quizzes in the Library.\n"
             "🌐 Public quizzes.\n"
             "🗂 Flashcards for revision.\n"
@@ -553,7 +604,7 @@ MESSAGES = {
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
-            "📌 *Methods for creating tests and getting Premium in the app have been posted in our group as a video, please check them out.*\n\n"
+            "🔴 *Methods for creating tests, slides and getting Premium in the app have been posted in our group as a video, please check them out.*\n\n"
         ),
         "open_app": "Open App 📱",
         "payment_prompt": (
@@ -582,7 +633,7 @@ MESSAGES = {
         "free_public_limit_notice": "🔒 *Your free public quiz limit has ended!*\n\nYou have used your {limit} free public quizzes for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "free_flashcard_limit_notice": "🔒 *Your free flashcard limit has ended!*\n\nYou have used your {limit} free flashcards for the 30-day period. To continue, we recommend 👑 *Premium*.\n\n🚀 Choose a plan in the Premium section.",
         "paid_limit_notice": "⏳ *Your Premium plan has expired!*\n\nYour {tariff_name} plan has ended. 👑 We recommend renewing Premium to continue using all features without limits.\n\n{tariff_lines}\n\n🚀 Choose a new plan in the Premium section.",
-        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. Your free limits are now: AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}.\n\n🚀 Keep enjoying Quiz Pilot Bot!",
+        "free_limits_restored_notice": "🎉 *Your free limits have been restored!*\n\nYour 30-day free period has been renewed. Your free limits are now: AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}.\n\n🚀 Keep enjoying Quiz AI Bot!",
     }
 }
 
@@ -729,6 +780,31 @@ def init_db():
         tariff_price TEXT,
         status TEXT DEFAULT 'pending',
         created_at INTEGER)""")
+
+    # Kredit xaridlari uchun kengaytma. Eski to'lovlar payment_type='premium' hisoblanadi.
+    payment_columns = {row[1] for row in cursor.execute("PRAGMA table_info(payments)").fetchall()}
+    for column, definition in (("payment_type", "TEXT DEFAULT 'premium'"), ("package_id", "TEXT DEFAULT ''"), ("credits_amount", "INTEGER DEFAULT 0")):
+        if column not in payment_columns:
+            cursor.execute(f"ALTER TABLE payments ADD COLUMN {column} {definition}")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS credit_wallets (
+        user_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
+        updated_at INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS credit_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL, reference TEXT NOT NULL UNIQUE, description TEXT DEFAULT '',
+        created_at INTEGER NOT NULL)""")
+    # Kredit manbalarini ajratish: eski umumiy balans xarid qilingan kredit sifatida saqlanadi.
+    wallet_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_wallets)").fetchall()}
+    for column in ("tariff_balance", "purchased_balance"):
+        if column not in wallet_columns:
+            cursor.execute(f"ALTER TABLE credit_wallets ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+    cursor.execute("UPDATE credit_wallets SET purchased_balance=balance WHERE purchased_balance=0 AND tariff_balance=0 AND balance>0")
+    transaction_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_transactions)").fetchall()}
+    for column in ("tariff_amount", "purchased_amount"):
+        if column not in transaction_columns:
+            cursor.execute(f"ALTER TABLE credit_transactions ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+    # Tarixiy yozuvlar eski balansdan kelgani uchun ularning manbasi xarid qilingan kredit deb belgilanadi.
+    cursor.execute("UPDATE credit_transactions SET purchased_amount=amount WHERE purchased_amount=0 AND tariff_amount=0 AND amount>0")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
         id TEXT PRIMARY KEY,
@@ -1129,6 +1205,21 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     if not path.startswith("/api/") or request.method == "OPTIONS":
         return await call_next(request)
 
+    # Slayd yuklash tokeni Telegram Android downloader uchun imzolangan initData'siz ishlaydi.
+    # Token tasodifiy va qisqa muddatli; bir nechta GET urinishiga ruxsat beriladi.
+    if path.startswith("/api/slides/download/") and request.method == "GET":
+        parts = path.rstrip("/").split("/")
+        download_token = parts[-2] if len(parts) >= 2 else ""
+        with _SLIDES_DOWNLOAD_LOCK:
+            slide_ticket = _SLIDES_DOWNLOAD_FILES.get(download_token)
+            ticket_valid = bool(slide_ticket and slide_ticket.get("expires_at", 0) >= time.time())
+            if ticket_valid:
+                slide_ticket["uses"] = slide_ticket.get("uses", 0) + 1
+                ticket_valid = slide_ticket["uses"] <= 10
+        if not ticket_valid:
+            return JSONResponse(status_code=401, content={"detail": "Slayd yuklash havolasi yaroqsiz yoki muddati tugagan."})
+        return await call_next(request)
+
     # Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida va qisqa muddat ishlaydi.
     # Telegram/Android downloader bir fayl uchun bir nechta GET yuborishi mumkin;
     # shu sababli chipta birinchi GET'dan keyin bekor qilinmaydi.
@@ -1194,6 +1285,23 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
     request.state.telegram_user_id = verified_user_id
     response = await call_next(request)
     return response
+
+
+class SlideItemSchema(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+    bullets: List[str] = Field(min_length=2, max_length=6)
+    speaker_notes: Optional[str] = Field(default="", max_length=1200)
+    visual_type: Optional[str] = Field(default="none", max_length=20)
+    visual_title: Optional[str] = Field(default="", max_length=120)
+    visual_labels: Optional[List[str]] = Field(default_factory=list, max_length=8)
+    visual_values: Optional[List[float]] = Field(default_factory=list, max_length=8)
+
+
+class SlideDeckSchema(BaseModel):
+    presentation_title: str = Field(min_length=1, max_length=180)
+    subtitle: Optional[str] = Field(default="", max_length=240)
+    design_theme: Optional[str] = Field(default="modern", max_length=24)
+    slides: List[SlideItemSchema]
 
 
 class NewsCreateSchema(BaseModel):
@@ -1351,6 +1459,8 @@ class PaymentIntentRequest(BaseModel):
     tariff_name: Optional[str] = Field(default=None, max_length=100)
     tariff_price: Optional[str] = Field(default=None, max_length=32)
     tariff_key: Optional[str] = Field(default=None, max_length=32)
+    payment_type: Optional[str] = Field(default="premium", max_length=16)
+    package_id: Optional[str] = Field(default=None, max_length=40)
 
 
 
@@ -1491,9 +1601,11 @@ def process_expired_paid_limits():
         for row in rows:
             user_id = row["user_id"]
             expiry = row["premium_until"] or 0
-            if (row["paid_limit_notice_until"] or 0) == expiry:
-                continue
             plan_key = row["plan_key"] or get_plan_key(row["status"] or "")
+            expire_tariff_slide_credits(conn, user_id, now)
+            if (row["paid_limit_notice_until"] or 0) == expiry:
+                cur.execute("UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0 WHERE user_id=? AND premium_until=?", (user_id, expiry))
+                continue
             cur.execute(
                 "UPDATE users SET status='Oddiy foydalanuvchi', plan_key='', premium_until=0, paid_limit_notice_until=? "
                 "WHERE user_id=? AND premium_until=?",
@@ -1588,6 +1700,180 @@ def update_user_activity(user_id: int):
         logging.error(f"Faol foydalanuvchi vaqtini yangilashda xato: {e}")
 
 
+def get_slide_credit_packages():
+    """Load trusted credit packages from the SLIDE_CREDIT_PACKAGES JSON env var."""
+    raw = os.getenv("SLIDE_CREDIT_PACKAGES", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        packages = {}
+        for package_id, item in data.items():
+            if not isinstance(item, dict):
+                continue
+            credits, price = int(item.get("credits", 0)), int(item.get("price", 0))
+            if not str(package_id).strip() or credits <= 0 or price <= 0 or credits > 1000000 or price > 100000000:
+                continue
+            packages[str(package_id)] = {"id": str(package_id), "name": str(item.get("name") or f"{credits} kredit")[:80], "credits": credits, "price": price}
+        return packages
+    except Exception as exc:
+        logging.error("SLIDE_CREDIT_PACKAGES JSON noto'g'ri: %s", exc)
+        return {}
+
+
+def trigger_credit_payment_flow(user_id, package_id):
+    """Create a P2P payment intent for a server-configured credit package."""
+    try:
+        package = get_slide_credit_packages().get(str(package_id))
+        if not package:
+            logging.warning("Noma'lum kredit paketi | user_id=%s | package_id=%s", user_id, package_id)
+            return False
+        lang = get_user_lang(user_id)
+        tx_id = f"CR{uuid.uuid4().hex[:8].upper()}"
+        price_text = f"{package['price']:,}".replace(",", " ") + " so'm"
+        conn = _connect_db()
+        try:
+            conn.execute("UPDATE payments SET status='cancelled' WHERE user_id=? AND status='pending'", (user_id,))
+            conn.execute(
+                "INSERT INTO payments (tx_id,user_id,tariff_name,tariff_price,status,created_at,payment_type,package_id,credits_amount) "
+                "VALUES (?,?,?,?, 'pending', ?, 'credits', ?, ?)",
+                (tx_id, int(user_id), f"Kreditlar: {package['name']}", price_text, int(time.time()), package['id'], package['credits']),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        messages = {
+            "uz": "💎 Kredit xaridi\nPaket: {name}\nKreditlar: {credits}\nTo'lov: {price}\nBuyurtma: `{tx}`\n\nTo'lovni amalga oshirib, chek rasmini shu chatga yuboring.",
+            "ru": "💎 Покупка кредитов\nПакет: {name}\nКредиты: {credits}\nОплата: {price}\nЗаказ: `{tx}`\n\nОплатите и отправьте фото чека в этот чат.",
+            "en": "💎 Credit purchase\nPackage: {name}\nCredits: {credits}\nPayment: {price}\nOrder: `{tx}`\n\nPay and send the receipt image in this chat.",
+        }
+        message = messages.get(lang, messages["uz"]).format(name=package['name'], credits=package['credits'], price=price_text, tx=tx_id)
+        if P2P_CARD_NUMBER:
+            card_labels = {"uz": "💳 To'lov kartasi", "ru": "💳 Карта для оплаты", "en": "💳 Payment card"}
+            message += f"\n\n{card_labels.get(lang, card_labels['uz'])}: `{P2P_CARD_NUMBER}`"
+        bot.send_message(user_id, message, parse_mode="Markdown")
+        return True
+    except Exception as exc:
+        logging.exception("Kredit xaridi to'lovini yaratishda xato: %s", exc)
+        return False
+
+
+def get_credit_wallet(user_id):
+    conn = _connect_db()
+    try:
+        row = conn.execute("SELECT balance, tariff_balance, purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+        if not row:
+            return {"balance": 0, "tariff_balance": 0, "purchased_balance": 0}
+        return {"balance": int(row[0] or 0), "tariff_balance": int(row[1] or 0), "purchased_balance": int(row[2] or 0)}
+    finally:
+        conn.close()
+
+def get_credit_balance(user_id):
+    return get_credit_wallet(user_id)["balance"]
+
+def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"):
+    """Avval muddati bor tarif kreditini, keyin xarid qilingan kreditni atomar sarflaydi."""
+    try:
+        amount = int(amount)
+        if amount <= 0 or amount > 1000000 or not str(reference).strip():
+            return False, "invalid_request"
+        conn = _connect_db()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            now = int(time.time())
+            conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+            row = conn.execute("SELECT balance,tariff_balance,purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+            if int(row[0] or 0) < amount:
+                conn.rollback()
+                return False, "insufficient_credits"
+            tariff_spent = min(int(row[1] or 0), amount)
+            purchased_spent = amount - tariff_spent
+            conn.execute("UPDATE credit_wallets SET balance=balance-?, tariff_balance=tariff_balance-?, purchased_balance=purchased_balance-?, updated_at=? WHERE user_id=?",
+                         (amount, tariff_spent, purchased_spent, now, int(user_id)))
+            conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'spend', ?, ?, ?, ?, ?)",
+                         (int(user_id), -amount, str(reference), str(description)[:200], now, -tariff_spent, -purchased_spent))
+            conn.commit()
+            return True, get_credit_balance(user_id)
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return False, "duplicate_reference"
+        finally:
+            conn.close()
+    except Exception:
+        logging.exception("Slayd yaratish uchun kredit yechishda xatolik")
+        return False, "internal_error"
+
+def refund_slide_credits(user_id, amount, spend_reference, refund_reference, description):
+    """Muvaffaqiyatsiz taqdimot xarajatini aynan yechilgan manbalarga qaytaradi."""
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        spent = conn.execute("SELECT tariff_amount,purchased_amount FROM credit_transactions WHERE user_id=? AND reference=? AND transaction_type='spend'", (int(user_id), str(spend_reference))).fetchone()
+        if not spent:
+            conn.rollback(); logging.error("Kredit qaytarilmadi: sarf yozuvi topilmadi | foydalanuvchi=%s", user_id); return False
+        tariff_refund = max(0, -int(spent[0] or 0)); purchased_refund = max(0, -int(spent[1] or 0))
+        total = tariff_refund + purchased_refund
+        if total != int(amount):
+            conn.rollback(); logging.error("Kredit qaytarilmadi: qaytariladigan miqdor mos emas | foydalanuvchi=%s", user_id); return False
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (total, tariff_refund, purchased_refund, int(time.time()), int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'refund', ?, ?, ?, ?, ?)", (int(user_id), total, str(refund_reference), str(description)[:200], int(time.time()), tariff_refund, purchased_refund))
+        conn.commit(); return True
+    except sqlite3.IntegrityError:
+        conn.rollback(); return False
+    except Exception:
+        conn.rollback(); logging.exception("Taqdimot krediti asl manbasiga qaytarishda xatolik"); return False
+    finally:
+        conn.close()
+
+def grant_tariff_slide_credits(conn, user_id, plan_key, payment_reference, now=None):
+    """Premium to'lovi uchun tarif kreditini bir marta beradi; chaqiruvchi tranzaksiyani boshqaradi."""
+    amount = int(SLIDE_TARIFF_CREDITS.get(plan_key, 0))
+    if amount <= 0:
+        logging.info("Tarif bo'yicha taqdimot krediti berilmadi: Railway miqdori 0 | tarif=%s | foydalanuvchi=%s", plan_key, user_id)
+        return 0
+    now = int(now or time.time())
+    reference = f"tariff-credit:{payment_reference}"
+    exists = conn.execute("SELECT 1 FROM credit_transactions WHERE reference=?", (reference,)).fetchone()
+    if exists:
+        logging.warning("Tarif krediti takroran berilmadi | tarif=%s | foydalanuvchi=%s", plan_key, user_id)
+        return 0
+    conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+    conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
+    conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'tariff_grant', ?, ?, ?, ?, 0)", (int(user_id), amount, reference, f"{plan_key} tarifi uchun taqdimot krediti", now, amount))
+    logging.info("Tarif taqdimot krediti berildi | tarif=%s | miqdor=%s | foydalanuvchi=%s", plan_key, amount, user_id)
+    return amount
+
+def expire_tariff_slide_credits(conn, user_id, now=None):
+    """Faqat tarif kreditining qolganini bekor qiladi; xarid qilingan kredit saqlanadi."""
+    row = conn.execute("SELECT tariff_balance,purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+    if not row or int(row[0] or 0) <= 0:
+        return 0
+    amount = int(row[0]); now = int(now or time.time())
+    conn.execute("UPDATE credit_wallets SET balance=MAX(0,balance-?), tariff_balance=0, updated_at=? WHERE user_id=?", (amount, now, int(user_id)))
+    reference = f"tariff-expiry:{int(user_id)}:{now}"
+    conn.execute("INSERT OR IGNORE INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'tariff_expiry', ?, ?, ?, ?, 0)", (int(user_id), -amount, reference, "Tarif muddati tugadi — qolgan tarif kreditlari bekor qilindi", now, -amount))
+    logging.info("Tarif muddati tugadi: qolgan tarif kreditlari bekor qilindi | foydalanuvchi=%s | miqdor=%s", user_id, amount)
+    return amount
+
+
+def get_credit_history(user_id, limit=20):
+    conn = _connect_db()
+    try:
+        rows = conn.execute(
+            "SELECT amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount "
+            "FROM credit_transactions WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            (int(user_id), max(1, min(int(limit), 100)))
+        ).fetchall()
+        return [dict(row) if isinstance(row, sqlite3.Row) else {
+            "amount": row[0], "transaction_type": row[1], "reference": row[2],
+            "description": row[3], "created_at": row[4], "tariff_amount": row[5], "purchased_amount": row[6]
+        } for row in rows]
+    finally:
+        conn.close()
+
+
 def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_key=None):
     try:
         user_lang = get_user_lang(user_id)
@@ -1612,7 +1898,8 @@ def trigger_payment_flow(user_id, tariff_name=None, tariff_price=None, tariff_ke
         # Avvalgi kutilayotgan to'lovlarni o'chirish/bekor qilish
         cursor.execute("UPDATE payments SET status = 'cancelled' WHERE user_id = ? AND status = 'pending'", (user_id,))
         cursor.execute(
-            "INSERT INTO payments VALUES (?, ?, ?, ?, 'pending', ?)",
+            "INSERT INTO payments (tx_id, user_id, tariff_name, tariff_price, status, created_at, payment_type, package_id, credits_amount) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, 'premium', '', 0)",
             (tx_id, user_id, tariff_name, tariff_price, int(time.time())),
         )
         conn.commit()
@@ -2656,6 +2943,42 @@ def admin_bonus_teacher_command(message):
         pass
 
 
+@bot.message_handler(commands=["bonus_credits"])
+def admin_bonus_credits_command(message):
+    """Admin-only: grant slide credits independently from Premium/test bonuses."""
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) != 3:
+        bot.send_message(message.chat.id, "Format: /bonus_credits USER_ID KREDIT\nMisol: /bonus_credits 123456789 50")
+        return
+    try:
+        target_id, amount = int(parts[1]), int(parts[2])
+        if target_id <= 0 or amount <= 0 or amount > 1000000:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID musbat son, kredit miqdori esa 1–1 000 000 oralig‘ida bo‘lishi kerak.")
+        return
+    add_user_to_db(target_id)
+    admin_id = int(message.from_user.id)
+    reference = f"admin-credit:{admin_id}:{target_id}:{uuid.uuid4().hex}"
+    description = f"Admin bonusi; admin_id={admin_id}"
+    if not add_slide_credits(target_id, amount, reference, description, transaction_type="admin_bonus"):
+        bot.send_message(message.chat.id, "❌ Kredit qo‘shilmadi. Baza yoki tranzaksiya xatosini tekshiring.")
+        return
+    bot.send_message(message.chat.id, f"💎 Kredit bonusi berildi.\n👤 User: {target_id}\n➕ Kredit: {amount}\n🛡 Admin: {admin_id}")
+    try:
+        lang = get_user_lang(target_id)
+        texts = {
+            "uz": f"🎁 Sizga administrator tomonidan {amount} ta Slayd krediti berildi!\n💎 Kredit balansingiz yangilandi.",
+            "ru": f"🎁 Администратор начислил вам {amount} кредитов для слайдов!\n💎 Баланс обновлён.",
+            "en": f"🎁 The administrator granted you {amount} slide credits!\n💎 Your balance has been updated.",
+        }
+        bot.send_message(target_id, texts.get(lang, texts["uz"]))
+    except Exception:
+        logging.exception("Admin kredit bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
+
+
 @bot.message_handler(commands=["bonus_revoke"])
 def admin_bonus_revoke_command(message):
     if not _admin_only(message):
@@ -2799,6 +3122,7 @@ def handle_admin_decision(call):
             "UPDATE users SET status = ?, plan_key = ?, premium_until = ?, premium_source = ? WHERE user_id = ?",
             (f"PRO ✨ ({display_name})", plan_key, premium_until_timestamp, "paid", user_id),
         )
+        grant_tariff_slide_credits(conn, user_id, plan_key, tx_id, current_time)
         conn.commit()
 
         bot.answer_callback_query(call.id, "To'lov tasdiqlandi!")
@@ -2991,6 +3315,7 @@ def get_tariff_config():
                 "duration_value": item["duration_value"],
                 "duration_unit": item["duration_unit"],
                 "names": item["names"],
+                "slide_credits": SLIDE_TARIFF_CREDITS.get(key, 0),
             }
             for key, item in TARIFFS.items()
         },
@@ -3011,18 +3336,1196 @@ def get_tariff_config():
 @app.post("/api/payment-intent")
 def api_payment_intent(req: PaymentIntentRequest):
     if req.action == "payment_intent":
-        if req.tariff_key not in TARIFFS:
+        if req.payment_type == "credits":
+            package = get_slide_credit_packages().get(str(req.package_id or ""))
+            if not package:
+                raise HTTPException(status_code=400, detail="Noto'g'ri yoki sozlanmagan kredit paketi")
+            threading.Thread(target=trigger_credit_payment_flow, args=(req.user_id, package["id"]), daemon=True).start()
+            return {"status": "ok", "message": "Kredit xaridi so'rovi qabul qilindi"}
+        if req.payment_type not in (None, "", "premium") or req.tariff_key not in TARIFFS:
             raise HTTPException(status_code=400, detail="Noto'g'ri tarif")
-        threading.Thread(
-            target=trigger_payment_flow,
-            args=(req.user_id, req.tariff_name, req.tariff_price, req.tariff_key),
-            daemon=True,
-        ).start()
-        return {
-            "status": "ok",
-            "message": "To'lov so'rovi muvaffaqiyatli qabul qilindi",
-        }
+        threading.Thread(target=trigger_payment_flow, args=(req.user_id, req.tariff_name, req.tariff_price, req.tariff_key), daemon=True).start()
+        return {"status": "ok", "message": "To'lov so'rovi muvaffaqiyatli qabul qilindi"}
     raise HTTPException(status_code=400, detail="Noto'g'ri amal")
+
+
+@app.get("/api/slide-credits")
+def api_slide_credits(user_id: int):
+    add_user_to_db(user_id)
+    wallet = get_credit_wallet(user_id)
+    return {"status": "ok", **wallet, "packages": list(get_slide_credit_packages().values())}
+
+
+@app.get("/api/slide-credit-history")
+def api_slide_credit_history(user_id: int, limit: int = 20):
+    add_user_to_db(user_id)
+    return {"status": "ok", "history": get_credit_history(user_id, limit)}
+
+
+@app.get("/api/slides/config")
+def api_slides_config():
+    """Frontend uchun maxfiy bo'lmagan slayd/kredit sozlamalari."""
+    enabled = os.getenv("SLIDES_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    credits_enabled = os.getenv("SLIDE_CREDITS_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+    try:
+        per_slide = max(1, min(10000, int(os.getenv("SLIDE_CREDITS_PER_SLIDE", "1"))))
+    except Exception:
+        per_slide = 1
+    try:
+        options = [int(x.strip()) for x in os.getenv("SLIDE_COUNT_OPTIONS", "6,8,10,12,16,20").split(",") if x.strip()]
+        options = sorted({x for x in options if 1 <= x <= 100}) or [6, 8, 10, 12, 16, 20]
+    except Exception:
+        options = [6, 8, 10, 12, 16, 20]
+    return {"status": "ok", "enabled": enabled, "credits_enabled": credits_enabled,
+            "credits_per_slide": per_slide, "slide_count_options": options,
+            "tariff_credits": SLIDE_TARIFF_CREDITS}
+
+
+@app.get("/api/slides/credits")
+def api_slides_credits_compat(user_id: int):
+    """UI bilan mos endpoint; tarix ham shu javobda qaytariladi."""
+    add_user_to_db(user_id)
+    wallet = get_credit_wallet(user_id)
+    return {"status": "ok", **wallet,
+            "transactions": get_credit_history(user_id, 20),
+            "packages": list(get_slide_credit_packages().values())}
+
+
+def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi", transaction_type="refund"):
+    """Kreditlarni atomik va takrorlanmaydigan tarzda hisobga qo'shish."""
+    amount = int(amount)
+    if amount <= 0 or amount > 1000000 or not str(reference).strip():
+        return False
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        now = int(time.time())
+        conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?,?,?,?,?,0,?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], now, amount))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return False
+    except Exception:
+        conn.rollback()
+        logging.exception("Slayd kreditini qaytarishda xato")
+        return False
+    finally:
+        conn.close()
+
+
+def _extract_slide_source(contents, filename):
+    """PDF yoki DOCX manbasidan matn ajratadi; fayl RAM ichida qayta ishlanadi."""
+    ext = Path(filename or "").suffix.lower()
+    if ext == ".pdf":
+        if pymupdf is not None:
+            with pymupdf.open(stream=contents, filetype="pdf") as pdf_doc:
+                if pdf_doc.page_count > int(os.getenv("SLIDE_MAX_PDF_PAGES", "50")):
+                    raise ValueError("source_too_many_pages")
+                return "\n".join(page.get_text("text") or "" for page in pdf_doc)
+        reader = PdfReader(BytesIO(contents))
+        if len(reader.pages) > int(os.getenv("SLIDE_MAX_PDF_PAGES", "50")):
+            raise ValueError("source_too_many_pages")
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    if ext == ".docx":
+        document = docx.Document(BytesIO(contents))
+        parts = [para.text for para in document.paragraphs if para.text.strip()]
+        for table in document.tables:
+            for row in table.rows:
+                parts.append(" | ".join(cell.text for cell in row.cells))
+        return "\n".join(parts)
+    raise ValueError("unsupported_source")
+
+
+
+def _slide_theme_config(theme="modern"):
+    """Slayd shablonining ranglari va maket turini yagona manbadan beradi."""
+    themes = {
+        "modern": {"bg": (12, 25, 48), "accent": (42, 183, 210), "fg": (245, 248, 252), "layout": "rail", "font": "Aptos"},
+        "minimal": {"bg": (250, 250, 248), "accent": (35, 85, 105), "fg": (35, 42, 52), "layout": "minimal", "font": "Aptos"},
+        "academic": {"bg": (28, 48, 72), "accent": (190, 155, 80), "fg": (248, 247, 242), "layout": "academic", "font": "Georgia"},
+        "creative": {"bg": (43, 24, 75), "accent": (232, 92, 150), "fg": (250, 246, 252), "layout": "creative", "font": "Aptos"},
+        "tech": {"bg": (7, 21, 34), "accent": (0, 217, 255), "fg": (239, 249, 255), "layout": "tech", "font": "Aptos"},
+        "business": {"bg": (23, 32, 44), "accent": (212, 173, 98), "fg": (248, 246, 240), "layout": "business", "font": "Aptos"},
+        "infographic": {"bg": (243, 247, 251), "accent": (36, 166, 160), "fg": (35, 55, 68), "layout": "infographic", "font": "Aptos"},
+        "nature": {"bg": (18, 56, 46), "accent": (127, 189, 114), "fg": (244, 250, 239), "layout": "nature", "font": "Aptos"},
+        "elegant": {"bg": (31, 29, 45), "accent": (205, 168, 112), "fg": (250, 247, 241), "layout": "elegant", "font": "Georgia"},
+    }
+    return themes.get(theme, themes["modern"])
+
+
+def _slide_chart_palette(theme="modern"):
+    """PPTX va PDF diagrammalarida bir xil, fon bilan kontrast ranglar."""
+    cfg = _slide_theme_config(theme)
+    if cfg["layout"] == "minimal" or cfg["layout"] == "infographic":
+        return [
+            cfg["accent"], (65, 105, 145), (225, 155, 65),
+            (104, 157, 119), (160, 112, 170), (205, 105, 95),
+        ]
+    return [
+        cfg["accent"], (65, 105, 145), (83, 157, 170),
+        (222, 171, 82), (126, 181, 119), (171, 137, 198),
+    ]
+
+
+def _slide_visual_layout(item):
+    """PPTX va PDF uchun bir xil slayd joylashuvini qaytaradi."""
+    visual_type = (item.visual_type or "none").lower()
+    labels = list(item.visual_labels or [])[:8]
+    values = list(item.visual_values or [])[:8]
+    valid_chart = (
+        visual_type in ("bar", "column", "pie", "line")
+        and len(labels) >= 2 and len(labels) == len(values)
+    )
+    if valid_chart:
+        try:
+            numeric_values = [float(value) for value in values]
+            valid_chart = all(value >= 0 for value in numeric_values)
+            if visual_type == "pie" and sum(numeric_values) <= 0:
+                valid_chart = False
+        except (TypeError, ValueError):
+            valid_chart = False
+    valid_flow = visual_type in ("process", "timeline", "cards", "cycle", "pyramid", "funnel") and len(labels) >= 2
+    has_visual = valid_chart or valid_flow
+    return {
+        "type": visual_type if has_visual else "none",
+        "labels": labels if has_visual else [],
+        "values": values if valid_chart else [],
+        "has_visual": has_visual,
+        # Matn chap ustunda, vizual esa o'ng ustunda: hech qachon ustma-ust tushmaydi.
+        "bullet_x": 1.35,
+        "bullet_width": 5.25 if has_visual else 11.45,
+        "visual_x": 7.05,
+        "visual_y": 2.00,
+        "visual_width": 5.55,
+        "visual_height": 4.35,
+    }
+
+
+def _ensure_slide_visuals(deck):
+    """Coverdan tashqari har bir slaydda mazmuniy vizual bo'lishini kafolatlaydi."""
+    fallback_types = ("cards", "cycle", "pyramid", "funnel", "process", "timeline")
+    used_types = []
+    for index, item in enumerate(deck.slides[1:], start=0):
+        layout = _slide_visual_layout(item)
+        if layout["has_visual"]:
+            used_types.append(layout["type"])
+            continue
+
+        # Grafik uchun haqiqiy sonlar bo'lmasa, bulletlardan sxema tuzamiz.
+        # Hech qanday sun'iy qiymat yoki statistik ma'lumot yaratilmaydi.
+        candidate = fallback_types[index % len(fallback_types)]
+        if used_types and candidate == used_types[-1]:
+            candidate = fallback_types[(fallback_types.index(candidate) + 1) % len(fallback_types)]
+        item.visual_type = candidate
+        item.visual_title = item.title[:120]
+        item.visual_labels = [str(value).strip()[:90] for value in (item.bullets or [])[:6] if str(value).strip()]
+        item.visual_values = []
+        used_types.append(candidate)
+
+    return deck
+
+
+def _slide_bullet_layout(bullets, has_visual):
+    """Har bir bullet uchun ikki formatda ham bir xil qatorlar va koordinatalar."""
+    x = 1.35
+    width = 5.25 if has_visual else 11.45
+    font_size = 16 if has_visual else 18
+    max_chars = 49 if has_visual else 105
+    y = 1.92
+    bottom = 6.65
+    gap = 0.16
+    rows = []
+    for bullet in bullets or []:
+        words = str(bullet or "").split()
+        wrapped, line = [], ""
+        for word in words:
+            candidate = (line + " " + word).strip()
+            if line and len(candidate) > max_chars:
+                wrapped.append(line)
+                line = word
+            else:
+                line = candidate
+        if line:
+            wrapped.append(line)
+        wrapped = wrapped or [""]
+        line_height = 0.30 if font_size >= 18 else 0.27
+        height = max(0.42, len(wrapped) * line_height + 0.08)
+        rows.append({
+            "text": "\n".join(wrapped), "x": x, "y": y,
+            "width": width, "height": height, "font_size": font_size,
+        })
+        y += height + gap
+    # Juda uzun matnlar bo'lsa, qatorlar oralig'ini mutanosib qisqartiramiz.
+    if rows and rows[-1]["y"] + rows[-1]["height"] > bottom:
+        available = bottom - 1.92
+        total = sum(row["height"] for row in rows)
+        gaps = gap * max(0, len(rows) - 1)
+        scale = max(0.68, (available - gaps) / max(total, 0.01))
+        y = 1.92
+        for row in rows:
+            row["height"] *= scale
+            y += row["height"] + gap
+    return rows
+
+
+
+def _build_slide_pptx(deck, theme="modern"):
+    """PPTX eksporti: har bir tema o'z kompozitsiyasiga ega, grafiklar kontrastli."""
+    cfg = _slide_theme_config(theme)
+    bg, accent, fg = cfg["bg"], cfg["accent"], cfg["fg"]
+    layout_name, font_name = cfg["layout"], cfg["font"]
+    chart_palette = _slide_chart_palette(theme)
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
+    blank = prs.slide_layouts[6]
+
+    def add_text(slide, x, y, w, h, value, size, color, bold=False, align=None, font=None):
+        shape = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = shape.text_frame
+        tf.clear()
+        tf.word_wrap = True
+        tf.margin_left = Inches(.05)
+        tf.margin_right = Inches(.05)
+        tf.margin_top = Inches(.03)
+        tf.margin_bottom = Inches(.03)
+        tf.vertical_anchor = MSO_ANCHOR.TOP
+        para = tf.paragraphs[0]
+        para.text = str(value)
+        para.font.name = font or font_name
+        para.font.size = Pt(size)
+        para.font.bold = bold
+        para.font.color.rgb = RGBColor(*color)
+        if align is not None:
+            para.alignment = align
+        return shape
+
+    def add_decor(slide, slide_index):
+        """Mavzuga xos bezaklar; asosiy matn va grafik maydoniga kirmaydi."""
+        def shape(kind, x, y, w, h, fill=None, line=None, transparency=0, line_width=1):
+            obj = slide.shapes.add_shape(kind, Inches(x), Inches(y), Inches(w), Inches(h))
+            if fill:
+                obj.fill.solid()
+                obj.fill.fore_color.rgb = RGBColor(*fill)
+                obj.fill.transparency = transparency
+            else:
+                obj.fill.background()
+            if line:
+                obj.line.color.rgb = RGBColor(*line)
+                obj.line.width = Pt(line_width)
+            else:
+                obj.line.fill.background()
+            return obj
+
+        if layout_name == "rail":
+            shape(MSO_SHAPE.RECTANGLE, 0, 0, .16, 7.5, accent)
+            shape(MSO_SHAPE.OVAL, 11.95, .22, .72, .72, accent, transparency=78)
+        elif layout_name == "minimal":
+            shape(MSO_SHAPE.RECTANGLE, .68, .30, 11.95, .025, accent)
+            shape(MSO_SHAPE.RECTANGLE, .68, 7.12, 11.95, .018, accent, transparency=35)
+        elif layout_name == "academic":
+            shape(MSO_SHAPE.RECTANGLE, 0, 0, 13.333, .16, accent)
+            shape(MSO_SHAPE.RECTANGLE, .72, 1.42, .07, 5.55, accent, transparency=12)
+            shape(MSO_SHAPE.RECTANGLE, 11.92, 6.92, .68, .035, accent)
+        elif layout_name == "creative":
+            shape(MSO_SHAPE.OVAL, 11.25, -.38, 2.45, 2.45, accent, transparency=76)
+            shape(MSO_SHAPE.OVAL, 10.95, .35, .82, .82, fg, transparency=84)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.15, .07, accent)
+        elif layout_name == "tech":
+            # Dekorativ panjara chap chetda qoladi, grafik maydoniga kirmaydi.
+            for gx in (.28, .48, .68):
+                shape(MSO_SHAPE.RECTANGLE, gx, 1.85, .012, 5.25, accent, transparency=82)
+            for gy in (2.0, 2.65, 3.3, 3.95, 4.6, 5.25, 5.9, 6.55, 7.0):
+                shape(MSO_SHAPE.RECTANGLE, .25, gy, .48, .012, accent, transparency=82)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, .95, .055, accent)
+        elif layout_name == "business":
+            shape(MSO_SHAPE.RECTANGLE, 0, 0, 13.333, .13, accent)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.25, .045, accent)
+            shape(MSO_SHAPE.RECTANGLE, .82, 6.92, 11.7, .018, accent, transparency=45)
+        elif layout_name == "infographic":
+            shape(MSO_SHAPE.ROUNDED_RECTANGLE, .72, 1.72, 11.92, 5.15, None, accent, line_width=1.1)
+            shape(MSO_SHAPE.RECTANGLE, .72, 1.72, .09, 5.15, accent)
+        elif layout_name == "nature":
+            shape(MSO_SHAPE.OVAL, 11.55, -.35, 2.0, 2.0, accent, transparency=82)
+            shape(MSO_SHAPE.OVAL, -.55, 6.25, 1.55, 1.55, accent, transparency=84)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.05, .06, accent)
+        elif layout_name == "elegant":
+            shape(MSO_SHAPE.RECTANGLE, .35, .32, 12.62, 6.86, None, accent, line_width=.8)
+            shape(MSO_SHAPE.RECTANGLE, .82, 1.47, 1.05, .025, accent)
+            shape(MSO_SHAPE.RECTANGLE, 11.45, 6.88, .95, .025, accent)
+
+    def add_chart(slide, layout, item):
+        labels, values = layout["labels"], layout["values"]
+        data = CategoryChartData()
+        data.categories = [str(value)[:28] for value in labels]
+        data.add_series(item.visual_title or item.title, [float(value) for value in values])
+        kind = {
+            "bar": XL_CHART_TYPE.BAR_CLUSTERED,
+            "column": XL_CHART_TYPE.COLUMN_CLUSTERED,
+            "pie": XL_CHART_TYPE.PIE,
+            "line": XL_CHART_TYPE.LINE,
+        }[layout["type"]]
+        # Pie diagrammada native legenda PowerPoint/LibreOffice versiyasiga qarab
+        # diagramma ustiga chiqib ketishi mumkin. Shu sababli pie uchun
+        # diagramma maydonini toraytirib, legendani alohida PPTX obyektlari bilan chizamiz.
+        is_pie = layout["type"] == "pie"
+        chart_width = layout["visual_width"] * 0.72 if is_pie else layout["visual_width"]
+        chart_y = layout["visual_y"] + (0.42 if is_pie and item.visual_title else 0)
+        chart_height = layout["visual_height"] - (0.42 if is_pie and item.visual_title else 0)
+        chart = slide.shapes.add_chart(
+            kind, Inches(layout["visual_x"]), Inches(chart_y),
+            Inches(chart_width), Inches(chart_height), data
+        ).chart
+
+        # Diagramma maydonining barcha matnlari fon rangiga mos kontrastda.
+        chart.font.name = font_name
+        chart.font.size = Pt(9)
+        chart.font.color.rgb = RGBColor(*fg)
+        chart.has_title = bool(item.visual_title) and not is_pie
+        if item.visual_title and is_pie:
+            add_text(
+                slide, layout["visual_x"], layout["visual_y"] + 0.02,
+                layout["visual_width"], 0.32, str(item.visual_title)[:80],
+                12, fg, bold=True, align=PP_ALIGN.CENTER, font=font_name
+            )
+        elif item.visual_title:
+            chart.chart_title.text_frame.text = str(item.visual_title)[:80]
+            for paragraph in chart.chart_title.text_frame.paragraphs:
+                paragraph.font.name = font_name
+                paragraph.font.size = Pt(12)
+                paragraph.font.bold = True
+                paragraph.font.color.rgb = RGBColor(*fg)
+
+        # Pie chart native legendasini o'chiramiz: ayrim PowerPoint/LibreOffice
+        # rendererlarida RIGHT joylashuvi include_in_layout=True bo'lsa ham
+        # diagramma ustiga chiqib ketadi.
+        chart.has_legend = False
+
+        plot = chart.plots[0]
+        if layout["type"] == "pie":
+            for point_index, point in enumerate(plot.series[0].points):
+                point.format.fill.solid()
+                point.format.fill.fore_color.rgb = RGBColor(*chart_palette[point_index % len(chart_palette)])
+                point.format.line.color.rgb = RGBColor(*bg)
+                point.format.line.width = Pt(1)
+
+            # PDF dagi kabi legenda uchun mustaqil, oldindan ajratilgan ustun.
+            legend_x = layout["visual_x"] + layout["visual_width"] * 0.79
+            legend_y = layout["visual_y"] + 2.05
+            for point_index, label in enumerate(labels):
+                item_y = legend_y + point_index * 0.38
+                swatch = slide.shapes.add_shape(
+                    MSO_SHAPE.ROUNDED_RECTANGLE,
+                    Inches(legend_x), Inches(item_y + 0.035),
+                    Inches(0.11), Inches(0.11)
+                )
+                swatch.fill.solid()
+                swatch.fill.fore_color.rgb = RGBColor(*chart_palette[point_index % len(chart_palette)])
+                swatch.line.fill.background()
+                add_text(
+                    slide, legend_x + 0.17, item_y, 1.10, 0.30,
+                    str(label)[:28], 9, fg, font=font_name
+                )
+        else:
+            series = plot.series[0]
+            series.format.fill.solid()
+            series.format.fill.fore_color.rgb = RGBColor(*accent)
+            series.format.line.color.rgb = RGBColor(*accent)
+            if layout["type"] in ("bar", "column"):
+                for axis in (chart.category_axis, chart.value_axis):
+                    axis.tick_labels.font.name = font_name
+                    axis.tick_labels.font.size = Pt(8)
+                    axis.tick_labels.font.color.rgb = RGBColor(*fg)
+                chart.value_axis.has_major_gridlines = True
+                try:
+                    chart.value_axis.major_gridlines.format.line.color.rgb = RGBColor(*accent)
+                    chart.value_axis.major_gridlines.format.line.transparency = 78
+                except Exception:
+                    pass
+            elif layout["type"] == "line":
+                chart.category_axis.tick_labels.font.color.rgb = RGBColor(*fg)
+                chart.value_axis.tick_labels.font.color.rgb = RGBColor(*fg)
+                chart.value_axis.has_major_gridlines = True
+
+    def add_process(slide, layout):
+        labels = layout["labels"][:6]
+        x0, y0, total_w = layout["visual_x"], 3.15, layout["visual_width"]
+        gap = .12
+        box_w = (total_w - gap * (len(labels) - 1)) / len(labels)
+        for i, label in enumerate(labels):
+            x = x0 + i * (box_w + gap)
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y0),
+                Inches(box_w), Inches(1.15)
+            )
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = RGBColor(*accent)
+            shape.fill.transparency = 14
+            shape.line.color.rgb = RGBColor(*accent)
+            shape.text_frame.text = str(label)[:70]
+            shape.text_frame.word_wrap = True
+            shape.text_frame.margin_left = Inches(.06)
+            shape.text_frame.margin_right = Inches(.06)
+            shape.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+            for para in shape.text_frame.paragraphs:
+                para.alignment = PP_ALIGN.CENTER
+                para.font.name = font_name
+                para.font.size = Pt(11)
+                para.font.bold = True
+                para.font.color.rgb = RGBColor(*fg)
+            if i < len(labels) - 1:
+                arrow = slide.shapes.add_shape(
+                    MSO_SHAPE.CHEVRON, Inches(x + box_w + .015),
+                    Inches(y0 + .42), Inches(gap - .02), Inches(.28)
+                )
+                arrow.fill.solid()
+                arrow.fill.fore_color.rgb = RGBColor(*accent)
+                arrow.line.fill.background()
+
+    def add_rich_diagram(slide, layout, item):
+        """Raqamsiz mazmuniy diagrammalar: kartalar, sikl, piramida va funnel."""
+        labels = layout["labels"][:6]
+        x0, y0, total_w = layout["visual_x"], 2.55, layout["visual_width"]
+        palette = chart_palette
+        kind = layout["type"]
+
+        if kind == "cards":
+            cols = 2
+            rows = (len(labels) + cols - 1) // cols
+            gap_x, gap_y = .16, .16
+            box_w = (total_w - gap_x) / cols
+            box_h = min(1.05, (3.65 - gap_y * max(0, rows - 1)) / max(1, rows))
+            for i, label in enumerate(labels):
+                col, row = i % cols, i // cols
+                x, y = x0 + col * (box_w + gap_x), y0 + row * (box_h + gap_y)
+                shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(box_w), Inches(box_h))
+                shape.fill.solid()
+                shape.fill.fore_color.rgb = RGBColor(*palette[i % len(palette)])
+                shape.fill.transparency = 10
+                shape.line.color.rgb = RGBColor(*accent)
+                tf = shape.text_frame
+                tf.clear(); tf.word_wrap = True
+                tf.margin_left = Inches(.10); tf.margin_right = Inches(.10)
+                tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+                para = tf.paragraphs[0]; para.text = str(label)[:90]
+                para.alignment = PP_ALIGN.CENTER
+                para.font.name = font_name; para.font.size = Pt(10); para.font.bold = True
+                para.font.color.rgb = RGBColor(*fg)
+            return
+
+        if kind == "cycle":
+            # Doiraviy siklni 3-6 tugun bilan, markaziy bo'shliqni saqlagan holda chizamiz.
+            from math import cos, sin, pi
+            cx, cy = x0 + total_w / 2, 4.25
+            radius_x, radius_y = 1.85, 1.35
+            count = len(labels)
+            node_w, node_h = 1.42, .72
+            positions = []
+            for i, label in enumerate(labels):
+                angle = -pi / 2 + (2 * pi * i / count)
+                px, py = cx + radius_x * cos(angle), cy + radius_y * sin(angle)
+                positions.append((px, py))
+            for i, (px, py) in enumerate(positions):
+                node = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(px-node_w/2), Inches(py-node_h/2), Inches(node_w), Inches(node_h))
+                node.fill.solid(); node.fill.fore_color.rgb = RGBColor(*palette[i % len(palette)])
+                node.line.color.rgb = RGBColor(*accent)
+                tf=node.text_frame; tf.clear(); tf.word_wrap=True
+                tf.vertical_anchor=MSO_ANCHOR.MIDDLE
+                para=tf.paragraphs[0]; para.text=str(labels[i])[:65]
+                para.alignment=PP_ALIGN.CENTER; para.font.name=font_name
+                para.font.size=Pt(8); para.font.bold=True; para.font.color.rgb=RGBColor(*fg)
+            return
+
+        if kind in ("pyramid", "funnel"):
+            count = len(labels)
+            max_w, total_h = total_w * .82, 3.75
+            center_x = x0 + total_w / 2
+            seg_h = total_h / count
+            for i, label in enumerate(labels):
+                if kind == "pyramid":
+                    top_w = max_w * (count - i - 1) / count
+                    bottom_w = max_w * (count - i) / count
+                    if i == count - 1: top_w = max_w / count
+                else:
+                    top_w = max_w * (1 - .72 * i / max(1, count))
+                    bottom_w = max_w * (1 - .72 * (i + 1) / max(1, count))
+                top_w=max(.55,top_w); bottom_w=max(.55,bottom_w)
+                x=center_x-max(top_w,bottom_w)/2
+                y=y0+i*seg_h
+                # Trapezoid shape is native editable PowerPoint vector.
+                shp=slide.shapes.add_shape(MSO_SHAPE.TRAPEZOID, Inches(x), Inches(y), Inches(max(top_w,bottom_w)), Inches(seg_h-.04))
+                shp.fill.solid(); shp.fill.fore_color.rgb=RGBColor(*palette[i % len(palette)])
+                shp.line.color.rgb=RGBColor(*bg)
+                tf=shp.text_frame; tf.clear(); tf.word_wrap=True; tf.vertical_anchor=MSO_ANCHOR.MIDDLE
+                para=tf.paragraphs[0]; para.text=str(label)[:70]; para.alignment=PP_ALIGN.CENTER
+                para.font.name=font_name; para.font.size=Pt(9); para.font.bold=True; para.font.color.rgb=RGBColor(*fg)
+            return
+
+    for index, item in enumerate(deck.slides):
+        slide = prs.slides.add_slide(blank)
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = RGBColor(*bg)
+        add_decor(slide, index)
+
+        if index == 0:
+            # Har bir titul sahifasi ham tanlangan dizayn uslubiga mos kompozitsiyaga ega.
+            if layout_name in ("minimal", "business"):
+                title_x, title_y, title_w, title_align = .95, 1.72, 11.1, PP_ALIGN.LEFT
+            elif layout_name in ("academic", "elegant"):
+                title_x, title_y, title_w, title_align = 1.0, 1.85, 11.0, PP_ALIGN.CENTER
+            else:
+                title_x, title_y, title_w, title_align = .9, 1.62, 11.4, PP_ALIGN.CENTER
+            add_text(slide, title_x, title_y, title_w, 2.0, deck.presentation_title, 34, fg, True, title_align)
+            if deck.subtitle:
+                add_text(slide, 1.15, 3.72, 11.0, 1.15, deck.subtitle, 18, accent, False, PP_ALIGN.CENTER)
+            add_text(slide, 1.0, 6.65, 11.2, .35, "QUIZ AI  •  AI PRESENTATION", 10, fg, False, PP_ALIGN.CENTER)
+            continue
+
+        title_align = PP_ALIGN.LEFT
+        title_x = .88
+        if layout_name in ("academic", "elegant"):
+            title_x = 1.05
+        add_text(slide, title_x, .48, 11.45, .95, item.title, 27, accent, True, title_align)
+        title_rule = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.85), Inches(1.48), Inches(1.15), Inches(.055)
+        )
+        title_rule.fill.solid()
+        title_rule.fill.fore_color.rgb = RGBColor(*accent)
+        title_rule.line.fill.background()
+        layout = _slide_visual_layout(item)
+        for row in _slide_bullet_layout(item.bullets, layout["has_visual"]):
+            # Infografika uslubida punktlar yengil kartochka ichida ko'rsatiladi.
+            if layout_name == "infographic":
+                card = slide.shapes.add_shape(
+                    MSO_SHAPE.ROUNDED_RECTANGLE, Inches(.88), Inches(row["y"] - .045),
+                    Inches(row["width"] + .72), Inches(row["height"] + .08)
+                )
+                card.fill.solid()
+                card.fill.fore_color.rgb = RGBColor(224, 242, 240)
+                card.fill.transparency = 10
+                card.line.color.rgb = RGBColor(*accent)
+                card.line.transparency = 72
+            dot_x = .98 if layout_name != "infographic" else 1.04
+            dot = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL, Inches(dot_x), Inches(row["y"] + .12), Inches(.10), Inches(.10)
+            )
+            dot.fill.solid()
+            dot.fill.fore_color.rgb = RGBColor(*accent)
+            dot.line.fill.background()
+            add_text(slide, row["x"], row["y"], row["width"], row["height"],
+                     row["text"], row["font_size"], fg)
+
+        if layout["type"] in ("bar", "column", "pie", "line"):
+            try:
+                add_chart(slide, layout, item)
+            except Exception as chart_exc:
+                logging.warning("Slayd grafigi chizilmadi | slayd=%s | sabab=%s", index + 1, chart_exc)
+                fallback_layout = dict(layout)
+                fallback_layout.update({
+                    "type": "cards",
+                    "labels": [str(value)[:90] for value in (item.bullets or [])[:6]],
+                    "has_visual": True,
+                })
+                add_rich_diagram(slide, fallback_layout, item)
+        elif layout["type"] in ("process", "timeline"):
+            add_process(slide, layout)
+        elif layout["type"] in ("cards", "cycle", "pyramid", "funnel"):
+            add_rich_diagram(slide, layout, item)
+
+        add_text(slide, 11.8, 7, .7, .25, f"{index+1:02d}", 10, accent, True, PP_ALIGN.RIGHT)
+        if item.speaker_notes:
+            try:
+                slide.notes_slide.notes_text_frame.text = item.speaker_notes
+            except Exception:
+                pass
+
+    output = BytesIO()
+    prs.save(output)
+    return output.getvalue()
+
+
+def _register_slide_pdf_fonts():
+    """Slayd PDF eksporti uchun kirill va o'zbek belgilarini qo'llaydigan shriftlarni ulaydi."""
+    font_dir = Path(__file__).resolve().parent / "fonts"
+    regular_candidates = [
+        font_dir / "DejaVuSans.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+    ]
+    bold_candidates = [
+        font_dir / "DejaVuSans-Bold.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
+    ]
+
+    regular_name = "QuizAISlideRegular"
+    bold_name = "QuizAISlideBold"
+    regular_ok = bold_ok = False
+
+    if regular_name in pdfmetrics.getRegisteredFontNames():
+        regular_ok = True
+    else:
+        for font_path in regular_candidates:
+            if font_path.is_file():
+                try:
+                    pdfmetrics.registerFont(TTFont(regular_name, str(font_path)))
+                    regular_ok = True
+                    break
+                except Exception as exc:
+                    logging.warning("Slayd PDF oddiy shriftini ulab bo'lmadi | sabab=%s", exc)
+
+    if bold_name in pdfmetrics.getRegisteredFontNames():
+        bold_ok = True
+    else:
+        for font_path in bold_candidates:
+            if font_path.is_file():
+                try:
+                    pdfmetrics.registerFont(TTFont(bold_name, str(font_path)))
+                    bold_ok = True
+                    break
+                except Exception as exc:
+                    logging.warning("Slayd PDF qalin shriftini ulab bo'lmadi | sabab=%s", exc)
+
+    if not regular_ok:
+        raise RuntimeError(
+            "Slayd PDF uchun DejaVuSans.ttf topilmadi. Loyihada fonts/DejaVuSans.ttf bo'lishi kerak."
+        )
+    return regular_name, (bold_name if bold_ok else regular_name)
+
+
+def _build_slide_pdf(deck, theme="modern"):
+    """PDF eksporti PPTX bilan bir xil maket va vizual koordinatalardan foydalanadi."""
+    cfg = _slide_theme_config(theme)
+    bg, accent, fg = cfg["bg"], cfg["accent"], cfg["fg"]
+    layout_name = cfg["layout"]
+    chart_palette = _slide_chart_palette(theme)
+    page_w, page_h = 13.333 * 72, 7.5 * 72
+    output = BytesIO()
+    pdf = pdf_canvas.Canvas(output, pagesize=(page_w, page_h), pageCompression=1)
+    regular, bold = _register_slide_pdf_fonts()
+
+    def rgb(value):
+        return tuple(channel / 255.0 for channel in value)
+
+    def wrap_lines(text, font_name, font_size, max_width):
+        lines, current = [], ""
+        for word in str(text or "").split():
+            candidate = (current + " " + word).strip()
+            if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines or [""]
+
+    def draw_wrapped(text, x, y, max_width, font_name, font_size, color, leading):
+        pdf.setFillColorRGB(*rgb(color))
+        pdf.setFont(font_name, font_size)
+        for line in wrap_lines(text, font_name, font_size, max_width):
+            pdf.drawString(x, y, line)
+            y -= leading
+        return y
+
+    def draw_theme_decor(slide_index):
+        """PDF uchun shablon bezaklari; PPTX dagi theme kompozitsiyasiga mos."""
+        pdf.saveState()
+        pdf.setFillColorRGB(*rgb(accent))
+        pdf.setStrokeColorRGB(*rgb(accent))
+        if layout_name == "rail":
+            pdf.rect(0, 0, 12, page_h, fill=1, stroke=0)
+            pdf.setFillAlpha(.18)
+            pdf.circle(page_w - 42, page_h - 42, 26, fill=1, stroke=0)
+        elif layout_name == "minimal":
+            pdf.setFillAlpha(1)
+            pdf.rect(49, page_h - 23, page_w - 98, 1.5, fill=1, stroke=0)
+            pdf.setFillAlpha(.35)
+            pdf.rect(49, 22, page_w - 98, 1, fill=1, stroke=0)
+        elif layout_name == "academic":
+            pdf.rect(0, page_h - 11, page_w, 11, fill=1, stroke=0)
+            pdf.setFillAlpha(.9)
+            pdf.rect(52, 38, 5, page_h - 175, fill=1, stroke=0)
+            pdf.rect(page_w - 86, 35, 42, 2, fill=1, stroke=0)
+        elif layout_name == "creative":
+            pdf.setFillAlpha(.17)
+            pdf.circle(page_w - 18, page_h + 4, 88, fill=1, stroke=0)
+            pdf.setFillAlpha(.12)
+            pdf.circle(page_w - 100, page_h - 50, 32, fill=1, stroke=0)
+            pdf.setFillAlpha(1)
+            pdf.roundRect(59, page_h - 108, 82, 5, 2, fill=1, stroke=0)
+        elif layout_name == "tech":
+            pdf.setFillAlpha(.12)
+            pdf.setLineWidth(.45)
+            for gx in (18, 34, 50):
+                pdf.line(gx, 26, gx, page_h-133)
+            for gy in range(145, int(page_h-130), 47):
+                pdf.line(17, gy, 57, gy)
+            pdf.setFillAlpha(1)
+            pdf.rect(59, page_h - 108, 70, 4, fill=1, stroke=0)
+        elif layout_name == "business":
+            pdf.rect(0, page_h - 10, page_w, 10, fill=1, stroke=0)
+            pdf.setFillAlpha(.45)
+            pdf.rect(59, 27, page_w-100, 1, fill=1, stroke=0)
+            pdf.setFillAlpha(1)
+            pdf.rect(59, page_h - 108, 88, 3, fill=1, stroke=0)
+        elif layout_name == "infographic":
+            pdf.setFillAlpha(.9)
+            pdf.setLineWidth(1)
+            pdf.roundRect(48, 35, page_w-96, page_h-150, 10, fill=0, stroke=1)
+            pdf.rect(48, 35, 6, page_h-150, fill=1, stroke=0)
+        elif layout_name == "nature":
+            pdf.setFillAlpha(.16)
+            pdf.circle(page_w - 28, page_h + 5, 74, fill=1, stroke=0)
+            pdf.circle(-15, 18, 58, fill=1, stroke=0)
+            pdf.setFillAlpha(1)
+            pdf.roundRect(59, page_h - 108, 74, 4, 2, fill=1, stroke=0)
+        elif layout_name == "elegant":
+            pdf.setFillAlpha(.9)
+            pdf.setLineWidth(.7)
+            pdf.rect(25, 24, page_w-50, page_h-48, fill=0, stroke=1)
+            pdf.rect(59, page_h - 108, 74, 1.5, fill=1, stroke=0)
+            pdf.rect(page_w-125, 28, 66, 1.5, fill=1, stroke=0)
+        pdf.restoreState()
+
+    def draw_chart(layout, item):
+        x = layout["visual_x"] * 72
+        y_top = page_h - layout["visual_y"] * 72
+        w = layout["visual_width"] * 72
+        h = layout["visual_height"] * 72
+        labels, values = layout["labels"], [float(v) for v in layout["values"]]
+        kind = layout["type"]
+        title = item.visual_title or ""
+        if title:
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(bold, 12)
+            pdf.drawCentredString(x + w/2, y_top - 12, title[:70])
+        chart_top = y_top - (28 if title else 12)
+        chart_bottom = page_h - (layout["visual_y"] + layout["visual_height"]) * 72 + 36
+        chart_h = max(80, chart_top - chart_bottom)
+        chart_left, chart_right = x + 38, x + w - 12
+        chart_w = chart_right - chart_left
+        max_value = max(values) if values else 1
+        max_value = max(max_value, 1)
+
+        if kind == "pie":
+            total = sum(values) or 1
+            cx, cy = x + w * .48, chart_bottom + chart_h * .48
+            radius = min(chart_h * .51, w * .32)
+            palette = chart_palette
+            angle = 0
+            for i, value in enumerate(values):
+                extent = 360 * value / total
+                # Sektorlarni markazdan yoy bo'ylab ko'p nuqtali poligon sifatida chizamiz.
+                # Bu ReportLab versiyalari orasida wedge() farqlarini oldini oladi.
+                path = pdf.beginPath()
+                path.moveTo(cx, cy)
+                steps = max(4, int(extent / 5))
+                for step in range(steps + 1):
+                    theta = math.radians(angle + extent * step / steps)
+                    px = cx + radius * math.cos(theta)
+                    py = cy + radius * math.sin(theta)
+                    path.lineTo(px, py)
+                path.close()
+                pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
+                pdf.drawPath(path, fill=1, stroke=0)
+                angle += extent
+            pdf.setFont(regular, 9)
+            for i, label in enumerate(labels):
+                ly = chart_bottom + chart_h - 24 - i * 22
+                pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
+                pdf.roundRect(x + w * .82, ly-2, 9, 9, 2, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.setFont(regular, 9)
+                pdf.drawString(x + w * .82 + 14, ly, str(label)[:15])
+            return
+
+        # Ustunli, gorizontal bar va chiziqli grafiklar.
+        pdf.setStrokeColorRGB(*rgb((130, 145, 160)))
+        pdf.setLineWidth(.6)
+        pdf.line(chart_left, chart_bottom, chart_right, chart_bottom)
+        if kind == "line":
+            points = []
+            for i, value in enumerate(values):
+                px = chart_left + (chart_w * i / max(1, len(values)-1))
+                py = chart_bottom + (value / max_value) * (chart_h - 35)
+                points.append((px, py))
+            pdf.setStrokeColorRGB(*rgb(accent))
+            pdf.setLineWidth(2.5)
+            for p1, p2 in zip(points, points[1:]):
+                pdf.line(p1[0], p1[1], p2[0], p2[1])
+            pdf.setFillColorRGB(*rgb(accent))
+            for px, py in points:
+                pdf.circle(px, py, 3.5, fill=1, stroke=0)
+            pdf.setFont(regular, 8)
+            for (px, _), label in zip(points, labels):
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawCentredString(px, chart_bottom - 14, str(label)[:16])
+        elif kind == "bar":
+            row_h = (chart_h - 18) / max(1, len(values))
+            for i, (label, value) in enumerate(zip(labels, values)):
+                cy = chart_top - 25 - i * row_h
+                bar_w = (value / max_value) * (chart_w - 105)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.setFont(regular, 8)
+                pdf.drawRightString(chart_left - 7, cy + 3, str(label)[:18])
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.roundRect(chart_left, cy - 2, max(1, bar_w), 13, 3, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawString(chart_left + bar_w + 5, cy + 1, f"{value:g}")
+        else:
+            slot = chart_w / max(1, len(values))
+            bar_w = min(42, slot * .58)
+            pdf.setFont(regular, 8)
+            for i, (label, value) in enumerate(zip(labels, values)):
+                bh = (value / max_value) * (chart_h - 45)
+                bx = chart_left + i * slot + (slot - bar_w) / 2
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.roundRect(bx, chart_bottom, bar_w, max(1, bh), 3, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg))
+                pdf.drawCentredString(bx + bar_w/2, chart_bottom + bh + 5, f"{value:g}")
+                pdf.drawCentredString(bx + bar_w/2, chart_bottom - 14, str(label)[:14])
+
+    def draw_process(layout):
+        labels = layout["labels"][:6]
+        x0 = layout["visual_x"] * 72
+        total_w = layout["visual_width"] * 72
+        gap = 8
+        box_w = (total_w - gap * (len(labels)-1)) / len(labels)
+        y = page_h - (3.15 + 1.15) * 72
+        box_h = 1.15 * 72
+        for i, label in enumerate(labels):
+            x = x0 + i * (box_w + gap)
+            pdf.setFillColorRGB(*rgb(accent))
+            pdf.roundRect(x, y, box_w, box_h, 8, fill=1, stroke=0)
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(bold, 9)
+            lines = wrap_lines(str(label)[:70], bold, 9, box_w - 12)
+            line_y = y + box_h/2 + (len(lines)-1)*6
+            for line in lines[:4]:
+                pdf.drawCentredString(x + box_w/2, line_y, line)
+                line_y -= 12
+            if i < len(labels)-1:
+                mid_y = y + box_h / 2
+                arrow_x = x + box_w + 1
+                pdf.setStrokeColorRGB(*rgb(accent))
+                pdf.setLineWidth(1.8)
+                pdf.line(arrow_x, mid_y, arrow_x + gap - 2, mid_y)
+                pdf.line(arrow_x + gap - 5, mid_y + 3, arrow_x + gap - 2, mid_y)
+                pdf.line(arrow_x + gap - 5, mid_y - 3, arrow_x + gap - 2, mid_y)
+
+    def draw_rich_diagram(layout, item):
+        """PPTX dagi cards/cycle/pyramid/funnel sxemalarining PDF muqobili."""
+        labels = layout["labels"][:6]
+        x0, y0, total_w = layout["visual_x"] * 72, page_h - 2.55 * 72, layout["visual_width"] * 72
+        palette = chart_palette
+        kind = layout["type"]
+        pdf.saveState()
+        if kind == "cards":
+            cols = 2
+            rows = (len(labels) + cols - 1) // cols
+            gap_x, gap_y = 12, 12
+            box_w = (total_w - gap_x) / cols
+            box_h = min(75, (3.65 * 72 - gap_y * max(0, rows - 1)) / max(1, rows))
+            for i, label in enumerate(labels):
+                col, row = i % cols, i // cols
+                x, y = x0 + col * (box_w + gap_x), y0 - row * (box_h + gap_y) - box_h
+                pdf.setFillColorRGB(*rgb(palette[i % len(palette)]))
+                pdf.roundRect(x, y, box_w, box_h, 9, fill=1, stroke=0)
+                pdf.setFillColorRGB(*rgb(fg)); pdf.setFont(bold, 9)
+                lines = wrap_lines(str(label)[:90], bold, 9, box_w - 18)
+                ty = y + box_h/2 + (len(lines)-1)*6
+                for line in lines[:4]:
+                    pdf.drawCentredString(x + box_w/2, ty, line); ty -= 12
+            pdf.restoreState(); return
+
+        if kind == "cycle":
+            from math import cos, sin, pi
+            cx, cy = x0 + total_w/2, page_h - 4.25*72
+            rx, ry = 1.85*72, 1.35*72
+            count=len(labels); positions=[]
+            for i,label in enumerate(labels):
+                angle=-pi/2 + 2*pi*i/count
+                positions.append((cx+rx*cos(angle),cy+ry*sin(angle)))
+            # Connect nodes with subtle arrows/lines first.
+            pdf.setStrokeColorRGB(*rgb(accent)); pdf.setLineWidth(2)
+            for i,(px,py) in enumerate(positions):
+                nx,ny=positions[(i+1)%count]
+                pdf.line(px,py,nx,ny)
+            for i,((px,py),label) in enumerate(zip(positions,labels)):
+                nw,nh=1.42*72,.72*72
+                pdf.setFillColorRGB(*rgb(palette[i%len(palette)]))
+                pdf.ellipse(px-nw/2,py-nh/2,px+nw/2,py+nh/2,fill=1,stroke=0)
+                pdf.setFillColorRGB(*rgb(fg)); pdf.setFont(bold,7.5)
+                lines=wrap_lines(str(label)[:65],bold,7.5,nw-12)
+                ty=py+(len(lines)-1)*5
+                for line in lines[:3]:
+                    pdf.drawCentredString(px,ty,line); ty-=10
+            pdf.restoreState(); return
+
+        if kind in ("pyramid", "funnel"):
+            count=len(labels); max_w=total_w*.82; total_h=3.75*72; cx=x0+total_w/2
+            seg_h=total_h/count
+            for i,label in enumerate(labels):
+                if kind=="pyramid":
+                    top_w=max_w*(count-i-1)/count
+                    bottom_w=max_w*(count-i)/count
+                    if i==count-1: top_w=max_w/count
+                else:
+                    top_w=max_w*(1-.72*i/max(1,count))
+                    bottom_w=max_w*(1-.72*(i+1)/max(1,count))
+                top_w=max(40,top_w); bottom_w=max(40,bottom_w)
+                y_top=y0-i*seg_h
+                path=pdf.beginPath()
+                path.moveTo(cx-top_w/2,y_top)
+                path.lineTo(cx+top_w/2,y_top)
+                path.lineTo(cx+bottom_w/2,y_top-seg_h+3)
+                path.lineTo(cx-bottom_w/2,y_top-seg_h+3)
+                path.close()
+                pdf.setFillColorRGB(*rgb(palette[i%len(palette)]))
+                pdf.drawPath(path,fill=1,stroke=0)
+                pdf.setFillColorRGB(*rgb(fg)); pdf.setFont(bold,8)
+                pdf.drawCentredString(cx,y_top-seg_h/2-3,str(label)[:70])
+            pdf.restoreState(); return
+        pdf.restoreState()
+
+    for index, item in enumerate(deck.slides):
+        pdf.setFillColorRGB(*rgb(bg))
+        pdf.rect(0, 0, page_w, page_h, fill=1, stroke=0)
+        draw_theme_decor(index)
+        if index == 0:
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(bold, 34)
+            title_lines = wrap_lines(deck.presentation_title, bold, 34, page_w - 150)
+            y = page_h * .62 + (len(title_lines)-1) * 40
+            for line in title_lines[:3]:
+                pdf.drawCentredString(page_w/2, y, line)
+                y -= 40
+            if deck.subtitle:
+                subtitle_lines = []
+                for paragraph in str(deck.subtitle).replace("\r", "\n").split("\n"):
+                    subtitle_lines.extend(wrap_lines(paragraph, regular, 18, page_w - 190))
+                subtitle_y = page_h * .39 + (len(subtitle_lines) - 1) * 25
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.setFont(regular, 18)
+                for subtitle_line in subtitle_lines[:5]:
+                    pdf.drawCentredString(page_w / 2, subtitle_y, subtitle_line)
+                    subtitle_y -= 25
+            pdf.setFillColorRGB(*rgb(fg))
+            pdf.setFont(regular, 10)
+            pdf.drawCentredString(page_w/2, 28, "QUIZ AI  •  AI PRESENTATION")
+        else:
+            draw_wrapped(item.title, 55, page_h-62, page_w-105, bold, 27, accent, 32)
+            pdf.setFillColorRGB(*rgb(accent))
+            pdf.roundRect(58, page_h-112, 82, 4, 2, fill=1, stroke=0)
+            layout = _slide_visual_layout(item)
+            bullet_rows = _slide_bullet_layout(item.bullets, layout["has_visual"])
+            for row in bullet_rows:
+                y = page_h - (row["y"] * 72)
+                if layout_name == "infographic":
+                    pdf.saveState()
+                    pdf.setFillColorRGB(224/255, 242/255, 240/255)
+                    pdf.setFillAlpha(.10)
+                    card_h = max(30, row["height"] * 72 + 7)
+                    pdf.roundRect(62, y - card_h + 16, row["width"] * 72 + 52, card_h, 7, fill=1, stroke=0)
+                    pdf.restoreState()
+                pdf.setFillColorRGB(*rgb(accent))
+                pdf.circle(72, y + 5, 3.2, fill=1, stroke=0)
+                font_size = row["font_size"]
+                leading = font_size * 1.18
+                draw_wrapped(row["text"], row["x"] * 72, y, row["width"] * 72,
+                             regular, font_size, fg, leading)
+            if layout["type"] in ("bar", "column", "pie", "line"):
+                try:
+                    draw_chart(layout, item)
+                except Exception as chart_exc:
+                    logging.warning("PDF slayd grafigi chizilmadi | slayd=%s | sabab=%s", index + 1, chart_exc)
+                    fallback_layout = dict(layout)
+                    fallback_layout.update({
+                        "type": "cards",
+                        "labels": [str(value)[:90] for value in (item.bullets or [])[:6]],
+                        "has_visual": True,
+                    })
+                    draw_rich_diagram(fallback_layout, item)
+            elif layout["type"] in ("process", "timeline"):
+                draw_process(layout)
+            elif layout["type"] in ("cards", "cycle", "pyramid", "funnel"):
+                draw_rich_diagram(layout, item)
+            pdf.setFillColorRGB(*rgb(accent))
+            pdf.setFont(bold, 9)
+            pdf.drawRightString(page_w-35, 25, f"{index+1:02d}")
+        pdf.showPage()
+    pdf.save()
+    return output.getvalue()
+
+
+# Slayd fayllari Telegram WebView'da barqaror yuklanishi uchun qisqa muddatli saqlanadi.
+_SLIDES_DOWNLOAD_FILES = {}
+_SLIDES_DOWNLOAD_LOCK = threading.Lock()
+_SLIDES_DOWNLOAD_TTL = 30 * 60
+
+
+@app.get("/api/slides/download/{token}/{file_format}")
+def api_download_slides_file(token: str, file_format: str):
+    if file_format not in ("pptx", "pdf"):
+        raise HTTPException(status_code=404, detail="Fayl topilmadi")
+    now = time.time()
+    with _SLIDES_DOWNLOAD_LOCK:
+        expired = [key for key, value in _SLIDES_DOWNLOAD_FILES.items() if value["expires_at"] <= now]
+        for key in expired:
+            _SLIDES_DOWNLOAD_FILES.pop(key, None)
+        entry = _SLIDES_DOWNLOAD_FILES.get(token)
+        file_item = entry.get(file_format) if entry else None
+    if not file_item:
+        raise HTTPException(status_code=404, detail="Fayl muddati tugagan yoki topilmadi")
+    filename = file_item["filename"].replace('"', "")
+    return Response(
+        content=file_item["data"],
+        media_type=file_item["mime"],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/slides/generate")
+def api_generate_slides(
+    request: Request,
+    user_id: int = Form(...),
+    topic: str = Form(""),
+    slide_count: int = Form(...),
+    theme: str = Form("modern"),
+    university_recipient: str = Form(""),
+    student_group: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+):
+    """Yangi slayd generatori; mavjud quiz yaratish oqimidan mustaqil."""
+    if getattr(request.state, "telegram_user_id", None) != int(user_id):
+        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
+    if os.getenv("SLIDES_ENABLED", "true").lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=503, detail="Slaydlar xizmati hozircha o'chirilgan")
+    if os.getenv("SLIDE_CREDITS_ENABLED", "true").lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=503, detail="Kredit tizimi hozircha o'chirilgan")
+    if not GOOGLE_API_KEYS:
+        raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
+    min_count = max(1, int(os.getenv("SLIDE_MIN_COUNT", "6")))
+    max_count = max(min_count, min(100, int(os.getenv("SLIDE_MAX_COUNT", "20"))))
+    try:
+        allowed_counts = {int(x.strip()) for x in os.getenv("SLIDE_COUNT_OPTIONS", "6,8,10,12,16,20").split(",") if x.strip()}
+    except Exception:
+        allowed_counts = {6, 8, 10, 12, 16, 20}
+    allowed_counts = {x for x in allowed_counts if min_count <= x <= max_count} or {6, 8, 10, 12, 16, 20}
+    per_slide = max(1, min(10000, int(os.getenv("SLIDE_CREDITS_PER_SLIDE", "1"))))
+    max_file_mb = max(1, min(30, int(os.getenv("SLIDE_MAX_FILE_MB", "10"))))
+    max_source_chars = max(1000, min(200000, int(os.getenv("SLIDE_MAX_SOURCE_CHARS", "50000"))))
+    max_topic_chars = max(20, min(5000, int(os.getenv("SLIDE_MAX_TOPIC_CHARS", "1000"))))
+    if slide_count not in allowed_counts:
+        raise HTTPException(status_code=400, detail="Ruxsat etilgan slayd sonlaridan birini tanlang")
+    topic = (topic or "").strip()[:max_topic_chars]
+    university_recipient = (university_recipient or "").strip()[:180]
+    student_group = (student_group or "").strip()[:120]
+    source_text = ""
+    if file is not None:
+        raw = file.file.read()
+        if len(raw) > max_file_mb * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Fayl hajmi ruxsat etilgan limitdan katta")
+        try: source_text = _extract_slide_source(raw, Path(file.filename or "").name)
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+        except Exception:
+            logging.exception("Slayd manba faylini o'qishda xato")
+            raise HTTPException(status_code=400, detail="PDF/DOCX faylni o'qib bo'lmadi")
+    if not topic and not source_text.strip():
+        raise HTTPException(status_code=400, detail="Mavzu kiriting yoki PDF/DOCX fayl yuklang")
+    source_text = source_text[:max_source_chars]
+    cost = slide_count * per_slide
+    job_id = uuid.uuid4().hex
+    spent, reason = spend_slide_credits(user_id, cost, f"slides:{job_id}", f"AI taqdimot — {slide_count} slayd")
+    if not spent:
+        if reason == "insufficient_credits": raise HTTPException(status_code=402, detail="Kredit yetarli emas")
+        raise HTTPException(status_code=409, detail="Kredit operatsiyasini bajarib bo'lmadi")
+    prompt = (
+        "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
+        f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
+        "Qolgan HAR BIR slaydda 2-5 ta aniq, qisqa bullet va mazmunga mos kamida BITTA vizual diagramma/sxema bo'lishi SHART. visual_type faqat bar, column, pie, line, process, timeline, cards, cycle, pyramid yoki funnel bo'lsin; none ishlatmang. "
+        "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa hech qanday raqam to'qimang va cards/process/timeline/cycle/pyramid/funnel kabi mazmuniy sxemalardan foydalaning. "
+        "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column; mavzu bosqichlari uchun process/timeline, tarkibiy qismlar uchun cards, davriy jarayon uchun cycle, darajalar uchun pyramid, ketma-ket kamayish uchun funnel. "
+        "Bir xil vizual turini ketma-ket slaydlarda takrorlamang; butun taqdimot davomida chart va sxemalarni imkon qadar rang-barang taqsimlang. Mazmunga mos bo'lmagan grafikni majburan ishlatmang, lekin har bir kontent slaydida mazmuniy sxema bo'lsin. "
+        "design_theme ni faqat ilovada mavjud bo'lgan modern, minimal, academic, creative, tech, business, infographic, nature yoki elegant shablonlaridan tanlang. "
+        "Mavzu va materialga eng mos bitta shablonni tanlang; internetdan shablon qidirmang va mavjud bo'lmagan nom kiritmang. "
+        "Takrorlanish va manbada yo'q faktlarni qo'shmang. "
+        "Matn tilini foydalanuvchi bergan matn tiliga moslang. Speaker notes qisqa bo'lsin.\n"
+        f"Mavzu: {topic or 'Manba material asosida'}\\n"
+        f"Tituldagi universitet/qabul qiluvchi: {university_recipient or 'Ko‘rsatilmagan'}\\n"
+        f"Tituldagi talaba/guruh: {student_group or 'Ko‘rsatilmagan'}\\n"
+        "Agar titul ma'lumotlari berilgan bo'lsa, birinchi slayd subtitle qismiga ixcham va tartibli joylashtiring.\\n"
+        f"Manba matni:\\n{source_text}"
+    )
+    deadline = time.monotonic() + max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
+    deck = None; last_error = None
+    start_index = _next_generation_key_start(len(GOOGLE_API_KEYS))
+    try:
+        acquired = gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic()))
+        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        try:
+            for offset in range(len(GOOGLE_API_KEYS)):
+                if time.monotonic() >= deadline: break
+                key_index = (start_index + offset) % len(GOOGLE_API_KEYS)
+                try:
+                    client = genai.Client(api_key=GOOGLE_API_KEYS[key_index], http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000))))
+                    response = client.models.generate_content(
+                        model=os.getenv("SLIDE_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
+                        config=genai_types.GenerateContentConfig(response_mime_type="application/json", response_schema=SlideDeckSchema, temperature=.35, max_output_tokens=12000),
+                    )
+                    if not response or not response.text: raise RuntimeError("AI bo'sh javob qaytardi")
+                    deck = SlideDeckSchema.model_validate_json(response.text)
+                    if len(deck.slides) != slide_count: raise RuntimeError(f"Slaydlar soni mos emas: {len(deck.slides)}/{slide_count}")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning("Slayd Gemini urinish muvaffaqiyatsiz | kalit_indeksi=%s | sabab=%s", key_index+1, _safe_ai_error_text(exc))
+        finally:
+            gemini_semaphore.release()
+        if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        deck = _ensure_slide_visuals(deck)
+        allowed_slide_themes = ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature", "elegant")
+        safe_theme = (deck.design_theme if deck.design_theme in allowed_slide_themes else "modern") if theme == "auto" else (theme if theme in allowed_slide_themes else "modern")
+        pptx_bytes = _build_slide_pptx(deck, safe_theme)
+        pdf_bytes = _build_slide_pdf(deck, safe_theme)
+        safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", deck.presentation_title).strip("_")[:60] or "quiz_ai_slides"
+        download_token = secrets.token_urlsafe(32)
+        with _SLIDES_DOWNLOAD_LOCK:
+            now = time.time()
+            expired = [key for key, value in _SLIDES_DOWNLOAD_FILES.items() if value["expires_at"] <= now]
+            for key in expired:
+                _SLIDES_DOWNLOAD_FILES.pop(key, None)
+            _SLIDES_DOWNLOAD_FILES[download_token] = {
+                "expires_at": now + _SLIDES_DOWNLOAD_TTL,
+                "pptx": {
+                    "filename": f"{safe_title}.pptx",
+                    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "data": pptx_bytes,
+                },
+                "pdf": {
+                    "filename": f"{safe_title}.pdf",
+                    "mime": "application/pdf",
+                    "data": pdf_bytes,
+                },
+            }
+        return JSONResponse(content={
+            "status": "ok",
+            "title": deck.presentation_title,
+            "job_id": job_id,
+            "credits_spent": cost,
+            "files": {
+                "pptx": {"filename": f"{safe_title}.pptx", "url": f"/api/slides/download/{download_token}/pptx"},
+                "pdf": {"filename": f"{safe_title}.pdf", "url": f"/api/slides/download/{download_token}/pdf"},
+            }
+        })
+    except Exception as exc:
+        refund_slide_credits(user_id, cost, f"slides:{job_id}", f"slides-refund:{job_id}", "Slayd yaratish amalga oshmadi — kreditlar avvalgi hisoblariga qaytarildi")
+        logging.exception("AI slayd yaratishda xato | user_id=%s | job_id=%s | sabab=%s", user_id, job_id, _safe_ai_error_text(exc))
+        raise HTTPException(status_code=502, detail="Taqdimot yaratilmadi. Sarflangan kreditlar balansga qaytarildi.")
 
 
 @app.get("/api/premium-status")
@@ -3069,6 +4572,7 @@ def get_premium_status(user_id: int):
     if is_active_paid_status(user_status, premium_until):
         pass
     elif "PRO" in user_status and premium_until > 0 and now > premium_until:
+        expire_tariff_slide_credits(conn, user_id, now)
         cursor.execute("UPDATE users SET status = 'Oddiy foydalanuvchi', plan_key = '', premium_until = 0, premium_source = 'paid' WHERE user_id = ?", (user_id,))
         conn.commit()
         user_status, plan_key, premium_until = "Oddiy foydalanuvchi", "", 0
@@ -3172,6 +4676,7 @@ async def create_quiz_web(
             and premium_until > 0
             and current_now > premium_until
         ):
+            expire_tariff_slide_credits(conn_check, user_id, current_now)
             cursor_check.execute(
                 "UPDATE users SET status = 'Oddiy foydalanuvchi', premium_until = 0 WHERE user_id = ?",
                 (user_id,),
@@ -6004,6 +7509,7 @@ def _admin_panel_bonus_markup():
     markup.add(
         telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
         telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
+        telebot.types.InlineKeyboardButton("💎 Slayd kreditlari bonusi", callback_data="adminpanel:guide:bonus_credits"),
         telebot.types.InlineKeyboardButton("🗑 Bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
         telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
     )
@@ -6024,7 +7530,7 @@ def admin_help_panel_command(message):
         "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
         "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
         "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
-        "🎁 Bonuslar — buyruq formati bo‘yicha yordam.\n\n"
+        "🎁 Bonuslar — Premium, Teacher va Slayd kreditlarini alohida boshqarish.\n\n"
         "🔐 Ushbu menyu faqat administrator uchun ochiq."
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
@@ -6065,6 +7571,7 @@ def admin_help_panel_callback(call):
         guide_texts = {
             "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
             "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
+            "bonus_credits": "💎 <b>Slayd kreditlari bonusi</b>\nFormat: <code>/bonus_credits USER_ID KREDIT</code>\nMisol: <code>/bonus_credits 123456789 50</code>\nBu bonus Premium va test limitlaridan alohida hisoblanadi.",
             "bonus_revoke": "🗑 <b>Bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
         }
         bot.answer_callback_query(call.id)
