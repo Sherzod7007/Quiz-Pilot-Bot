@@ -63,6 +63,9 @@ from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 # P2P Payment AI is isolated from Generation AI. It uses PAYMENT_GEMINI_API_KEYS only.
 import p2p_payment_ai
 
+# Umumiy QR/branding moduli: sozlamalar Railway Variables'dan o'qiladi.
+import quiz_ai_branding
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -3942,6 +3945,8 @@ def _build_slide_pptx(deck, theme="modern"):
             except Exception:
                 pass
 
+    # Smart Branding: sozlama yoqilgan bo'lsa, QR oxirgi slaydga qo'shiladi.
+    quiz_ai_branding.add_qr_to_pptx(prs, feature="SLIDES")
     output = BytesIO()
     prs.save(output)
     return output.getvalue()
@@ -4359,7 +4364,8 @@ def _build_slide_pdf(deck, theme="modern"):
             pdf.drawRightString(page_w-35, 25, f"{index+1:02d}")
         pdf.showPage()
     pdf.save()
-    return output.getvalue()
+    # QR faqat oxirgi sahifaga qo'shiladi; asl slayd sahifalari saqlanadi.
+    return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="SLIDES")
 
 
 # Slayd fayllari Telegram WebView'da barqaror yuklanishi uchun qisqa muddatli saqlanadi.
@@ -6216,6 +6222,7 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 opts=(q.get("options") or [])+['','','','']
                 for j in range(4): doc.add_paragraph(f"{chr(65+j)}) {opts[j]}", style=None)
             doc.add_paragraph("Javoblar: " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))))
+        quiz_ai_branding.add_qr_to_docx(doc, feature="TEACHER")
         doc.save(path)
         return _teacher_download_response(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
@@ -6253,6 +6260,14 @@ def teacher_export_quiz(quiz_id: str, user_id: int, format: str, variant: str = 
                 story.append(Spacer(1,4))
             story.append(Paragraph("<b>Javoblar:</b> " + ", ".join(f"{i+1}-{a}" for i,a in enumerate(answer_key(payload))),q_style)); story.append(Spacer(1,10))
         doc.build(story)
+        # Teacher PDF eksportida QR oxirgi sahifaga joylanadi.
+        try:
+            with open(path, "rb") as _pdf_file:
+                _branded_pdf = quiz_ai_branding.add_qr_to_pdf_bytes(_pdf_file.read(), feature="TEACHER")
+            with open(path, "wb") as _pdf_file:
+                _pdf_file.write(_branded_pdf)
+        except Exception:
+            logging.exception("Teacher PDF uchun QR branding qo'shilmadi; asl PDF saqlandi.")
         return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
@@ -7127,6 +7142,7 @@ def teacher_export(session_id: str, user_id: int, format: str):
             cells=table.add_row().cells
             vals=[i,_mta_word_without_telegram_emoji(r["first_name"]),_mta_word_without_telegram_emoji(r["username"]),r["score"],r["total"],f"{r['percent']}%"]
             for j,v in enumerate(vals): cells[j].text=str(v)
+        quiz_ai_branding.add_qr_to_docx(doc, feature="TEACHER")
         doc.save(path); return _teacher_download_response(path, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     if fmt=="pdf":
         path=os.path.join(DOWNLOADS_DIR,f"{safe}_{s['code']}_{uuid.uuid4().hex}.pdf")
@@ -7216,6 +7232,14 @@ def teacher_export(session_id: str, user_id: int, format: str):
             for _emoji_path in _emoji_images:
                 try: os.remove(_emoji_path)
                 except OSError: pass
+        # Teacher sessiya PDF eksportida QR oxirgi sahifaga joylanadi.
+        try:
+            with open(path, "rb") as _pdf_file:
+                _branded_pdf = quiz_ai_branding.add_qr_to_pdf_bytes(_pdf_file.read(), feature="TEACHER")
+            with open(path, "wb") as _pdf_file:
+                _pdf_file.write(_branded_pdf)
+        except Exception:
+            logging.exception("Teacher sessiya PDF uchun QR branding qo'shilmadi; asl PDF saqlandi.")
         return _teacher_download_response(path, "application/pdf")
     raise HTTPException(status_code=400, detail=teacher_text(user_id, "format_invalid"))
 
