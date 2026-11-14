@@ -219,32 +219,155 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     return output.getvalue()
 
 
+def _docx_qr_with_caption(png_bytes, caption):
+    """Build one image containing QR + caption so it can float as one object."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    qr_image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+    if not caption:
+        output = io.BytesIO()
+        qr_image.save(output, format="PNG", optimize=True)
+        return output.getvalue()
+
+    # Render the caption into the image: this avoids a separate flowing paragraph
+    # that could move the document content or appear below the table.
+    font_size = max(18, qr_image.width // 18)
+    font = None
+    for font_path in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    ):
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    pad_top = max(8, qr_image.width // 24)
+    pad_bottom = max(12, qr_image.width // 14)
+    draw_probe = ImageDraw.Draw(Image.new("RGB", (1, 1), "white"))
+    bbox = draw_probe.textbbox((0, 0), caption, font=font)
+    text_height = max(1, bbox[3] - bbox[1])
+    canvas = Image.new(
+        "RGB", (qr_image.width, qr_image.height + pad_top + text_height + pad_bottom), "white"
+    )
+    canvas.paste(qr_image, (0, 0))
+    draw = ImageDraw.Draw(canvas)
+    text_width = draw.textlength(caption, font=font)
+    draw.text(((canvas.width - text_width) / 2, qr_image.height + pad_top),
+              caption, fill=(35, 80, 110), font=font)
+    output = io.BytesIO()
+    canvas.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _make_docx_picture_floating(paragraph, picture_run, x_emu, y_emu):
+    """Convert python-docx's inline picture to a page-positioned floating picture."""
+    from copy import deepcopy
+    from docx.oxml import OxmlElement
+
+    inline = picture_run._r.xpath(".//wp:inline")
+    if not inline:
+        return False
+    inline = inline[0]
+
+    anchor = OxmlElement("wp:anchor")
+    for name, value in {
+        "distT": "0", "distB": "0", "distL": "0", "distR": "0",
+        "simplePos": "0", "relativeHeight": "251658240", "behindDoc": "0",
+        "locked": "0", "layoutInCell": "1", "allowOverlap": "1",
+    }.items():
+        anchor.set(name, value)
+
+    simple_pos = OxmlElement("wp:simplePos")
+    simple_pos.set("x", "0")
+    simple_pos.set("y", "0")
+    anchor.append(simple_pos)
+
+    position_h = OxmlElement("wp:positionH")
+    position_h.set("relativeFrom", "page")
+    offset_h = OxmlElement("wp:posOffset")
+    offset_h.text = str(int(x_emu))
+    position_h.append(offset_h)
+    anchor.append(position_h)
+
+    position_v = OxmlElement("wp:positionV")
+    position_v.set("relativeFrom", "page")
+    offset_v = OxmlElement("wp:posOffset")
+    offset_v.text = str(int(y_emu))
+    position_v.append(offset_v)
+    anchor.append(position_v)
+
+    # Keep the original dimensions and picture drawing data intact.
+    for child in list(inline):
+        anchor.append(deepcopy(child))
+
+    wrap = OxmlElement("wp:wrapNone")
+    anchor.insert(5, wrap)
+    inline.getparent().replace(inline, anchor)
+    return True
+
+
 def add_qr_to_docx(document, feature="TEACHER"):
-    """Append a centered/positioned QR block to a generated Word document."""
+    """Place QR as a floating object at the configured position on the final page.
+
+    Unlike an ordinary appended paragraph, the QR does not sit immediately below
+    the last table. It is anchored relative to the page, preserving document flow.
+    """
     config = get_branding_config(feature)
     png = _make_qr_png(config)
     if not png:
         return False
 
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Inches
 
+    # The anchor paragraph is attached to the final content paragraph, so the
+    # floating image belongs to the final page without adding a new page/section.
+    if document.paragraphs:
+        anchor_paragraph = document.paragraphs[-1]
+    else:
+        anchor_paragraph = document.add_paragraph()
+
+    # If the final body element is a table, add a minimal paragraph after it only
+    # as an anchor; the floating object itself does not consume text-flow space.
+    body = document._element.body
+    if body[-1].tag.endswith("}tbl"):
+        anchor_paragraph = document.add_paragraph()
+
+    section = document.sections[-1]
+    page_w = int(section.page_width)
+    page_h = int(section.page_height)
+    left_margin = int(section.left_margin)
+    right_margin = int(section.right_margin)
+    top_margin = int(section.top_margin)
+    bottom_margin = int(section.bottom_margin)
+
+    qr_width = Inches(config["size"] / 72.0)
+    qr_width_emu = int(qr_width)
+    # Caption is embedded in the image, so it remains attached to the QR.
+    docx_png = _docx_qr_with_caption(png, config["caption"])
+    run = anchor_paragraph.add_run()
+    picture = run.add_picture(io.BytesIO(docx_png), width=qr_width)
+
+    # Match the PDF's page-edge placement while respecting page margins.
+    image_height = int(picture.height)
     position = config["position"]
-    alignment = WD_ALIGN_PARAGRAPH.CENTER
     if position in ("top_left", "bottom_left"):
-        alignment = WD_ALIGN_PARAGRAPH.LEFT
+        x = left_margin
     elif position in ("top_right", "bottom_right"):
-        alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        x = page_w - right_margin - qr_width_emu
+    elif position == "center":
+        x = (page_w - qr_width_emu) // 2
+    else:  # document_end: bottom-left on the final page for Word documents
+        x = left_margin
 
-    paragraph = document.add_paragraph()
-    paragraph.alignment = alignment
-    run = paragraph.add_run()
-    run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
-    if config["caption"]:
-        caption = document.add_paragraph()
-        caption.alignment = alignment
-        text_run = caption.add_run(config["caption"])
-        text_run.bold = True
-        text_run.font.size = Pt(8)
-        text_run.font.color.rgb = RGBColor(35, 80, 110)
-    return True
+    if position in ("top_left", "top_right"):
+        y = top_margin
+    elif position == "center":
+        y = (page_h - image_height) // 2
+    else:
+        y = page_h - bottom_margin - image_height
+
+    return _make_docx_picture_floating(anchor_paragraph, run, x, y)
