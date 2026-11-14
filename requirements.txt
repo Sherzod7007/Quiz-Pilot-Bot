@@ -12,3 +12,4 @@ psycopg2-binary
 deep-translator
 PyMuPDF
 python-pptx>=1.0.2
+qrcode[pil]>=7.4
