@@ -1253,6 +1253,21 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Slayd yuklash havolasi yaroqsiz yoki muddati tugagan."})
         return await call_next(request)
 
+    # Konspekt fayllari Telegram Android downloader uchun qisqa muddatli token bilan yuklanadi.
+    # Token tasodifiy, muddati va foydalanish soni cheklangan.
+    if path.startswith("/api/summary/download/") and request.method == "GET":
+        parts = path.rstrip("/").split("/")
+        download_token = parts[-2] if len(parts) >= 2 else ""
+        with _SUMMARY_DOWNLOAD_LOCK:
+            summary_ticket = _SUMMARY_DOWNLOAD_FILES.get(download_token)
+            ticket_valid = bool(summary_ticket and summary_ticket.get("expires_at", 0) >= time.time())
+            if ticket_valid:
+                summary_ticket["uses"] = summary_ticket.get("uses", 0) + 1
+                ticket_valid = summary_ticket["uses"] <= 10
+        if not ticket_valid:
+            return JSONResponse(status_code=401, content={"detail": "Konspekt yuklash havolasi yaroqsiz yoki muddati tugagan."})
+        return await call_next(request)
+
     # Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida va qisqa muddat ishlaydi.
     # Telegram/Android downloader bir fayl uchun bir nechta GET yuborishi mumkin;
     # shu sababli chipta birinchi GET'dan keyin bekor qilinmaydi.
@@ -4629,10 +4644,13 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
         token = secrets.token_urlsafe(32); now = time.time()
         with _SUMMARY_DOWNLOAD_LOCK:
             for key in [k for k,v in _SUMMARY_DOWNLOAD_FILES.items() if v["expires_at"] <= now]: _SUMMARY_DOWNLOAD_FILES.pop(key, None)
-            _SUMMARY_DOWNLOAD_FILES[token] = {"expires_at":now+_SUMMARY_DOWNLOAD_TTL,
+            _SUMMARY_DOWNLOAD_FILES[token] = {"expires_at":now+_SUMMARY_DOWNLOAD_TTL, "uses":0,
                 "docx":{"filename":safe_title+".docx","mime":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","data":docx_bytes},
                 "pdf":{"filename":safe_title+".pdf","mime":"application/pdf","data":pdf_bytes}}
-        return JSONResponse({"status":"ok","title":title,"download":{"docx":f"/api/summary/download/{token}/docx","pdf":f"/api/summary/download/{token}/pdf"},"usage":_summary_usage_snapshot(user_id)})
+        return JSONResponse({"status":"ok","title":title,"download":{
+            "docx":{"url":f"/api/summary/download/{token}/docx","filename":safe_title+".docx"},
+            "pdf":{"url":f"/api/summary/download/{token}/pdf","filename":safe_title+".pdf"}
+        },"usage":_summary_usage_snapshot(user_id)})
     except HTTPException:
         _refund_summary_quota(user_id, period_key); raise
     except Exception as exc:
