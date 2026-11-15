@@ -13448,7 +13448,6 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             <select id="summary-purpose-select" class="input-title"><option value="notebook" data-lang="summary_purpose_notebook">Daftarga ko‘chirib yozish uchun</option><option value="digital" data-lang="summary_purpose_digital">Word/PDF shaklida foydalanish uchun</option></select>
             <button type="button" class="submit-btn" id="summary-generate-btn" onclick="generateSummary()" data-lang="summary_generate_btn">📚 Konspekt yaratish</button>
             <div id="summary-status" class="slides-credit-error" hidden></div>
-            <div id="summary-downloads" class="slides-file-picker" hidden><a id="summary-download-docx" class="support-contact-btn" href="#" download>⬇️ Word (.docx)</a><a id="summary-download-pdf" class="support-contact-btn" href="#" download>⬇️ PDF</a></div>
         </div>
     </div>
 
@@ -14636,26 +14635,98 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 if (generateButton) generateButton.disabled = !data.allowed;
             } catch (error) { console.warn('Konspekt limiti yuklanmadi:', error); }
         }
+        let summaryGeneratedFiles = null;
+
+        function showSummaryResult(files, title) {
+            summaryGeneratedFiles = files || null;
+            const overlay = document.getElementById('summary-result-overlay');
+            const titleNode = document.getElementById('summary-result-title');
+            const subtitleNode = document.getElementById('summary-result-subtitle');
+            if (titleNode) titleNode.textContent = title || 'Quiz AI';
+            const copy = {
+                uz: 'Konspektingiz tayyor! Kerakli formatni tanlab yuklab oling.',
+                ru: 'Ваш конспект готов! Выберите формат для скачивания.',
+                en: 'Your notes are ready! Choose a format to download.'
+            };
+            const labels = {
+                uz: {docx:'Word (.DOCX) yuklab olish', pdf:'PDF yuklab olish'},
+                ru: {docx:'Скачать Word (.DOCX)', pdf:'Скачать PDF'},
+                en: {docx:'Download Word (.DOCX)', pdf:'Download PDF'}
+            };
+            if (subtitleNode) subtitleNode.textContent = copy[currentLang] || copy.uz;
+            const currentLabels = labels[currentLang] || labels.uz;
+            document.querySelectorAll('[data-summary-result-label]').forEach(node => {
+                const format = node.getAttribute('data-summary-result-label');
+                if (currentLabels[format]) node.textContent = currentLabels[format];
+            });
+            if (overlay) { overlay.classList.add('active'); overlay.setAttribute('aria-hidden', 'false'); }
+        }
+
+        function closeSummaryResult() {
+            const overlay = document.getElementById('summary-result-overlay');
+            if (overlay) { overlay.classList.remove('active'); overlay.setAttribute('aria-hidden', 'true'); }
+            summaryGeneratedFiles = null;
+        }
+
+        function downloadSummaryFile(format) {
+            const item = summaryGeneratedFiles && summaryGeneratedFiles[format];
+            if (!item || !item.url) {
+                showAppAlert('⚠️', currentLang === 'ru' ? 'Ссылка на файл недоступна. Создайте конспект ещё раз.' : currentLang === 'en' ? 'The file link is unavailable. Please generate the notes again.' : 'Fayl havolasi topilmadi. Konspektni qayta yarating.');
+                return;
+            }
+            const fileName = item.filename || (format === 'pdf' ? 'Quiz_AI_Summary.pdf' : 'Quiz_AI_Summary.docx');
+            const downloadUrl = new URL(item.url, BASE_URL).href;
+            try {
+                if (tg && typeof tg.downloadFile === 'function') {
+                    tg.downloadFile({url: downloadUrl, file_name: fileName}, function(result) {
+                        if (result && result.status === 'cancelled') return;
+                    });
+                    return;
+                }
+                const anchor = document.createElement('a');
+                anchor.href = downloadUrl;
+                anchor.download = fileName;
+                anchor.rel = 'noopener';
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+            } catch (error) {
+                console.warn('Konspekt faylini yuklab olishda xato:', error);
+                showAppAlert('⚠️', currentLang === 'ru' ? 'Не удалось загрузить файл. Попробуйте ещё раз.' : currentLang === 'en' ? 'Could not download the file. Please try again.' : 'Konspekt faylini yuklab bo‘lmadi. Qayta urinib ko‘ring.');
+            }
+        }
+
         async function generateSummary() {
             const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
             const topic = document.getElementById('summary-topic-input')?.value.trim() || '';
             const file = document.getElementById('summary-source-file')?.files?.[0];
             const status = document.getElementById('summary-status');
             const button = document.getElementById('summary-generate-btn');
-            const downloads = document.getElementById('summary-downloads');
             if (!topic && !file) { status.hidden=false; status.textContent=langPack[currentLang].summary_need_source; return; }
             if (!tgUser || !tgUser.id) { status.hidden=false; status.textContent=langPack[currentLang].summary_error; return; }
             const form = new FormData(); form.append('user_id',tgUser.id); form.append('topic',topic);
             form.append('style',document.getElementById('summary-style-select').value); form.append('purpose',document.getElementById('summary-purpose-select').value);
             if (file) form.append('file',file);
-            button.disabled=true; button.textContent=langPack[currentLang].summary_generating; status.hidden=false; status.textContent=langPack[currentLang].summary_generating; downloads.hidden=true;
+            button.disabled=true;
+            status.hidden=true;
+            closeSummaryResult();
+            setAIGenerationLock(true, 'summary');
             try {
-                const response=await fetch(`${BASE_URL}/api/summary/generate`,{method:'POST',body:form}); const data=await response.json();
-                if (!response.ok || data.status!=='ok') { if(response.status===402) throw new Error(langPack[currentLang].summary_limit_error); throw new Error(data.detail||langPack[currentLang].summary_error); }
-                document.getElementById('summary-download-docx').href=data.download.docx; document.getElementById('summary-download-pdf').href=data.download.pdf;
-                downloads.hidden=false; status.textContent=langPack[currentLang].summary_success; await loadSummaryUsage();
-            } catch(error) { status.textContent=error.message||langPack[currentLang].summary_error; }
-            finally { button.disabled=false; button.textContent=langPack[currentLang].summary_generate_btn; }
+                const response = await fetch(`${BASE_URL}/api/summary/generate`, {method:'POST', body:form});
+                const data = await response.json();
+                if (!response.ok || data.status !== 'ok') {
+                    if (response.status === 402) throw new Error(langPack[currentLang].summary_limit_error);
+                    throw new Error(data.detail || langPack[currentLang].summary_error);
+                }
+                showSummaryResult(data.download, data.title);
+                await loadSummaryUsage();
+            } catch (error) {
+                status.hidden = false;
+                status.textContent = error.message || langPack[currentLang].summary_error;
+            } finally {
+                setAIGenerationLock(false, 'summary');
+                button.disabled = false;
+            }
         }
 
         let slidesCreditsPerSlide = 1;
@@ -15123,8 +15194,13 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 ru: {title:'Презентация готовится...', subtitle:'Анализируем тему и формируем слайды.', note:'Презентации готовятся, пожалуйста, подождите. До завершения создания управление приложением временно заблокировано.'},
                 en: {title:'Preparing your presentation...', subtitle:'Your topic is being analyzed and slides are being created.', note:'Your presentations are being prepared. Please wait. App controls are temporarily locked until the presentation is ready.'}
             };
-            if (mode === 'slides') {
-                const copy = slideText[currentLang] || slideText.uz;
+            const summaryText = {
+                uz: {title:'Konspekt tayyorlanmoqda...', subtitle:'Mavzu tahlil qilinmoqda va konspekt tayyorlanmoqda.', note:'Konspektingiz tayyorlanayapti, iltimos biroz kuting. Tayyor bo‘lgunicha ilova boshqaruvi vaqtincha bloklangan.'},
+                ru: {title:'Конспект готовится...', subtitle:'Анализируем тему и создаём конспект.', note:'Ваш конспект готовится, пожалуйста, подождите. Управление приложением временно заблокировано.'},
+                en: {title:'Preparing your notes...', subtitle:'Your topic is being analyzed and your notes are being created.', note:'Your notes are being prepared. Please wait. App controls are temporarily locked.'}
+            };
+            if (mode === 'slides' || mode === 'summary') {
+                const copy = (mode === 'summary' ? summaryText : slideText)[currentLang] || (mode === 'summary' ? summaryText : slideText).uz;
                 if (title) title.innerText = copy.title;
                 if (subtitle) subtitle.innerText = copy.subtitle;
                 if (note) note.innerText = copy.note;
@@ -15137,6 +15213,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             overlay.setAttribute('aria-hidden', aiGenerationLocked ? 'false' : 'true');
             document.body.classList.toggle('ai-generation-active', aiGenerationLocked);
             document.body.classList.toggle('slides-generation-active', aiGenerationLocked && mode === 'slides');
+            document.body.classList.toggle('summary-generation-active', aiGenerationLocked && mode === 'summary');
         }
 
         async function startGeneration() {
@@ -16559,6 +16636,17 @@ window.onload = function() {
 
 
 
+    <div id="summary-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="slides-result-card glass-panel">
+            <div class="slides-result-icon">🎉</div>
+            <h2 id="summary-result-title">Quiz AI</h2>
+            <p id="summary-result-subtitle">Konspektingiz tayyor! Kerakli formatni tanlab yuklab oling.</p>
+            <button type="button" class="slides-download-btn slides-download-pptx" onclick="downloadSummaryFile('docx')"><span>📝</span><span data-summary-result-label="docx">Word (.DOCX) yuklab olish</span></button>
+            <button type="button" class="slides-download-btn slides-download-pdf" onclick="downloadSummaryFile('pdf')"><span>📕</span><span data-summary-result-label="pdf">PDF yuklab olish</span></button>
+            <button type="button" class="slides-result-close" onclick="closeSummaryResult()">✕</button>
+        </div>
+    </div>
+
     <div id="slides-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
         <div class="slides-result-card glass-panel">
             <div class="slides-result-icon">🎉</div>
@@ -16572,9 +16660,9 @@ window.onload = function() {
 
 
 <style id="quiz-ai-slides-loader-download">
-body.slides-generation-active #ai-generation-overlay{background:rgba(3,12,22,.91)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
-body.slides-generation-active #ai-generation-overlay .ai-generation-card{animation:aiGenerationCardIn .16s ease-out;box-shadow:0 12px 34px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.14)}
-body.slides-generation-active #ai-generation-overlay .ai-loader-orbit{animation:ai-loader-breathe 2.2s ease-in-out infinite}
+body.slides-generation-active #ai-generation-overlay,body.summary-generation-active #ai-generation-overlay{background:rgba(3,12,22,.91)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.slides-generation-active #ai-generation-overlay .ai-generation-card,body.summary-generation-active #ai-generation-overlay .ai-generation-card{animation:aiGenerationCardIn .16s ease-out;box-shadow:0 12px 34px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.14)}
+body.slides-generation-active #ai-generation-overlay .ai-loader-orbit,body.summary-generation-active #ai-generation-overlay .ai-loader-orbit{animation:ai-loader-breathe 2.2s ease-in-out infinite}
 .slides-result-overlay{position:fixed;inset:0;z-index:18100;display:none;align-items:center;justify-content:center;padding:22px;box-sizing:border-box;background:rgba(3,10,18,.82)}
 .slides-result-overlay.active{display:flex}
 .slides-result-card{width:min(390px,100%);padding:24px 20px 20px;text-align:center;position:relative;background:linear-gradient(145deg,rgba(19,48,62,.98),rgba(7,18,29,.99));border:1px solid rgba(115,210,230,.34);border-radius:20px;box-shadow:0 18px 48px rgba(0,0,0,.48)}
