@@ -8,6 +8,7 @@ or add_qr_to_pptx() without duplicating QR logic.
 import io
 import logging
 import os
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -174,7 +175,7 @@ def add_qr_to_pptx(presentation, feature="SLIDES"):
 
 
 def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
-    """Overlay the QR on the final PDF page while preserving existing pages/content."""
+    """Overlay QR on the final content page; summary branding pages are omitted."""
     config = get_branding_config(feature)
     png = _make_qr_png(config)
     if not png:
@@ -189,14 +190,32 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     if not reader.pages:
         return pdf_bytes
 
-    page = reader.pages[-1]
+    is_summary = str(feature).strip().upper() == "SUMMARY"
+
+    # Konspekt PDF'ida oxiriga qo'shilgan faqat "Quiz AI" yozuvi/QR turgan
+    # brending sahifalarini chiqarib tashlaymiz va QR'ni oxirgi mazmunli
+    # sahifaning pastki chap tomoniga joylaymiz.
+    target_index = len(reader.pages) - 1
+    if is_summary:
+        while target_index > 0:
+            page_text = (reader.pages[target_index].extract_text() or "")
+            # "Quiz AI" sarlavhasi va caption'i bir yoki bir necha marta
+            # uchrasa ham ularni chiqarib, sahifada haqiqiy matn qolganini tekshiramiz.
+            without_brand = re.sub(r"quiz\s*ai", "", page_text, flags=re.IGNORECASE)
+            normalized = re.sub(r"[^a-z0-9]+", "", without_brand.lower())
+            # Faqat brending yozuvi bo'lgan yoki mutlaqo bo'sh sahifa.
+            if normalized == "":
+                target_index -= 1
+                continue
+            break
+
+    page = reader.pages[target_index]
     box = page.mediabox
     page_width = float(box.width)
     page_height = float(box.height)
     size = float(config["size"])
-    is_summary = str(feature).strip().upper() == "SUMMARY"
-    # Konspekt uchun QR doim oxirgi mazmunli sahifaning pastki chapida turadi.
-    # Boshqa hujjat turlarining Railway joylashuv sozlamalari o'zgarmaydi.
+
+    # PDF Konspekt QR'i doim pastki chapda; Word funksiyasiga tegilmaydi.
     position = "bottom_left" if is_summary else config["position"]
     x, y = _position_xy(position, page_width, page_height, size)
     overlay_buffer = io.BytesIO()
@@ -204,8 +223,14 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     layer.saveState()
     layer.setFillColorRGB(1, 1, 1)
     caption_enabled = bool(config["caption"]) and not is_summary
-    layer.roundRect(x - 4, y - 4, size + 8, size + (22 if caption_enabled else 8), 4, fill=1, stroke=0)
-    layer.drawImage(ImageReader(io.BytesIO(png)), x, y, width=size, height=size, preserveAspectRatio=True, mask="auto")
+    layer.roundRect(
+        x - 4, y - 4, size + 8,
+        size + (22 if caption_enabled else 8), 4, fill=1, stroke=0
+    )
+    layer.drawImage(
+        ImageReader(io.BytesIO(png)), x, y,
+        width=size, height=size, preserveAspectRatio=True, mask="auto"
+    )
     if caption_enabled:
         layer.setFillColorRGB(0.12, 0.28, 0.40)
         layer.setFont("Helvetica-Bold", 8)
@@ -217,7 +242,9 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     page.merge_page(overlay_page)
 
     writer = PdfWriter()
-    for item in reader.pages:
+    for index, item in enumerate(reader.pages):
+        if is_summary and index > target_index:
+            continue
         writer.add_page(item)
     output = io.BytesIO()
     writer.write(output)
