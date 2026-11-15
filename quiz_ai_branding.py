@@ -194,14 +194,19 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     page_width = float(box.width)
     page_height = float(box.height)
     size = float(config["size"])
-    x, y = _position_xy(config["position"], page_width, page_height, size)
+    is_summary = str(feature).strip().upper() == "SUMMARY"
+    # Konspekt uchun QR doim oxirgi mazmunli sahifaning pastki chapida turadi.
+    # Boshqa hujjat turlarining Railway joylashuv sozlamalari o'zgarmaydi.
+    position = "bottom_left" if is_summary else config["position"]
+    x, y = _position_xy(position, page_width, page_height, size)
     overlay_buffer = io.BytesIO()
     layer = canvas.Canvas(overlay_buffer, pagesize=(page_width, page_height))
     layer.saveState()
     layer.setFillColorRGB(1, 1, 1)
-    layer.roundRect(x - 4, y - 4, size + 8, size + 22, 4, fill=1, stroke=0)
+    caption_enabled = bool(config["caption"]) and not is_summary
+    layer.roundRect(x - 4, y - 4, size + 8, size + (22 if caption_enabled else 8), 4, fill=1, stroke=0)
     layer.drawImage(ImageReader(io.BytesIO(png)), x, y, width=size, height=size, preserveAspectRatio=True, mask="auto")
-    if config["caption"]:
+    if caption_enabled:
         layer.setFillColorRGB(0.12, 0.28, 0.40)
         layer.setFont("Helvetica-Bold", 8)
         layer.drawCentredString(x + size / 2, y - 13, config["caption"])
@@ -233,9 +238,15 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches, Pt, RGBColor
 
+    is_summary = str(feature).strip().upper() == "SUMMARY"
     position = config["position"]
     alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if position in ("top_left", "bottom_left"):
+    if is_summary:
+        # Konspekt QR kodi yangi sahifa ochmasdan, oxirgi matndan keyin chapda turadi.
+        # Sarlavha va alohida "Quiz AI" yozuvi qo'shilmaydi.
+        alignment = WD_ALIGN_PARAGRAPH.LEFT
+        page_break = False
+    elif position in ("top_left", "bottom_left"):
         alignment = WD_ALIGN_PARAGRAPH.LEFT
     elif position in ("top_right", "bottom_right"):
         alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -252,7 +263,8 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
     paragraph.alignment = alignment if not page_break else WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.add_run()
     run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
-    if config["caption"]:
+    # Konspektda faqat QR tasviri qoladi; boshqa hujjatlarning caption'i saqlanadi.
+    if config["caption"] and not is_summary:
         caption = document.add_paragraph()
         caption.alignment = alignment
         text_run = caption.add_run(config["caption"])
