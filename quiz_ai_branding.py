@@ -219,8 +219,12 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     return output.getvalue()
 
 
-def add_qr_to_docx(document, feature="TEACHER"):
-    """Append a centered/positioned QR block to a generated Word document."""
+def add_qr_to_docx(document, feature="TEACHER", page_break=False):
+    """Append a centered/positioned QR block to a generated Word document.
+
+    page_break=True places the QR branding on a dedicated final page. Existing
+    callers retain their previous behavior because the default is False.
+    """
     config = get_branding_config(feature)
     png = _make_qr_png(config)
     if not png:
@@ -236,8 +240,16 @@ def add_qr_to_docx(document, feature="TEACHER"):
     elif position in ("top_right", "bottom_right"):
         alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
+    if page_break:
+        document.add_page_break()
+        heading = document.add_paragraph()
+        heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        heading_run = heading.add_run("Quiz AI")
+        heading_run.bold = True
+        heading_run.font.size = Pt(18)
+        heading_run.font.color.rgb = RGBColor(35, 80, 110)
     paragraph = document.add_paragraph()
-    paragraph.alignment = alignment
+    paragraph.alignment = alignment if not page_break else WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.add_run()
     run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
     if config["caption"]:
