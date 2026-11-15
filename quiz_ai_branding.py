@@ -220,31 +220,122 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
 
 
 def add_qr_to_docx(document, feature="TEACHER"):
-    """Append a centered/positioned QR block to a generated Word document."""
+    """Anchor the QR to the bottom of the final page without changing table flow."""
     config = get_branding_config(feature)
     png = _make_qr_png(config)
     if not png:
         return False
 
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Inches, Pt
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from PIL import Image, ImageDraw, ImageFont
+    import copy
 
+    # Word uchun QR va yozuvni bitta rasmga birlashtiramiz.
+    # Bu matn/jadval oqimiga alohida caption paragrafini qo'shmaydi.
+    qr_image = Image.open(io.BytesIO(png)).convert("RGB")
+    if config["caption"]:
+        caption_height = max(24, qr_image.width // 5)
+        branded = Image.new(
+            "RGB", (qr_image.width, qr_image.height + caption_height), "white"
+        )
+        branded.paste(qr_image, (0, 0))
+        draw = ImageDraw.Draw(branded)
+        try:
+            font = ImageFont.truetype("arial.ttf", max(10, qr_image.width // 12))
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+        bbox = draw.textbbox((0, 0), config["caption"], font=font)
+        text_width = bbox[2] - bbox[0]
+        text_x = max(0, (branded.width - text_width) // 2)
+        text_y = qr_image.height + max(2, (caption_height - (bbox[3] - bbox[1])) // 2)
+        draw.text((text_x, text_y), config["caption"], fill=(35, 80, 110), font=font)
+    else:
+        branded = qr_image
+
+    # Rasmni hujjat oxiridagi paragrafga bog'laymiz, lekin koordinatasini
+    # sahifaga nisbatan belgilaymiz: jadval qisqa bo'lsa ham QR pastda turadi.
+    section = document.sections[-1]
     position = config["position"]
-    alignment = WD_ALIGN_PARAGRAPH.CENTER
+    width_emu = Inches(config["size"] / 72.0)
+    aspect = branded.height / branded.width
+    height_emu = int(width_emu * aspect)
+    page_w = int(section.page_width)
+    page_h = int(section.page_height)
+    left_margin = int(section.left_margin)
+    right_margin = int(section.right_margin)
+    top_margin = int(section.top_margin)
+    bottom_margin = int(section.bottom_margin)
+
     if position in ("top_left", "bottom_left"):
-        alignment = WD_ALIGN_PARAGRAPH.LEFT
-    elif position in ("top_right", "bottom_right"):
-        alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        x = left_margin
+    elif position in ("top_right", "bottom_right", "document_end"):
+        x = page_w - right_margin - width_emu
+    else:
+        x = (page_w - width_emu) // 2
+
+    if position in ("top_left", "top_right"):
+        y = top_margin
+    elif position == "center":
+        y = (page_h - height_emu) // 2
+    else:
+        y = page_h - bottom_margin - height_emu
 
     paragraph = document.add_paragraph()
-    paragraph.alignment = alignment
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.line_spacing = Pt(1)
     run = paragraph.add_run()
-    run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
-    if config["caption"]:
-        caption = document.add_paragraph()
-        caption.alignment = alignment
-        text_run = caption.add_run(config["caption"])
-        text_run.bold = True
-        text_run.font.size = Pt(8)
-        text_run.font.color.rgb = RGBColor(35, 80, 110)
+    branded_buffer = io.BytesIO()
+    branded.save(branded_buffer, format="PNG")
+    branded_buffer.seek(0)
+    inline = run.add_picture(branded_buffer, width=width_emu)._inline
+
+    # python-docx inline rasm elementini Word 2016 qo'llaydigan
+    # sahifaga nisbatan joylashtirilgan wp:anchor elementiga aylantiramiz.
+    anchor = OxmlElement("wp:anchor")
+    for key, value in {
+        "distT": "0", "distB": "0", "distL": "0", "distR": "0",
+        "simplePos": "0", "relativeHeight": "251658240",
+        "behindDoc": "0", "locked": "0", "layoutInCell": "1",
+        "allowOverlap": "1",
+    }.items():
+        anchor.set(key, value)
+
+    simple_pos = OxmlElement("wp:simplePos")
+    simple_pos.set("x", "0")
+    simple_pos.set("y", "0")
+    anchor.append(simple_pos)
+
+    pos_h = OxmlElement("wp:positionH")
+    pos_h.set("relativeFrom", "page")
+    pos_h_offset = OxmlElement("wp:posOffset")
+    pos_h_offset.text = str(x)
+    pos_h.append(pos_h_offset)
+    anchor.append(pos_h)
+
+    pos_v = OxmlElement("wp:positionV")
+    pos_v.set("relativeFrom", "page")
+    pos_v_offset = OxmlElement("wp:posOffset")
+    pos_v_offset.text = str(y)
+    pos_v.append(pos_v_offset)
+    anchor.append(pos_v)
+
+    for tag in ("wp:extent", "wp:effectExtent"):
+        child = inline.find(qn(tag))
+        if child is not None:
+            anchor.append(copy.deepcopy(child))
+        elif tag == "wp:effectExtent":
+            effect = OxmlElement("wp:effectExtent")
+            for edge in ("l", "t", "r", "b"):
+                effect.set(edge, "0")
+            anchor.append(effect)
+
+    anchor.append(OxmlElement("wp:wrapNone"))
+    for tag in ("wp:docPr", "wp:cNvGraphicFramePr", "a:graphic"):
+        child = inline.find(qn(tag))
+        if child is not None:
+            anchor.append(copy.deepcopy(child))
+    inline.getparent().replace(inline, anchor)
     return True
