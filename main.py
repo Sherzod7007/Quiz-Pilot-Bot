@@ -422,6 +422,30 @@ logging.info("Taqdimot tarif kreditlari Railway'dan yuklandi | kunlik=%s | hafta
              SLIDE_TARIFF_CREDITS["daily"], SLIDE_TARIFF_CREDITS["weekly"],
              SLIDE_TARIFF_CREDITS["monthly"], SLIDE_TARIFF_CREDITS["teachers"])
 
+# Konspekt limitlari: tarif muddati davomida umumiy son; 0 = o'chirilgan, -1 = cheksiz.
+def _env_summary_limit(name, default=0):
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+        return value if value >= -1 else default
+    except (TypeError, ValueError, AttributeError):
+        logging.warning("Konspekt limiti noto'g'ri; standart qiymat ishlatiladi | o'zgaruvchi=%s", name)
+        return default
+
+SUMMARY_ENABLED = os.getenv("SUMMARY_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+SUMMARY_FREE_LIMIT = _env_summary_limit("SUMMARY_FREE_LIMIT", 0)
+SUMMARY_TARIFF_LIMITS = {
+    "daily": _env_summary_limit("SUMMARY_DAILY_LIMIT", 0),
+    "weekly": _env_summary_limit("SUMMARY_WEEKLY_LIMIT", 0),
+    "monthly": _env_summary_limit("SUMMARY_MONTHLY_LIMIT", 0),
+    "teachers": _env_summary_limit("SUMMARY_TEACHER_LIMIT", 0),
+}
+SUMMARY_MAX_FILE_MB = max(1, min(30, _env_positive_int("SUMMARY_MAX_FILE_MB", 10)))
+SUMMARY_MAX_SOURCE_CHARS = max(1000, min(200000, _env_positive_int("SUMMARY_MAX_SOURCE_CHARS", 80000)))
+SUMMARY_MAX_TOPIC_CHARS = max(20, min(5000, _env_positive_int("SUMMARY_MAX_TOPIC_CHARS", 1500)))
+logging.info("Konspekt limitlari Railway'dan yuklandi | free=%s | daily=%s | weekly=%s | monthly=%s | teachers=%s",
+             SUMMARY_FREE_LIMIT, SUMMARY_TARIFF_LIMITS["daily"], SUMMARY_TARIFF_LIMITS["weekly"],
+             SUMMARY_TARIFF_LIMITS["monthly"], SUMMARY_TARIFF_LIMITS["teachers"])
+
 # Bepul limitlar: musbat son = limit, -1 = cheksiz. 0 va boshqa manfiy qiymatlar yaroqsiz.
 def _env_free_limit(name, default=3):
     raw = os.getenv(name, str(default))
@@ -504,7 +528,7 @@ MESSAGES = {
             "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
             "🔊 Ovoz va vibratsiya sozlamalari.\n"
             "🌍 O'zbek, Русский va English tillari.\n"
-            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}.\n"
+            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}, Konspekt — {summary_limit}.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -554,7 +578,7 @@ MESSAGES = {
             "📊 Удобный просмотр и анализ результатов.\n"
             "🔊 Настройки звука и вибрации.\n"
             "🌍 Узбекский, русский и английский языки.\n"
-            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}.\n"
+            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}, конспекты — {summary_limit}.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
@@ -603,7 +627,7 @@ MESSAGES = {
             "📊 Easy results viewing and analysis.\n"
             "🔊 Sound and vibration settings.\n"
             "🌍 Uzbek, Russian and English languages.\n"
-            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}.\n"
+            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}, notes — {summary_limit}.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -702,6 +726,12 @@ def init_db():
         last_free_reset_notice_cycle INTEGER DEFAULT 0,
         paid_limit_notice_until INTEGER DEFAULT 0,
         premium_source TEXT DEFAULT 'paid')""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS summary_usage (
+        user_id INTEGER PRIMARY KEY,
+        period_key TEXT NOT NULL DEFAULT '',
+        used INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0)""")
 
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
@@ -1929,7 +1959,7 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang))
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang), summary_limit=format_free_limit(SUMMARY_FREE_LIMIT, user_lang))
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
@@ -3319,6 +3349,7 @@ def get_tariff_config():
                 "duration_unit": item["duration_unit"],
                 "names": item["names"],
                 "slide_credits": SLIDE_TARIFF_CREDITS.get(key, 0),
+                "summary_limit": SUMMARY_TARIFF_LIMITS.get(key, 0),
             }
             for key, item in TARIFFS.items()
         },
@@ -3327,11 +3358,13 @@ def get_tariff_config():
             "quiz": None if FREE_QUIZ_LIMIT == -1 else FREE_QUIZ_LIMIT,
             "public": None if FREE_PUBLIC_LIMIT == -1 else FREE_PUBLIC_LIMIT,
             "flashcard": None if FREE_FLASHCARD_LIMIT == -1 else FREE_FLASHCARD_LIMIT,
+            "summary": None if SUMMARY_FREE_LIMIT == -1 else SUMMARY_FREE_LIMIT,
         },
         "free_limits_display": {
             "quiz": {lang: format_free_limit(FREE_QUIZ_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "public": {lang: format_free_limit(FREE_PUBLIC_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "flashcard": {lang: format_free_limit(FREE_FLASHCARD_LIMIT, lang) for lang in ("uz", "ru", "en")},
+            "summary": {lang: format_free_limit(SUMMARY_FREE_LIMIT, lang) for lang in ("uz", "ru", "en")},
         },
     }
 
@@ -4366,6 +4399,246 @@ def _build_slide_pdf(deck, theme="modern"):
     pdf.save()
     # QR faqat oxirgi sahifaga qo'shiladi; asl slayd sahifalari saqlanadi.
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="SLIDES")
+
+
+# --- AI KONSPEKT YARATISH: mustaqil tarif limiti, kredit ishlatilmaydi ---
+_SUMMARY_DOWNLOAD_FILES = {}
+_SUMMARY_DOWNLOAD_LOCK = threading.Lock()
+_SUMMARY_DOWNLOAD_TTL = 30 * 60
+
+
+def _summary_user_quota(user_id):
+    """Faol tarif yoki 30 kunlik bepul davr uchun konspekt limitini aniqlaydi."""
+    add_user_to_db(int(user_id))
+    conn = _connect_db()
+    try:
+        row = conn.execute("SELECT created_at,status,plan_key,premium_until FROM users WHERE user_id=?", (int(user_id),)).fetchone()
+        if not row:
+            return {"period_key": "free:0", "limit": SUMMARY_FREE_LIMIT, "plan": "free"}
+        created_at, status, plan_key, premium_until = row
+        now = int(time.time())
+        if is_active_paid_status(status or "", premium_until or 0):
+            key = get_plan_key(status or "", plan_key or "")
+            period_key = f"paid:{key}:{int(premium_until or 0)}"
+            return {"period_key": period_key, "limit": SUMMARY_TARIFF_LIMITS.get(key, 0), "plan": key or "paid"}
+        cycle_start = int(created_at or now)
+        if now - cycle_start >= 30 * 86400:
+            cycle_start = now
+            conn.execute("UPDATE users SET created_at=? WHERE user_id=? AND (premium_until IS NULL OR premium_until<?)", (cycle_start, int(user_id), now))
+            conn.commit()
+        return {"period_key": f"free:{cycle_start}", "limit": SUMMARY_FREE_LIMIT, "plan": "free"}
+    finally:
+        conn.close()
+
+
+def _summary_usage_snapshot(user_id):
+    quota = _summary_user_quota(user_id)
+    conn = _connect_db()
+    try:
+        row = conn.execute("SELECT period_key,used FROM summary_usage WHERE user_id=?", (int(user_id),)).fetchone()
+        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
+        limit = int(quota["limit"])
+        unlimited = limit == -1
+        remaining = None if unlimited else max(0, limit - used)
+        return {"status": "ok", "enabled": SUMMARY_ENABLED, "plan": quota["plan"], "used": used,
+                "limit": None if unlimited else limit, "remaining": remaining, "unlimited": unlimited,
+                "allowed": SUMMARY_ENABLED and (unlimited or used < limit)}
+    finally:
+        conn.close()
+
+
+def _reserve_summary_quota(user_id, reference):
+    """Atomik limit band qilish; muvaffaqiyatsiz AI so'rovida qaytariladi."""
+    quota = _summary_user_quota(user_id)
+    limit = int(quota["limit"])
+    if not SUMMARY_ENABLED:
+        return False, "disabled"
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT period_key,used FROM summary_usage WHERE user_id=?", (int(user_id),)).fetchone()
+        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
+        if limit != -1 and used >= limit:
+            conn.rollback()
+            return False, "limit"
+        conn.execute("INSERT INTO summary_usage(user_id,period_key,used,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET period_key=excluded.period_key,used=excluded.used,updated_at=excluded.updated_at",
+                     (int(user_id), quota["period_key"], used + 1, int(time.time())))
+        conn.commit()
+        return True, quota["period_key"]
+    except Exception:
+        conn.rollback()
+        logging.exception("Konspekt limitini band qilishda xato | user_id=%s", user_id)
+        return False, "database"
+    finally:
+        conn.close()
+
+
+def _refund_summary_quota(user_id, period_key):
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE summary_usage SET used=MAX(0,used-1),updated_at=? WHERE user_id=? AND period_key=?",
+                     (int(time.time()), int(user_id), str(period_key)))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("Konspekt limitini qaytarishda xato | user_id=%s", user_id)
+    finally:
+        conn.close()
+
+
+def _build_summary_docx(title, content):
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = docx.shared.Cm(2.0)
+    section.bottom_margin = docx.shared.Cm(2.0)
+    heading = document.add_heading(title[:180], 0)
+    heading.alignment = 1
+    document.add_paragraph("Quiz AI yordamida tayyorlangan o‘quv konspekti", style="Subtitle")
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("### "):
+            document.add_heading(line[4:], level=2)
+        elif line.startswith("## "):
+            document.add_heading(line[3:], level=1)
+        elif line.startswith("# "):
+            document.add_heading(line[2:], level=1)
+        elif re.match(r"^[-*•]\s+", line):
+            document.add_paragraph(re.sub(r"^[-*•]\s+", "", line), style="List Bullet")
+        elif re.match(r"^\d+[.)]\s+", line):
+            document.add_paragraph(re.sub(r"^\d+[.)]\s+", "", line), style="List Number")
+        else:
+            document.add_paragraph(line)
+    quiz_ai_branding.add_qr_to_docx(document, feature="SUMMARY", page_break=True)
+    output = BytesIO(); document.save(output); return output.getvalue()
+
+
+def _build_summary_pdf(title, content):
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, ListFlowable, ListItem
+    from reportlab.lib.units import cm
+    from xml.sax.saxutils import escape
+    output = BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=1.8*cm, bottomMargin=1.8*cm)
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="SummaryTitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, leading=23, spaceAfter=14))
+    styles.add(ParagraphStyle(name="SummaryH1", parent=styles["Heading1"], fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
+    styles.add(ParagraphStyle(name="SummaryH2", parent=styles["Heading2"], fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
+    story = [Paragraph(escape(title[:180]), styles["SummaryTitle"]), Paragraph("Quiz AI yordamida tayyorlangan o‘quv konspekti", styles["Italic"]), Spacer(1, 12)]
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line: continue
+        if line.startswith("### "):
+            story.append(Paragraph(escape(line[4:]), styles["SummaryH2"]))
+        elif line.startswith("## ") or line.startswith("# "):
+            story.append(Paragraph(escape(line.lstrip('#').strip()), styles["SummaryH1"]))
+        elif re.match(r"^[-*•]\s+", line):
+            story.append(Paragraph("• " + escape(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
+        elif re.match(r"^\d+[.)]\s+", line):
+            story.append(Paragraph(escape(line), styles["BodyText"]))
+        else:
+            story.append(Paragraph(escape(line), styles["BodyText"]))
+        story.append(Spacer(1, 5))
+    story.append(PageBreak())
+    story.append(Paragraph("Quiz AI", styles["SummaryTitle"]))
+    doc.build(story)
+    return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="SUMMARY")
+
+
+@app.get("/api/summary/usage")
+def api_summary_usage(request: Request, user_id: int):
+    if getattr(request.state, "telegram_user_id", None) != int(user_id):
+        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
+    if user_id <= 0: raise HTTPException(status_code=400, detail="Noto'g'ri foydalanuvchi ID")
+    return _summary_usage_snapshot(user_id)
+
+
+@app.get("/api/summary/config")
+def api_summary_config():
+    return {"status": "ok", "enabled": SUMMARY_ENABLED, "free_limit": SUMMARY_FREE_LIMIT,
+            "tariff_limits": SUMMARY_TARIFF_LIMITS}
+
+
+@app.get("/api/summary/download/{token}/{file_format}")
+def api_download_summary_file(token: str, file_format: str):
+    if file_format not in ("docx", "pdf"): raise HTTPException(status_code=404, detail="Fayl topilmadi")
+    now = time.time()
+    with _SUMMARY_DOWNLOAD_LOCK:
+        for key in [k for k,v in _SUMMARY_DOWNLOAD_FILES.items() if v["expires_at"] <= now]: _SUMMARY_DOWNLOAD_FILES.pop(key, None)
+        item = _SUMMARY_DOWNLOAD_FILES.get(token, {}).get(file_format)
+    if not item: raise HTTPException(status_code=404, detail="Fayl muddati tugagan yoki topilmadi")
+    return Response(content=item["data"], media_type=item["mime"], headers={"Content-Disposition": f'attachment; filename="{item["filename"].replace(chr(34), "")}"', "Cache-Control":"no-store"})
+
+
+@app.post("/api/summary/generate")
+def api_generate_summary(request: Request, user_id: int = Form(...), topic: str = Form(""), style: str = Form("standard"), purpose: str = Form("notebook"), file: Optional[UploadFile] = File(None)):
+    if getattr(request.state, "telegram_user_id", None) != int(user_id): raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
+    if not SUMMARY_ENABLED: raise HTTPException(status_code=503, detail="Konspekt yaratish xizmati hozircha o'chirilgan")
+    if not GOOGLE_API_KEYS: raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
+    topic = (topic or "").strip()[:SUMMARY_MAX_TOPIC_CHARS]
+    source_text = ""
+    if file is not None:
+        raw = file.file.read()
+        if len(raw) > SUMMARY_MAX_FILE_MB * 1024 * 1024: raise HTTPException(status_code=413, detail=f"Fayl hajmi {SUMMARY_MAX_FILE_MB} MB limitdan oshdi")
+        try: source_text = _extract_slide_source(raw, Path(file.filename or "").name)
+        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+        except Exception:
+            logging.exception("Konspekt manba faylini o'qishda xato")
+            raise HTTPException(status_code=400, detail="PDF/DOCX faylni o'qib bo'lmadi")
+    source_text = source_text[:SUMMARY_MAX_SOURCE_CHARS]
+    if not topic and not source_text.strip(): raise HTTPException(status_code=400, detail="Mavzu kiriting yoki PDF/DOCX fayl yuklang")
+    reserved, period_or_reason = _reserve_summary_quota(user_id, uuid.uuid4().hex)
+    if not reserved:
+        if period_or_reason == "limit": raise HTTPException(status_code=402, detail="Konspekt limiti tugagan. Tarifni faollashtiring.")
+        if period_or_reason == "disabled": raise HTTPException(status_code=503, detail="Konspekt yaratish o'chirilgan")
+        raise HTTPException(status_code=409, detail="Konspekt limitini tekshirib bo'lmadi")
+    period_key = period_or_reason
+    prompt_styles = {"standard":"O'rtacha hajmli, aniq va tartibli konspekt", "detailed":"Kengaytirilgan, batafsil konspekt; tushunchalar va misollar bilan", "exam":"Imtihonga tayyorlanish uchun muhim ta'riflar, formulalar va asosiy fikrlar"}
+    style_text = prompt_styles.get(style, prompt_styles["standard"])
+    purpose_text = "Daftarga ko'chirish qulay bo'lishi uchun ixcham sarlavha va punktlardan foydalaning." if purpose == "notebook" else "Word/PDF uchun to'liq, yaxshi tuzilgan bo'limlar va izohlar yozing."
+    prompt = ("Siz tajribali o'qituvchi va akademik konspekt tuzuvchisiz. Faqat berilgan mavzu va manbaga tayaning; manbada yo'q fakt, sana, formula yoki iqtibosni to'qimang. "
+              "O'zbekcha matn bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yozing. Markdown sarlavhalari (#, ##, ###) va punktlardan foydalaning. "
+              f"Uslub: {style_text}. {purpose_text} Yakunda qisqa xulosa va 3-5 ta o'zini tekshirish savolini qo'shing.\n"
+              f"Mavzu: {topic or 'Manba material asosida'}\nMANBA:\n{source_text}")
+    try:
+        deadline = time.monotonic() + max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
+        if not gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic())): raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        try:
+            last_error = None; summary_text = None; start = _next_generation_key_start(len(GOOGLE_API_KEYS))
+            for offset in range(len(GOOGLE_API_KEYS)):
+                if time.monotonic() >= deadline: break
+                key = GOOGLE_API_KEYS[(start+offset) % len(GOOGLE_API_KEYS)]
+                try:
+                    client = genai.Client(api_key=key, http_options=genai_types.HttpOptions(timeout=max(1000,int((deadline-time.monotonic())*1000))))
+                    response = client.models.generate_content(model=os.getenv("SUMMARY_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
+                        config=genai_types.GenerateContentConfig(temperature=0.25, max_output_tokens=max(3000,min(24000,int(os.getenv("SUMMARY_MAX_OUTPUT_TOKENS","12000"))))))
+                    summary_text = (response.text or "").strip()
+                    if not summary_text: raise RuntimeError("AI bo'sh javob qaytardi")
+                    break
+                except Exception as exc:
+                    last_error = exc; logging.warning("Konspekt Gemini urinish xatosi | kalit=%s | sabab=%s", offset+1, _safe_ai_error_text(exc))
+        finally: gemini_semaphore.release()
+        if not summary_text: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        title = topic or (Path(file.filename).stem if file and file.filename else "O'quv konspekti")
+        safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_summary"
+        docx_bytes = _build_summary_docx(title, summary_text)
+        pdf_bytes = _build_summary_pdf(title, summary_text)
+        token = secrets.token_urlsafe(32); now = time.time()
+        with _SUMMARY_DOWNLOAD_LOCK:
+            for key in [k for k,v in _SUMMARY_DOWNLOAD_FILES.items() if v["expires_at"] <= now]: _SUMMARY_DOWNLOAD_FILES.pop(key, None)
+            _SUMMARY_DOWNLOAD_FILES[token] = {"expires_at":now+_SUMMARY_DOWNLOAD_TTL,
+                "docx":{"filename":safe_title+".docx","mime":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","data":docx_bytes},
+                "pdf":{"filename":safe_title+".pdf","mime":"application/pdf","data":pdf_bytes}}
+        return JSONResponse({"status":"ok","title":title,"download":{"docx":f"/api/summary/download/{token}/docx","pdf":f"/api/summary/download/{token}/pdf"},"usage":_summary_usage_snapshot(user_id)})
+    except HTTPException:
+        _refund_summary_quota(user_id, period_key); raise
+    except Exception as exc:
+        _refund_summary_quota(user_id, period_key)
+        logging.exception("Konspekt yaratishda xato | user_id=%s | sabab=%s", user_id, _safe_ai_error_text(exc))
+        raise HTTPException(status_code=502, detail="Konspekt yaratilmadi. Limit hisobingizga qaytarildi.")
 
 
 # Slayd fayllari Telegram WebView'da barqaror yuklanishi uchun qisqa muddatli saqlanadi.
