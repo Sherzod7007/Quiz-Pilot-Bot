@@ -459,7 +459,7 @@ REFERAT_TARIFF_LIMITS = {
 REFERAT_MAX_FILE_MB = max(1, min(30, _env_positive_int("REFERAT_MAX_FILE_MB", SUMMARY_MAX_FILE_MB)))
 REFERAT_MAX_SOURCE_CHARS = max(1000, min(200000, _env_positive_int("REFERAT_MAX_SOURCE_CHARS", SUMMARY_MAX_SOURCE_CHARS)))
 REFERAT_MAX_TOPIC_CHARS = max(20, min(5000, _env_positive_int("REFERAT_MAX_TOPIC_CHARS", 1500)))
-REFERAT_MAX_OUTPUT_TOKENS = max(3000, min(30000, _env_positive_int("REFERAT_MAX_OUTPUT_TOKENS", 16000)))
+REFERAT_MAX_OUTPUT_TOKENS = max(6000, min(30000, _env_positive_int("REFERAT_MAX_OUTPUT_TOKENS", 24000)))
 logging.info("Referat limitlari Railway'dan yuklandi | enabled=%s | free=%s | daily=%s | weekly=%s | monthly=%s | teachers=%s",
              REFERAT_ENABLED, REFERAT_FREE_LIMIT, REFERAT_TARIFF_LIMITS["daily"],
              REFERAT_TARIFF_LIMITS["weekly"], REFERAT_TARIFF_LIMITS["monthly"], REFERAT_TARIFF_LIMITS["teachers"])
@@ -4757,6 +4757,46 @@ def _refund_summary_quota(user_id, period_key):
         conn.close()
 
 
+
+def _add_markdown_inline_runs(paragraph, text):
+    """Markdown inline belgilarini Word run formatiga aylantiradi."""
+    value = str(text or "")
+    pattern = re.compile(r'(\*\*.+?\*\*|__.+?__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
+    cursor = 0
+    for match in pattern.finditer(value):
+        if match.start() > cursor:
+            paragraph.add_run(value[cursor:match.start()])
+        token = match.group(0)
+        if token.startswith(("**", "__")):
+            run = paragraph.add_run(token[2:-2])
+            run.bold = True
+        elif token.startswith("`"):
+            run = paragraph.add_run(token[1:-1])
+            run.font.name = "Consolas"
+        else:
+            run = paragraph.add_run(token[1:-1])
+            run.italic = True
+        cursor = match.end()
+    if cursor < len(value):
+        paragraph.add_run(value[cursor:])
+
+
+def _markdown_inline_to_reportlab(value):
+    """Markdown inline formatini ReportLab Paragraph belgilashiga xavfsiz o'tkazadi."""
+    from xml.sax.saxutils import escape
+    escaped = escape(str(value or ""))
+    escaped = re.sub(r'`([^`]+)`', r'<font name="Courier">\1</font>', escaped)
+    escaped = re.sub(r'\*\*(.+?)\*\*|__(.+?)__',
+                     lambda m: '<b>' + (m.group(1) or m.group(2)) + '</b>', escaped)
+    escaped = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)',
+                     lambda m: '<i>' + (m.group(1) or m.group(2)) + '</i>', escaped)
+    return escaped
+
+
+def _markdown_heading_text(value):
+    return re.sub(r'^(?:\*\*|__)?(.*?)(?:\*\*|__)?$', r'\1', str(value or "")).strip()
+
+
 def _build_summary_docx(title, content):
     document = Document()
     section = document.sections[0]
@@ -4770,17 +4810,20 @@ def _build_summary_docx(title, content):
         if not line:
             continue
         if line.startswith("### "):
-            document.add_heading(line[4:], level=2)
+            document.add_heading(_markdown_heading_text(line[4:]), level=2)
         elif line.startswith("## "):
-            document.add_heading(line[3:], level=1)
+            document.add_heading(_markdown_heading_text(line[3:]), level=1)
         elif line.startswith("# "):
-            document.add_heading(line[2:], level=1)
+            document.add_heading(_markdown_heading_text(line[2:]), level=1)
         elif re.match(r"^[-*•]\s+", line):
-            document.add_paragraph(re.sub(r"^[-*•]\s+", "", line), style="List Bullet")
+            paragraph = document.add_paragraph(style="List Bullet")
+            _add_markdown_inline_runs(paragraph, re.sub(r"^[-*•]\s+", "", line))
         elif re.match(r"^\d+[.)]\s+", line):
-            document.add_paragraph(re.sub(r"^\d+[.)]\s+", "", line), style="List Number")
+            paragraph = document.add_paragraph(style="List Number")
+            _add_markdown_inline_runs(paragraph, re.sub(r"^\d+[.)]\s+", "", line))
         else:
-            document.add_paragraph(line)
+            paragraph = document.add_paragraph()
+            _add_markdown_inline_runs(paragraph, line)
     quiz_ai_branding.add_qr_to_docx(document, feature="SUMMARY", page_break=True)
     output = BytesIO(); document.save(output); return output.getvalue()
 
@@ -4800,17 +4843,16 @@ def _build_summary_pdf(title, content):
     story = [Paragraph(escape(title[:180]), styles["SummaryTitle"]), Paragraph("Quiz AI yordamida tayyorlangan o‘quv konspekti", styles["Italic"]), Spacer(1, 12)]
     for raw_line in content.splitlines():
         line = raw_line.strip()
-        if not line: continue
+        if not line:
+            continue
         if line.startswith("### "):
-            story.append(Paragraph(escape(line[4:]), styles["SummaryH2"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(line[4:]), styles["SummaryH2"]))
         elif line.startswith("## ") or line.startswith("# "):
-            story.append(Paragraph(escape(line.lstrip('#').strip()), styles["SummaryH1"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(line.lstrip("# ").strip()), styles["SummaryH1"]))
         elif re.match(r"^[-*•]\s+", line):
-            story.append(Paragraph("• " + escape(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
-        elif re.match(r"^\d+[.)]\s+", line):
-            story.append(Paragraph(escape(line), styles["BodyText"]))
+            story.append(Paragraph("• " + _markdown_inline_to_reportlab(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
         else:
-            story.append(Paragraph(escape(line), styles["BodyText"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(line), styles["BodyText"]))
         story.append(Spacer(1, 5))
     story.append(PageBreak())
     story.append(Paragraph("Quiz AI", styles["SummaryTitle"]))
@@ -4866,13 +4908,28 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
         if period_or_reason == "disabled": raise HTTPException(status_code=503, detail="Konspekt yaratish o'chirilgan")
         raise HTTPException(status_code=409, detail="Konspekt limitini tekshirib bo'lmadi")
     period_key = period_or_reason
-    prompt_styles = {"standard":"O'rtacha hajmli, aniq va tartibli konspekt", "detailed":"Kengaytirilgan, batafsil konspekt; tushunchalar va misollar bilan", "exam":"Imtihonga tayyorlanish uchun muhim ta'riflar, formulalar va asosiy fikrlar"}
+    prompt_styles = {
+        "standard": "O'rtacha hajmli, aniq va tartibli konspekt",
+        "detailed": "Kengaytirilgan, batafsil konspekt; tushunchalar, izohlar va misollar bilan",
+        "exam": "Imtihonga tayyorlanish uchun muhim ta'riflar, formulalar, qonunlar va asosiy fikrlarni to'liq tushuntiruvchi konspekt"
+    }
     style_text = prompt_styles.get(style, prompt_styles["standard"])
-    purpose_text = "Daftarga ko'chirish qulay bo'lishi uchun ixcham sarlavha va punktlardan foydalaning." if purpose == "notebook" else "Word/PDF uchun to'liq, yaxshi tuzilgan bo'limlar va izohlar yozing."
+    purpose_text = (
+        "Daftarga ko'chirish qulay bo'lsin, lekin mazmunni haddan tashqari qisqartirmang; asosiy tushuncha, ta'rif, formula va bog'lanishlarni qoldirmang."
+        if purpose == "notebook" else
+        "Word/PDF uchun to'liq, batafsil bo'limlar, izohlar, misollar va zarur joylarda formulalar bilan yozing."
+    )
+    word_target = (
+        "Kamida 1800-2400 so'z atrofida yozing; manba qisqa bo'lsa, hajmni sun'iy to'ldirmang, mavjud mazmunni to'liq oching."
+        if style == "standard" else
+        "Taxminan 2200-3200 so'z hajmida yozing; manba qisqa bo'lsa, hajmni sun'iy to'ldirmang, mavjud mazmunni to'liq oching."
+    )
     prompt = ("Siz tajribali o'qituvchi va akademik konspekt tuzuvchisiz. Faqat berilgan mavzu va manbaga tayaning; manbada yo'q fakt, sana, formula yoki iqtibosni to'qimang. "
-              "O'zbekcha matn bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yozing. Markdown sarlavhalari (#, ##, ###) va punktlardan foydalaning. "
-              f"Uslub: {style_text}. {purpose_text} Yakunda qisqa xulosa va 3-5 ta o'zini tekshirish savolini qo'shing.\n"
-              f"Mavzu: {topic or 'Manba material asosida'}\nMANBA:\n{source_text}")
+              "Manbadagi muhim bo'lim, kichik mavzu, ta'rif, qonun, formula va xulosalarni tashlab ketmang. Har bir asosiy tushunchani nima ekanligi, qanday ishlashi va ahamiyati bilan izohlang. "
+              "Bir xil fikrni takrorlamang, ammo mazmunni bir-ikki jumlaga siqib qo'ymang. Zarur joyda sodda misol yoki bosqichma-bosqich tushuntirish bering; manbada yo'q aniq faktni o'ylab topmang. "
+              "O'zbekcha matn bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yozing. Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalaning. "
+              f"Uslub: {style_text}. {purpose_text} {word_target} Yakunda mazmunli xulosa va 5 ta o'zini tekshirish savolini qo'shing.\\n"
+              f"Mavzu: {topic or 'Manba material asosida'}\\nMANBA:\\n{source_text}")
     try:
         deadline = time.monotonic() + max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
         if not gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic())): raise RuntimeError("AI navbatida kutish vaqti tugadi")
@@ -4884,7 +4941,7 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
                 try:
                     client = genai.Client(api_key=key, http_options=genai_types.HttpOptions(timeout=max(1000,int((deadline-time.monotonic())*1000))))
                     response = client.models.generate_content(model=os.getenv("SUMMARY_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
-                        config=genai_types.GenerateContentConfig(temperature=0.25, max_output_tokens=max(3000,min(24000,int(os.getenv("SUMMARY_MAX_OUTPUT_TOKENS","12000"))))))
+                        config=genai_types.GenerateContentConfig(temperature=0.25, max_output_tokens=max(6000,min(30000,int(os.getenv("SUMMARY_MAX_OUTPUT_TOKENS","20000"))))))
                     summary_text = (response.text or "").strip()
                     if not summary_text: raise RuntimeError("AI bo'sh javob qaytardi")
                     break
@@ -5016,19 +5073,20 @@ def _add_referat_body_to_docx(document, content):
         if not line:
             continue
         if line.startswith("### "):
-            document.add_heading(line[4:], level=2)
+            document.add_heading(_markdown_heading_text(line[4:]), level=2)
         elif line.startswith("## "):
-            document.add_heading(line[3:], level=1)
+            document.add_heading(_markdown_heading_text(line[3:]), level=1)
         elif line.startswith("# "):
-            document.add_heading(line[2:], level=1)
+            document.add_heading(_markdown_heading_text(line[2:]), level=1)
         elif re.match(r"^[-*•]\s+", line):
-            document.add_paragraph(re.sub(r"^[-*•]\s+", "", line), style="List Bullet")
+            paragraph = document.add_paragraph(style="List Bullet")
+            _add_markdown_inline_runs(paragraph, re.sub(r"^[-*•]\s+", "", line))
         elif re.match(r"^\d+[.)]\s+", line):
-            document.add_paragraph(re.sub(r"^\d+[.)]\s+", "", line), style="List Number")
+            paragraph = document.add_paragraph(style="List Number")
+            _add_markdown_inline_runs(paragraph, re.sub(r"^\d+[.)]\s+", "", line))
         else:
-            document.add_paragraph(line)
-
-
+            paragraph = document.add_paragraph()
+            _add_markdown_inline_runs(paragraph, line)
 def _build_referat_docx(title, content, author, university, faculty, group_name, teacher, subject):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Cm, Pt
@@ -5113,15 +5171,13 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
         if not line:
             continue
         if line.startswith("### "):
-            story.append(Paragraph(escape(line[4:]), styles["ReferatH2"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(line[4:]), styles["ReferatH2"]))
         elif line.startswith("## ") or line.startswith("# "):
-            story.append(Paragraph(escape(line.lstrip("#").strip()), styles["ReferatH1"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(line.lstrip("# ").strip()), styles["ReferatH1"]))
         elif re.match(r"^[-*•]\s+", line):
-            story.append(Paragraph("• " + escape(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
-        elif re.match(r"^\d+[.)]\s+", line):
-            story.append(Paragraph(escape(line), styles["BodyText"]))
+            story.append(Paragraph("• " + _markdown_inline_to_reportlab(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
         else:
-            story.append(Paragraph(escape(line), styles["BodyText"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(line), styles["BodyText"]))
         story.append(Spacer(1, 5))
     doc.build(story)
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="REFERAT")
@@ -5220,9 +5276,12 @@ def api_generate_referat(
         "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
         "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
         "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki aniq ma'lum bibliografik ma'lumotlarni kiriting. "
-        "Markdown sarlavhalaridan foydalaning. Tuzilishi: KIRISH; 2-4 ta mantiqiy asosiy bob; XULOSA; "
+        "Markdown sarlavhalaridan foydalaning. Tuzilishi: KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
         "FOYDALANILGAN ADABIYOTLAR (manba berilmagan bo'lsa, uydirma ro'yxat tuzmang, buni ochiq qayd eting). "
-        "Referat izchil, mazmunli, takrorlarsiz va topshirishga mos bo'lsin. "
+        "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
+        "har bir bobda sabab-oqibat, tushuncha, jarayon va amaliy ahamiyatni izchil tahlil qiling; boblar orasida mantiqiy bog'lanish bo'lsin. "
+        "Asosiy matnni kamida 1800-2400 so'z atrofida yozing. Agar berilgan manba hajmi bunga yetmasa, manbadagi barcha ma'lumotlarni batafsil oching, lekin fakt yoki manba to'qib hajmni sun'iy oshirmang. "
+        "Xulosa boblarda ko'rib chiqilgan fikrlarni umumlashtirsin. Referat izchil, mazmunli, takrorlarsiz va topshirishga mos bo'lsin. "
         f"Mavzu: {topic or 'Yuklangan manba asosida'}\nFan: {subject}\n"
         f"Muallif: {author}\nTa'lim muassasasi: {university}\nFakultet: {faculty}\n"
         f"Guruh: {group_name}\nTekshiruvchi: {teacher}\nMANBA MATNI:\n{source_text}"
