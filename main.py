@@ -834,16 +834,25 @@ def init_db():
         created_at INTEGER NOT NULL)""")
     # Kredit manbalarini ajratish: eski umumiy balans xarid qilingan kredit sifatida saqlanadi.
     wallet_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_wallets)").fetchall()}
-    for column in ("tariff_balance", "purchased_balance"):
+    _admin_bonus_column_added = "admin_bonus_balance" not in wallet_columns
+    for column in ("tariff_balance", "purchased_balance", "admin_bonus_balance"):
         if column not in wallet_columns:
             cursor.execute(f"ALTER TABLE credit_wallets ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
     cursor.execute("UPDATE credit_wallets SET purchased_balance=balance WHERE purchased_balance=0 AND tariff_balance=0 AND balance>0")
     transaction_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_transactions)").fetchall()}
-    for column in ("tariff_amount", "purchased_amount"):
+    for column in ("tariff_amount", "purchased_amount", "admin_bonus_amount"):
         if column not in transaction_columns:
             cursor.execute(f"ALTER TABLE credit_transactions ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
     # Tarixiy yozuvlar eski balansdan kelgani uchun ularning manbasi xarid qilingan kredit deb belgilanadi.
     cursor.execute("UPDATE credit_transactions SET purchased_amount=amount WHERE purchased_amount=0 AND tariff_amount=0 AND amount>0")
+    if _admin_bonus_column_added:
+        # Eski admin bonus qoldig'ini ehtiyotkor tiklaymiz: oldingi xarajatlar avval bonusdan yechilgan deb olinadi.
+        legacy_admin_bonus = cursor.execute("SELECT user_id, SUM(amount) FROM credit_transactions WHERE transaction_type='admin_bonus' AND amount>0 GROUP BY user_id").fetchall()
+        for _bonus_user_id, _bonus_granted in legacy_admin_bonus:
+            _wallet = cursor.execute("SELECT purchased_balance FROM credit_wallets WHERE user_id=?", (_bonus_user_id,)).fetchone()
+            _spent = cursor.execute("SELECT COALESCE(SUM(-purchased_amount),0) FROM credit_transactions WHERE user_id=? AND transaction_type='spend'", (_bonus_user_id,)).fetchone()
+            _legacy_remaining = min(max(0, int(_wallet[0] or 0)) if _wallet else 0, max(0, int(_bonus_granted or 0) - int(_spent[0] or 0)))
+            cursor.execute("UPDATE credit_wallets SET admin_bonus_balance=MAX(admin_bonus_balance, ?) WHERE user_id=?", (_legacy_remaining, _bonus_user_id))
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
         id TEXT PRIMARY KEY,
@@ -1817,10 +1826,10 @@ def trigger_credit_payment_flow(user_id, package_id):
 def get_credit_wallet(user_id):
     conn = _connect_db()
     try:
-        row = conn.execute("SELECT balance, tariff_balance, purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+        row = conn.execute("SELECT balance, tariff_balance, purchased_balance, admin_bonus_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
         if not row:
-            return {"balance": 0, "tariff_balance": 0, "purchased_balance": 0}
-        return {"balance": int(row[0] or 0), "tariff_balance": int(row[1] or 0), "purchased_balance": int(row[2] or 0)}
+            return {"balance": 0, "tariff_balance": 0, "purchased_balance": 0, "admin_bonus_balance": 0}
+        return {"balance": int(row[0] or 0), "tariff_balance": int(row[1] or 0), "purchased_balance": int(row[2] or 0), "admin_bonus_balance": int(row[3] or 0)}
     finally:
         conn.close()
 
@@ -1838,16 +1847,17 @@ def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"
             conn.execute("BEGIN IMMEDIATE")
             now = int(time.time())
             conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
-            row = conn.execute("SELECT balance,tariff_balance,purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+            row = conn.execute("SELECT balance,tariff_balance,purchased_balance,admin_bonus_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
             if int(row[0] or 0) < amount:
                 conn.rollback()
                 return False, "insufficient_credits"
             tariff_spent = min(int(row[1] or 0), amount)
             purchased_spent = amount - tariff_spent
-            conn.execute("UPDATE credit_wallets SET balance=balance-?, tariff_balance=tariff_balance-?, purchased_balance=purchased_balance-?, updated_at=? WHERE user_id=?",
-                         (amount, tariff_spent, purchased_spent, now, int(user_id)))
-            conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'spend', ?, ?, ?, ?, ?)",
-                         (int(user_id), -amount, str(reference), str(description)[:200], now, -tariff_spent, -purchased_spent))
+            admin_bonus_spent = min(int(row[3] or 0), purchased_spent)
+            conn.execute("UPDATE credit_wallets SET balance=balance-?, tariff_balance=tariff_balance-?, purchased_balance=purchased_balance-?, admin_bonus_balance=admin_bonus_balance-?, updated_at=? WHERE user_id=?",
+                         (amount, tariff_spent, purchased_spent, admin_bonus_spent, now, int(user_id)))
+            conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) VALUES (?,?, 'spend', ?, ?, ?, ?, ?, ?)",
+                         (int(user_id), -amount, str(reference), str(description)[:200], now, -tariff_spent, -purchased_spent, -admin_bonus_spent))
             conn.commit()
             return True, get_credit_balance(user_id)
         except sqlite3.IntegrityError:
@@ -1864,15 +1874,15 @@ def refund_slide_credits(user_id, amount, spend_reference, refund_reference, des
     conn = _connect_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        spent = conn.execute("SELECT tariff_amount,purchased_amount FROM credit_transactions WHERE user_id=? AND reference=? AND transaction_type='spend'", (int(user_id), str(spend_reference))).fetchone()
+        spent = conn.execute("SELECT tariff_amount,purchased_amount,admin_bonus_amount FROM credit_transactions WHERE user_id=? AND reference=? AND transaction_type='spend'", (int(user_id), str(spend_reference))).fetchone()
         if not spent:
             conn.rollback(); logging.error("Kredit qaytarilmadi: sarf yozuvi topilmadi | foydalanuvchi=%s", user_id); return False
-        tariff_refund = max(0, -int(spent[0] or 0)); purchased_refund = max(0, -int(spent[1] or 0))
+        tariff_refund = max(0, -int(spent[0] or 0)); purchased_refund = max(0, -int(spent[1] or 0)); admin_bonus_refund = max(0, -int(spent[2] or 0))
         total = tariff_refund + purchased_refund
         if total != int(amount):
             conn.rollback(); logging.error("Kredit qaytarilmadi: qaytariladigan miqdor mos emas | foydalanuvchi=%s", user_id); return False
-        conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (total, tariff_refund, purchased_refund, int(time.time()), int(user_id)))
-        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'refund', ?, ?, ?, ?, ?)", (int(user_id), total, str(refund_reference), str(description)[:200], int(time.time()), tariff_refund, purchased_refund))
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, purchased_balance=purchased_balance+?, admin_bonus_balance=admin_bonus_balance+?, updated_at=? WHERE user_id=?", (total, tariff_refund, purchased_refund, admin_bonus_refund, int(time.time()), int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) VALUES (?,?, 'refund', ?, ?, ?, ?, ?, ?)", (int(user_id), total, str(refund_reference), str(description)[:200], int(time.time()), tariff_refund, purchased_refund, admin_bonus_refund))
         conn.commit(); return True
     except sqlite3.IntegrityError:
         conn.rollback(); return False
@@ -3040,7 +3050,7 @@ def admin_bonus_summary_command(message):
         return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) != 3:
-        bot.send_message(message.chat.id, "Format: /bonus_summary USER_ID MIQDOR\\nMisol: /bonus_summary 123456789 5")
+        bot.send_message(message.chat.id, "Format: /bonus_summary USER_ID MIQDOR\nMisol: /bonus_summary 123456789 5")
         return
     try:
         target_id, amount = int(parts[1]), int(parts[2])
@@ -3086,6 +3096,72 @@ def admin_bonus_summary_command(message):
         logging.exception("Konspekt bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
 
 
+@bot.message_handler(commands=["bonus_credits_revoke"])
+def admin_bonus_credits_revoke_command(message):
+    """Bekor qilishda faqat ishlatilmay qolgan admin bergan Slayd kreditlarini yechadi."""
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        bot.send_message(message.chat.id, "Format: /bonus_credits_revoke USER_ID\nMisol: /bonus_credits_revoke 123456789")
+        return
+    try:
+        target_id = int(parts[1])
+        if target_id <= 0:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID musbat son bo‘lishi kerak.")
+        return
+
+    conn = _connect_db(timeout=30)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT balance, purchased_balance, admin_bonus_balance FROM credit_wallets WHERE user_id=?",
+            (target_id,)
+        ).fetchone()
+        bonus_balance = int(row[2] or 0) if row else 0
+        if bonus_balance <= 0:
+            conn.rollback()
+            bot.send_message(message.chat.id, "ℹ️ Bu foydalanuvchida bekor qilinadigan Slayd kredit bonusi yo‘q.")
+            return
+        now = int(time.time())
+        conn.execute(
+            "UPDATE credit_wallets SET balance=MAX(0,balance-?), "
+            "purchased_balance=MAX(0,purchased_balance-?), admin_bonus_balance=0, updated_at=? WHERE user_id=?",
+            (bonus_balance, bonus_balance, now, target_id)
+        )
+        reference = f"admin-credit-revoke:{target_id}:{uuid.uuid4().hex}"
+        conn.execute(
+            "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) "
+            "VALUES (?,?,'admin_bonus_revoke',?,?,?,0,?,?)",
+            (target_id, -bonus_balance, reference, "Admin tomonidan qolgan Slayd kredit bonusi bekor qilindi", now, -bonus_balance, -bonus_balance)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("Admin Slayd kredit bonusini bekor qilishda xato | target_id=%s", target_id)
+        bot.send_message(message.chat.id, "❌ Slayd kredit bonusini bekor qilib bo‘lmadi.")
+        return
+    finally:
+        conn.close()
+
+    bot.send_message(
+        message.chat.id,
+        f"🗑 Slayd kredit bonusi bekor qilindi.\n👤 User: {target_id}\n➖ Bekor qilindi: {bonus_balance} ta"
+    )
+    try:
+        lang = get_user_lang(target_id)
+        texts = {
+            "uz": f"ℹ️ Administrator hisobingizdagi {bonus_balance} ta ishlatilmagan Slayd kredit bonusini bekor qildi.\n💎 Sotib olingan va tarif kreditlaringiz saqlab qolindi.",
+            "ru": f"ℹ️ Администратор отменил {bonus_balance} неиспользованных бонусных кредитов для слайдов.\n💎 Купленные и тарифные кредиты сохранены.",
+            "en": f"ℹ️ The administrator revoked {bonus_balance} unused slide bonus credits.\n💎 Purchased and plan credits were kept.",
+        }
+        bot.send_message(target_id, texts.get(lang, texts["uz"]))
+    except Exception:
+        logging.exception("Slayd kredit bonusi bekor qilingani haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
+
+
 @bot.message_handler(commands=["bonus_summary_revoke"])
 def admin_bonus_summary_revoke_command(message):
     """Foydalanuvchining qolgan konspekt bonuslarini faqat admin bekor qiladi."""
@@ -3093,7 +3169,7 @@ def admin_bonus_summary_revoke_command(message):
         return
     parts = (message.text or "").split()
     if len(parts) != 2:
-        bot.send_message(message.chat.id, "Format: /bonus_summary_revoke USER_ID\\nMisol: /bonus_summary_revoke 123456789")
+        bot.send_message(message.chat.id, "Format: /bonus_summary_revoke USER_ID\nMisol: /bonus_summary_revoke 123456789")
         return
     try:
         target_id = int(parts[1])
@@ -3120,7 +3196,7 @@ def admin_bonus_summary_revoke_command(message):
     finally:
         conn.close()
 
-    bot.send_message(message.chat.id, f"🗑 Konspekt bonusi bekor qilindi.\\n👤 User: {target_id}\\n➖ Bekor qilindi: {balance} ta")
+    bot.send_message(message.chat.id, f"🗑 Konspekt bonusi bekor qilindi.\n👤 User: {target_id}\n➖ Bekor qilindi: {balance} ta")
 
 
 @bot.message_handler(commands=["bonus_revoke"])
@@ -3548,8 +3624,11 @@ def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi
         conn.execute("BEGIN IMMEDIATE")
         now = int(time.time())
         conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
-        conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
-        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?,?,?,?,?,0,?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], now, amount))
+        if str(transaction_type) == "admin_bonus":
+            conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, admin_bonus_balance=admin_bonus_balance+?, updated_at=? WHERE user_id=?", (amount, amount, amount, now, int(user_id)))
+        else:
+            conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) VALUES (?,?,?,?,?,?,0,?,?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], now, amount, amount if str(transaction_type) == "admin_bonus" else 0))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -5589,9 +5668,9 @@ def _maybe_alert_ai_queue_load():
 
         percent = min(100.0, queue_slots_used * 100.0 / max(1, AI_MAX_QUEUE))
         alert = (
-            "⚠️ <b>Quiz AI — AI navbati band</b>\\n"
-            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\\n"
-            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\\n"
+            "⚠️ <b>Quiz AI — AI navbati band</b>\n"
+            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\n"
+            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\n"
             "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /monitor buyrug'idan foydalaning."
         )
         bot.send_message(ADMIN_ID, alert, parse_mode="HTML", disable_web_page_preview=True)
@@ -7953,6 +8032,7 @@ def _admin_panel_bonus_markup():
         telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
         telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
         telebot.types.InlineKeyboardButton("💎 Slayd kreditlari bonusi", callback_data="adminpanel:guide:bonus_credits"),
+        telebot.types.InlineKeyboardButton("🗑 Slayd kredit bonusini bekor qilish", callback_data="adminpanel:guide:bonus_credits_revoke"),
         telebot.types.InlineKeyboardButton("📚 Konspekt bonusi", callback_data="adminpanel:guide:bonus_summary"),
         telebot.types.InlineKeyboardButton("🗑 Konspekt bonusini bekor qilish", callback_data="adminpanel:guide:bonus_summary_revoke"),
         telebot.types.InlineKeyboardButton("🗑 Premium bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
@@ -8017,9 +8097,10 @@ def admin_help_panel_callback(call):
             "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
             "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
             "bonus_credits": "💎 <b>Slayd kreditlari bonusi</b>\nFormat: <code>/bonus_credits USER_ID KREDIT</code>\nMisol: <code>/bonus_credits 123456789 50</code>\nBu bonus Premium va test limitlaridan alohida hisoblanadi.",
+            "bonus_credits_revoke": "🗑 <b>Slayd kredit bonusini bekor qilish</b>\nFormat: <code>/bonus_credits_revoke USER_ID</code>\nMisol: <code>/bonus_credits_revoke 123456789</code>\nFaqat ishlatilmay qolgan administrator bonusi bekor qilinadi; sotib olingan va tarif kreditlari saqlanadi.",
             "bonus_summary": "📚 <b>Konspekt bonusi</b>\nFormat: <code>/bonus_summary USER_ID MIQDOR</code>\nMisol: <code>/bonus_summary 123456789 5</code>\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
-            "bonus_summary_revoke": "🗑 <b>Konspekt bonusini bekor qilish</b>\\nFormat: <code>/bonus_summary_revoke USER_ID</code>\\nMisol: <code>/bonus_summary_revoke 123456789</code>\\nFoydalanuvchining qolgan konspekt bonuslari bekor qilinadi.",
-            "bonus_revoke": "🗑 <b>Premium bonusni bekor qilish</b>\\nFormat: <code>/bonus_revoke USER_ID</code>\\nMisol: <code>/bonus_revoke 123456789</code>",
+            "bonus_summary_revoke": "🗑 <b>Konspekt bonusini bekor qilish</b>\nFormat: <code>/bonus_summary_revoke USER_ID</code>\nMisol: <code>/bonus_summary_revoke 123456789</code>\nFoydalanuvchining qolgan konspekt bonuslari bekor qilinadi.",
+            "bonus_revoke": "🗑 <b>Premium bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
         }
         bot.answer_callback_query(call.id)
         bot.send_message(call.message.chat.id, guide_texts.get(value, "Buyruq topilmadi."), parse_mode="HTML", reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("⬅️ Admin Panel", callback_data="adminpanel:home")))
