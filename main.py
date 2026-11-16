@@ -1926,7 +1926,9 @@ def get_credit_history(user_id, limit=20):
     conn = _connect_db()
     try:
         rows = conn.execute(
-            "SELECT amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount "
+            "SELECT amount,transaction_type,reference,"
+            "CASE WHEN transaction_type='admin_bonus' THEN 'Admin bonusi' ELSE description END AS description,"
+            "created_at,tariff_amount,purchased_amount "
             "FROM credit_transactions WHERE user_id=? ORDER BY id DESC LIMIT ?",
             (int(user_id), max(1, min(int(limit), 100)))
         ).fetchall()
@@ -3026,7 +3028,7 @@ def admin_bonus_credits_command(message):
     add_user_to_db(target_id)
     admin_id = int(message.from_user.id)
     reference = f"admin-credit:{admin_id}:{target_id}:{uuid.uuid4().hex}"
-    description = f"Admin bonusi; admin_id={admin_id}"
+    description = "Admin bonusi"
     if not add_slide_credits(target_id, amount, reference, description, transaction_type="admin_bonus"):
         bot.send_message(message.chat.id, "❌ Kredit qo‘shilmadi. Baza yoki tranzaksiya xatosini tekshiring.")
         return
@@ -8032,8 +8034,8 @@ def _admin_panel_bonus_markup():
         telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
         telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
         telebot.types.InlineKeyboardButton("💎 Slayd kreditlari bonusi", callback_data="adminpanel:guide:bonus_credits"),
-        telebot.types.InlineKeyboardButton("🗑 Slayd kredit bonusini bekor qilish", callback_data="adminpanel:guide:bonus_credits_revoke"),
         telebot.types.InlineKeyboardButton("📚 Konspekt bonusi", callback_data="adminpanel:guide:bonus_summary"),
+        telebot.types.InlineKeyboardButton("🗑 Slayd kredit bonusini bekor qilish", callback_data="adminpanel:guide:bonus_credits_revoke"),
         telebot.types.InlineKeyboardButton("🗑 Konspekt bonusini bekor qilish", callback_data="adminpanel:guide:bonus_summary_revoke"),
         telebot.types.InlineKeyboardButton("🗑 Premium bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
         telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
