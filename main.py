@@ -3072,14 +3072,14 @@ def admin_bonus_summary_command(message):
     admin_id = int(message.from_user.id)
     bot.send_message(
         message.chat.id,
-        f"📚 Konspekt bonusi berildi.\\n👤 User: {target_id}\\n➕ Qo‘shildi: {amount} ta\\n🎁 Jami bonus qoldig‘i: {balance} ta\\n🛡 Admin: {admin_id}"
+        f"📚 Konspekt bonusi berildi.\n👤 User: {target_id}\n➕ Qo‘shildi: {amount} ta\n🎁 Jami bonus qoldig‘i: {balance} ta\n🛡 Admin: {admin_id}"
     )
     try:
         lang = get_user_lang(target_id)
         texts = {
-            "uz": f"🎁 Sizga administrator tomonidan {amount} ta qo‘shimcha konspekt bonusi berildi!\\n📚 Bonuslar tarif limitingizdan alohida hisoblanadi.",
-            "ru": f"🎁 Администратор начислил вам {amount} дополнительных конспектов!\\n📚 Бонусы учитываются отдельно от лимита тарифа.",
-            "en": f"🎁 The administrator granted you {amount} additional summary bonuses!\\n📚 Bonuses are counted separately from your plan limit.",
+            "uz": f"🎁 Sizga administrator tomonidan {amount} ta qo‘shimcha konspekt bonusi berildi!\n📚 Bonuslar tarif limitingizdan alohida hisoblanadi.",
+            "ru": f"🎁 Администратор начислил вам {amount} дополнительных конспектов!\n📚 Бонусы учитываются отдельно от лимита тарифа.",
+            "en": f"🎁 The administrator granted you {amount} additional summary bonuses!\n📚 Bonuses are counted separately from your plan limit.",
         }
         bot.send_message(target_id, texts.get(lang, texts["uz"]))
     except Exception:
@@ -8016,8 +8016,8 @@ def admin_help_panel_callback(call):
         guide_texts = {
             "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
             "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
-            "bonus_credits": "💎 <b>Slayd kreditlari bonusi</b>\\nFormat: <code>/bonus_credits USER_ID KREDIT</code>\\nMisol: <code>/bonus_credits 123456789 50</code>\\nBu bonus Premium va test limitlaridan alohida hisoblanadi.",
-            "bonus_summary": "📚 <b>Konspekt bonusi</b>\\nFormat: <code>/bonus_summary USER_ID MIQDOR</code>\\nMisol: <code>/bonus_summary 123456789 5</code>\\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
+            "bonus_credits": "💎 <b>Slayd kreditlari bonusi</b>\nFormat: <code>/bonus_credits USER_ID KREDIT</code>\nMisol: <code>/bonus_credits 123456789 50</code>\nBu bonus Premium va test limitlaridan alohida hisoblanadi.",
+            "bonus_summary": "📚 <b>Konspekt bonusi</b>\nFormat: <code>/bonus_summary USER_ID MIQDOR</code>\nMisol: <code>/bonus_summary 123456789 5</code>\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
             "bonus_summary_revoke": "🗑 <b>Konspekt bonusini bekor qilish</b>\\nFormat: <code>/bonus_summary_revoke USER_ID</code>\\nMisol: <code>/bonus_summary_revoke 123456789</code>\\nFoydalanuvchining qolgan konspekt bonuslari bekor qilinadi.",
             "bonus_revoke": "🗑 <b>Premium bonusni bekor qilish</b>\\nFormat: <code>/bonus_revoke USER_ID</code>\\nMisol: <code>/bonus_revoke 123456789</code>",
         }
