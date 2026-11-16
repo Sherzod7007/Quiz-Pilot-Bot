@@ -13377,6 +13377,11 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 <span class="create-tool-title" data-lang="slides_card_title">Slaydlar yaratish</span>
                 <span class="create-tool-desc" data-lang="slides_card_desc">SI yordamida taqdimot tayyorlang</span>
             </button>
+            <button type="button" class="upload-box create-tool-card test-tool-card referat-tool-card" onclick="openReferatScreen()">
+                <span class="create-tool-icon">📄</span>
+                <span class="create-tool-title" data-lang="referat_card_title">Referat yaratish</span>
+                <span class="create-tool-desc" data-lang="referat_card_desc">SI yordamida referat tayyorlang</span>
+            </button>
             <button type="button" class="upload-box create-tool-card summary-tool-card" onclick="openSummaryScreen()">
                 <span class="create-tool-icon">📚</span>
                 <span class="create-tool-title" data-lang="summary_card_title">Konspekt yaratish</span>
@@ -13448,6 +13453,48 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             <select id="summary-purpose-select" class="input-title"><option value="notebook" data-lang="summary_purpose_notebook">Daftarga ko‘chirib yozish uchun</option><option value="digital" data-lang="summary_purpose_digital">Word/PDF shaklida foydalanish uchun</option></select>
             <button type="button" class="submit-btn" id="summary-generate-btn" onclick="generateSummary()" data-lang="summary_generate_btn">📚 Konspekt yaratish</button>
             <div id="summary-status" class="slides-credit-error" hidden></div>
+        </div>
+    </div>
+
+    <div id="referat-screen" class="screen">
+        <div class="header slides-screen-header">
+            <button type="button" class="slides-back-btn" onclick="switchScreen('create')" aria-label="Back" data-lang-aria="referat_back_aria">⬅️</button>
+            <h1 data-lang="referat_screen_title">Referat yaratish</h1>
+            <span class="slides-header-crown">📄</span>
+        </div>
+        <div class="slides-credit-panel glass-panel" aria-live="polite">
+            <div class="slides-credit-main"><div>
+                <div class="slides-credit-label" data-lang="referat_limit_label">📄 Referatlarim</div>
+                <div class="slides-credit-value"><span id="referat-remaining">—</span> <small data-lang="referat_remaining_unit">ta qoldi</small></div>
+                <div class="slides-credit-caption" id="referat-usage-caption" data-lang="referat_usage_loading">Limit yuklanmoqda...</div>
+            </div><div class="slides-credit-wallet-icon">📄</div></div>
+        </div>
+        <div class="slides-builder-panel glass-panel">
+            <div class="slides-builder-icon" aria-hidden="true">📄</div>
+            <h2 data-lang="referat_builder_title">SI referat yaratuvchisi</h2>
+            <p data-lang="referat_builder_desc">Mavzu yoki o‘quv materialidan tartibli akademik referat tayyorlang.</p>
+            <label for="referat-topic-input" data-lang="referat_topic_label">Referat mavzusi</label>
+            <textarea id="referat-topic-input" class="input-text" rows="3" maxlength="5000" data-placeholder="referat_topic_placeholder" placeholder="Referat mavzusini kiriting..."></textarea>
+            <label for="referat-author-input" data-lang="referat_author_label">Talabaning ism-familiyasi</label>
+            <input id="referat-author-input" class="input-title" type="text" maxlength="160" data-placeholder="referat_author_placeholder" placeholder="Ism Familiya">
+            <label for="referat-university-input" data-lang="referat_university_label">Universitet / ta’lim muassasasi</label>
+            <input id="referat-university-input" class="input-title" type="text" maxlength="220" data-placeholder="referat_university_placeholder" placeholder="Ta’lim muassasasi nomi">
+            <label for="referat-faculty-input" data-lang="referat_faculty_label">Fakultet</label>
+            <input id="referat-faculty-input" class="input-title" type="text" maxlength="220" data-placeholder="referat_faculty_placeholder" placeholder="Fakultet nomi">
+            <label for="referat-group-input" data-lang="referat_group_label">Guruh</label>
+            <input id="referat-group-input" class="input-title" type="text" maxlength="100" data-placeholder="referat_group_placeholder" placeholder="Guruh raqami">
+            <label for="referat-subject-input" data-lang="referat_subject_label">Fan</label>
+            <input id="referat-subject-input" class="input-title" type="text" maxlength="160" data-placeholder="referat_subject_placeholder" placeholder="Fan nomi">
+            <label for="referat-teacher-input" data-lang="referat_teacher_label">Tekshiruvchi o‘qituvchi</label>
+            <input id="referat-teacher-input" class="input-title" type="text" maxlength="160" data-placeholder="referat_teacher_placeholder" placeholder="O‘qituvchining ism-familiyasi">
+            <label data-lang="referat_source_label">Manba fayli (PDF yoki DOCX, ixtiyoriy)</label>
+            <div class="slides-file-picker">
+                <button type="button" onclick="document.getElementById('referat-source-file').click()" data-lang="referat_choose_file">Fayl tanlash</button>
+                <span id="referat-source-file-name" data-lang="referat_no_file">Fayl tanlanmagan</span>
+                <input type="file" id="referat-source-file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            </div>
+            <button type="button" class="submit-btn" id="referat-generate-btn" onclick="generateReferat()" data-lang="referat_generate_btn">📄 Referat yaratish</button>
+            <div id="referat-status" class="slides-credit-error" hidden></div>
         </div>
     </div>
 
@@ -13743,6 +13790,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 <h2 data-lang="premium_status_title">💎 Sizning Statusingiz</h2>
                 <p id="p-status-val">Oddiy foydalanuvchi</p>
                 <p style="margin-top: 5px; font-size: 12px; color:#8e8e93;"><span data-lang="premium_limit_text">30 kunlik bepul limitingiz:</span> <span id="p-limit-val">0</span> <span data-lang="limit_unit">ta</span></p>
+                <p style="margin-top: 4px; font-size: 12px; color:#8e8e93;"><span data-lang="referat_free_limit_label">Bepul referat limiti:</span> <span id="p-referat-limit-val">—</span> <span data-lang="limit_unit">ta</span></p>
             </div>
 
             <div class="p-pro-header">
@@ -13961,7 +14009,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
 
         const langPack = {
             uz: {
-                summary_card_title: "Konspekt yaratish", summary_card_desc: "SI yordamida konspekt tayyorlang", summary_screen_title: "Konspekt yaratish", summary_back_aria: "Orqaga", summary_limit_label: "📚 Konspektlarim", summary_remaining_unit: "ta qoldi", summary_usage_loading: "Limit yuklanmoqda...", summary_builder_title: "SI konspekt yaratuvchisi", summary_builder_desc: "Mavzu yoki o‘quv materialidan tartibli konspekt tayyorlang.", summary_topic_label: "Konspekt mavzusi", summary_topic_placeholder: "Mavzuni kiriting yoki qisqacha izoh yozing...", summary_source_label: "Manba fayli (PDF yoki DOCX, ixtiyoriy)", summary_choose_file: "Fayl tanlash", summary_no_file: "Fayl tanlanmagan", summary_type_label: "Konspekt turi", summary_style_standard: "Oddiy konspekt", summary_style_detailed: "Batafsil konspekt", summary_style_exam: "Imtihonga tayyorgarlik", summary_purpose_label: "Foydalanish maqsadi", summary_purpose_notebook: "Daftarga ko‘chirib yozish uchun", summary_purpose_digital: "Word/PDF shaklida foydalanish uchun", summary_generate_btn: "📚 Konspekt yaratish", summary_generating: "Konspekt tayyorlanmoqda...", summary_success: "Konspekt tayyor! Word yoki PDF formatini yuklab oling.", summary_error: "Konspekt yaratishda xatolik yuz berdi.", summary_need_source: "Mavzu kiriting yoki PDF/DOCX fayl tanlang.", summary_limit_error: "Konspekt limiti tugagan. Tarifni faollashtiring.", summary_usage_text: "Jami: {limit} ta | Ishlatildi: {used} ta", summary_unlimited: "Cheksiz konspekt", summary_file_selected: "Tanlangan fayl: ",
+                summary_card_title: "Konspekt yaratish", summary_card_desc: "SI yordamida konspekt tayyorlang", summary_screen_title: "Konspekt yaratish", summary_back_aria: "Orqaga", summary_limit_label: "📚 Konspektlarim", summary_remaining_unit: "ta qoldi", summary_usage_loading: "Limit yuklanmoqda...", summary_builder_title: "SI konspekt yaratuvchisi", summary_builder_desc: "Mavzu yoki o‘quv materialidan tartibli konspekt tayyorlang.", summary_topic_label: "Konspekt mavzusi", summary_topic_placeholder: "Mavzuni kiriting yoki qisqacha izoh yozing...", summary_source_label: "Manba fayli (PDF yoki DOCX, ixtiyoriy)", summary_choose_file: "Fayl tanlash", summary_no_file: "Fayl tanlanmagan", summary_type_label: "Konspekt turi", summary_style_standard: "Oddiy konspekt", summary_style_detailed: "Batafsil konspekt", summary_style_exam: "Imtihonga tayyorgarlik", summary_purpose_label: "Foydalanish maqsadi", summary_purpose_notebook: "Daftarga ko‘chirib yozish uchun", summary_purpose_digital: "Word/PDF shaklida foydalanish uchun", summary_generate_btn: "📚 Konspekt yaratish", summary_generating: "Konspekt tayyorlanmoqda...", summary_success: "Konspekt tayyor! Word yoki PDF formatini yuklab oling.", summary_error: "Konspekt yaratishda xatolik yuz berdi.", summary_need_source: "Mavzu kiriting yoki PDF/DOCX fayl tanlang.", summary_limit_error: "Konspekt limiti tugagan. Tarifni faollashtiring.", summary_usage_text: "Jami: {limit} ta | Ishlatildi: {used} ta", summary_unlimited: "Cheksiz konspekt", summary_file_selected: "Tanlangan fayl: ", referat_card_title: "Referat yaratish", referat_card_desc: "SI yordamida referat tayyorlang", referat_screen_title: "Referat yaratish", referat_back_aria: "Orqaga", referat_limit_label: "📄 Referatlarim", referat_remaining_unit: "ta qoldi", referat_usage_loading: "Limit yuklanmoqda...", referat_builder_title: "SI referat yaratuvchisi", referat_builder_desc: "Mavzu yoki o‘quv materialidan tartibli akademik referat tayyorlang.", referat_topic_label: "Referat mavzusi", referat_topic_placeholder: "Referat mavzusini kiriting...", referat_author_label: "Talabaning ism-familiyasi", referat_author_placeholder: "Ism Familiya", referat_university_label: "Universitet / ta’lim muassasasi", referat_university_placeholder: "Ta’lim muassasasi nomi", referat_faculty_label: "Fakultet", referat_faculty_placeholder: "Fakultet nomi", referat_group_label: "Guruh", referat_group_placeholder: "Guruh raqami", referat_subject_label: "Fan", referat_subject_placeholder: "Fan nomi", referat_teacher_label: "Tekshiruvchi o‘qituvchi", referat_teacher_placeholder: "O‘qituvchining ism-familiyasi", referat_source_label: "Manba fayli (PDF yoki DOCX, ixtiyoriy)", referat_choose_file: "Fayl tanlash", referat_no_file: "Fayl tanlanmagan", referat_generate_btn: "📄 Referat yaratish", referat_need_source: "Referat mavzusini kiriting yoki PDF/DOCX fayl tanlang.", referat_author_required: "Talabaning ism-familiyasini kiriting.", referat_limit_error: "Referat yaratish limitingiz tugagan. Tarifni faollashtiring.", referat_error: "Referat yaratilmadi. Qayta urinib ko‘ring.", referat_usage_text: "Jami: {limit} ta | Ishlatildi: {used} ta", referat_unlimited: "Cheksiz referat", referat_generating: "Referat tayyorlanmoqda...", referat_file_selected: "Tanlangan fayl: ", referat_no_file_selected: "Fayl tanlanmagan", referat_download_ready: "Referatingiz tayyor! Kerakli formatni tanlab yuklab oling.", referat_download_docx: "Word (.DOCX) yuklab olish", referat_download_pdf: "PDF yuklab olish", referat_download_error: "Faylni yuklab bo‘lmadi. Qayta urinib ko‘ring.", 
 
                 nav_create: "Yaratish", nav_library: "Kutubxona", nav_teacher: "O‘qituvchi", teacher_active: "FAOL", teacher_center_title: "👨‍🏫 Professional O‘qituvchi Markazi", teacher_center_desc: "Guruhlar, topshiriqlar, test sessiyalari, 4 xil variant, natijalar va eksport — barchasi bir joyda.", teacher_groups: "Guruhlar", teacher_groups_desc: "Sinf va guruhlarni boshqarish", teacher_assignments: "Topshiriqlar", teacher_assignments_desc: "Testni guruhga biriktirish", teacher_variants: "4 ta variant", teacher_variants_desc: "A, B, C, D variantlar", teacher_results_title: "Natijalar", teacher_results_desc: "Ball, reyting va statistika", teacher_session_title: "🚀 Guruh testini boshlash", teacher_session_note: "Sessiya yaratilgach o‘quvchilar “Guruhga qo‘shilish” bo‘limidan testga kirishadi. Natijalar avtomatik yig‘iladi.", teacher_variant_title: "🔄 Test variantlari", teacher_variant_note: "Bitta testdan A, B, C, D ko‘rinishidagi 4 ta variant va mos test kalitlari.", teacher_sessions_title: "📚 Faol va oldingi sessiyalar", teacher_group_name_required: "Guruh nomini kiriting.", teacher_group_created: "Guruh yaratildi.", teacher_assignment_created: "Topshiriq guruhga biriktirildi.", teacher_variant_label: "Variant", teacher_student: "O‘quvchi", teacher_score: "Ball", teacher_refresh: "Yangilash", teacher_loading: "Yuklanmoqda...", nav_settings: "Sozlamalar", nav_premium: "Premium",
                 tab_tests: "❓ Testlar", tab_public: "🌐 Ommaviy", tab_cards: "🗂️ Kartochkalar", student_group_join_title: "Guruhga qo‘shilish", student_group_join_desc: "O‘qituvchingiz bergan 6 belgili guruh kodini kiriting.", student_group_code_placeholder: "Masalan: A7K29P", student_group_join_btn: "➕ Guruhga qo‘shilish", student_group_code_required: "Guruh kodini kiriting.", student_group_not_found: "Bunday faol guruh topilmadi. Kodni tekshiring.", student_group_joined: "Siz guruhga muvaffaqiyatli qo‘shildingiz.", student_group_already: "Siz bu guruhga allaqachon qo‘shilgansiz.", student_my_groups: "👥 Mening guruhlarim", student_no_groups: "Hali hech qanday guruhga qo‘shilmagansiz.", student_active_tests: "🚀 Faol testlar", student_no_active_tests: "Hozircha faol test yo‘q. O‘qituvchi testni boshlaganda shu yerda ko‘rinadi.", student_test_start: "🚀 Testni boshlash", student_test_info: "📝 {total} ta savol · ⏱️ {duration} daqiqa", student_test_remaining: "Qolgan vaqt: {time}", student_new_test: "🔔 Yangi test boshlandi", student_session_expired: "⏰ Bu test sessiyasi tugagan.", student_session_access: "Bu guruh testiga kirish uchun avval guruhga qo‘shiling.", student_active_students: "Faol o‘quvchilar", student_completed_students: "Yakunlagan", student_time_up: "⏰ Vaqt tugadi.", student_test_completed: "✅ Test yakunlangan", student_test_result: "Natijangiz: {score}/{total} ({percent}%)",
@@ -13975,7 +14023,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 btn_next: "Keyingi savol ➡️", btn_finish: "Natijani saqlash 🏁", 
                 alert_del_quiz: "Ushbu testni o'chirmoqchimisiz?", missing_input: "✍️ Iltimos, matn kiriting yoki fayl yuklang!", alert_success: "🎉 Test muvaffaqiyatli yaratildi!", quiz_split_title: "📚 Testni bo‘lish", quiz_split_subtitle: "{total} ta savol tayyor. Test hajmini tanlang:", quiz_split_single: "Bitta test", quiz_split_parts: "{count} ta alohida test", quiz_split_questions: "{count} ta savol", quiz_split_working: "Testlar tayyorlanmoqda...", quiz_split_done: "✅ {count} ta test tayyorlandi.", quiz_split_error: "❌ Testlarni bo‘lishda xatolik.", ai_generation_title: "AI test yaratmoqda", ai_generation_subtitle: "Savollar tahlil qilinmoqda va test tayyorlanmoqda...", ai_generation_lock_note: "Iltimos kuting. Test tayyor bo‘lguncha ilova boshqaruvlari vaqtincha bloklangan.", 
                 card_front: "Oldi (Atama/Savol):", card_back: "Orqasi (Tarjimasi/Javob):", btn_add_card: "Yangi kartochka qo'shish", 
-                premium_status_title: "💎 Sizning Statusingiz", regular_user: "Oddiy foydalanuvchi", premium_limit_text: "30 kunlik bepul limitingiz:", limit_unit: "ta", activate_btn: "Faollashtirish",
+                premium_status_title: "💎 Sizning Statusingiz", regular_user: "Oddiy foydalanuvchi", premium_limit_text: "30 kunlik bepul limitingiz:", referat_free_limit_label: "Bepul referat limiti:", limit_unit: "ta", activate_btn: "Faollashtirish",
                 modal_payment_text: "To'lov summasi:", modal_payment_hint: "Payme yoki Click orqali quyidagi plastik kartaga pul o'tkazing:",
                 copy_hint: "Karta raqamiga bosib nusxa oling 📄", toast_copied: "Karta raqami nusxalandi! ✅",
                 btn_send_receipt: "Chekni yuborish 📑", btn_close: "Yopish", 
@@ -13994,7 +14042,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 teacher_panel_title: "O'qituvchi rejimi", teacher_panel_desc: "Testni tanlang va guruh sessiyasini oching. O‘quvchilar “Guruhga qo‘shilish” bo‘limidan havolasiz kirishadi.", teacher_create_btn: "🚀 Guruh testini boshlash", teacher_no_quizzes: "Avval test yarating.", teacher_created: "Sessiya yaratildi.", teacher_results: "📊 Natijalar", teacher_copy: "🔗 Havolani nusxalash", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Hali natijalar yo'q.", teacher_refresh: "Yangilash", teacher_loading: "Yuklanmoqda...", teacher_group_name: "Guruh nomi", teacher_group_desc: "Izoh (ixtiyoriy)", teacher_create_group: "➕ Guruh yaratish", teacher_delete: "🗑️ O‘chirish", teacher_group_empty: "Hozircha guruhlar yo‘q.", teacher_group_code: "Guruh kodi", teacher_members: "a’zo", teacher_active_word: "Faol", teacher_closed_word: "Yopiq", teacher_delete_session: "🗑️ Sessiyani o‘chirish", teacher_assign_variant: "Oddiy test", teacher_assign_title: "Topshiriq nomi (ixtiyoriy)", teacher_assign_btn: "📋 Topshiriq biriktirish", teacher_assignment_empty: "Hozircha topshiriqlar yo‘q.", teacher_start_assignment: "🚀 Testni boshlash", teacher_assignment_started: "Guruh test sessiyasi yaratildi.", teacher_group_test_type: "Guruh testi", teacher_assignment_type: "Topshiriq", teacher_assignment_duration: "Test vaqti", teacher_assignment_duration_hint: "Topshiriq uchun test davomiyligini tanlang.", teacher_show_results: "📊 Natijalarni ko‘rsatish", teacher_no_sessions: "Hali sessiya yo‘q.", teacher_no_student_results: "Hali o‘quvchilar natijasi yo‘q.", teacher_generate_variants: "⚙️ A, B, C, D variantlarni yaratish", teacher_variants_ready: "Variantlar tayyorlandi. Har bir variant uchun test kaliti saqlandi.", teacher_export_pdf_key: "PDF + Kalit", teacher_export_word_key: "Word + Kalit", teacher_variant_a: "Variant A", teacher_variant_b: "Variant B", teacher_variant_c: "Variant C", teacher_variant_d: "Variant D", teacher_download_confirm: "Quyidagi faylni yuklab olishni xohlaysizmi?", teacher_download_failed: "❌ Faylni yuklab bo‘lmadi. Iltimos, qayta urinib ko‘ring.", teacher_server_error: "❌ Serverda ichki xatolik yuz berdi. Iltimos, qayta urinib ko‘ring.", teacher_db_busy: "⚠️ Server ma’lumotlar bazasi band. Bir necha soniyadan so‘ng qayta urinib ko‘ring.", teacher_select_group_quiz: "Guruh va testni tanlang.", teacher_select_quiz_variant: "Test va kamida bitta variantni tanlang.", teacher_select_group: "Guruhni tanlang.", public_locked: "🔒 Ommaviy testlardan foydalanish uchun Premium yoki O'qituvchi tarifini faollashtiring.", public_open: "▶️"
             },
             ru: {
-                summary_card_title: "Создать конспект", summary_card_desc: "Подготовьте конспект с помощью ИИ", summary_screen_title: "Создать конспект", summary_back_aria: "Назад", summary_limit_label: "📚 Мои конспекты", summary_remaining_unit: "осталось", summary_usage_loading: "Загрузка лимита...", summary_builder_title: "Создатель конспектов ИИ", summary_builder_desc: "Создайте структурированный конспект по теме или учебному материалу.", summary_topic_label: "Тема конспекта", summary_topic_placeholder: "Введите тему или краткое описание...", summary_source_label: "Исходный файл (PDF или DOCX, необязательно)", summary_choose_file: "Выбрать файл", summary_no_file: "Файл не выбран", summary_type_label: "Тип конспекта", summary_style_standard: "Обычный конспект", summary_style_detailed: "Подробный конспект", summary_style_exam: "Подготовка к экзамену", summary_purpose_label: "Цель использования", summary_purpose_notebook: "Для переписывания в тетрадь", summary_purpose_digital: "Для использования в Word/PDF", summary_generate_btn: "📚 Создать конспект", summary_generating: "Создаём конспект...", summary_success: "Конспект готов! Скачайте Word или PDF.", summary_error: "Не удалось создать конспект.", summary_need_source: "Введите тему или выберите файл PDF/DOCX.", summary_limit_error: "Лимит конспектов исчерпан. Активируйте тариф.", summary_usage_text: "Всего: {limit} | Использовано: {used}", summary_unlimited: "Безлимитные конспекты", summary_file_selected: "Выбран файл: ",
+                summary_card_title: "Создать конспект", summary_card_desc: "Подготовьте конспект с помощью ИИ", summary_screen_title: "Создать конспект", summary_back_aria: "Назад", summary_limit_label: "📚 Мои конспекты", summary_remaining_unit: "осталось", summary_usage_loading: "Загрузка лимита...", summary_builder_title: "Создатель конспектов ИИ", summary_builder_desc: "Создайте структурированный конспект по теме или учебному материалу.", summary_topic_label: "Тема конспекта", summary_topic_placeholder: "Введите тему или краткое описание...", summary_source_label: "Исходный файл (PDF или DOCX, необязательно)", summary_choose_file: "Выбрать файл", summary_no_file: "Файл не выбран", summary_type_label: "Тип конспекта", summary_style_standard: "Обычный конспект", summary_style_detailed: "Подробный конспект", summary_style_exam: "Подготовка к экзамену", summary_purpose_label: "Цель использования", summary_purpose_notebook: "Для переписывания в тетрадь", summary_purpose_digital: "Для использования в Word/PDF", summary_generate_btn: "📚 Создать конспект", summary_generating: "Создаём конспект...", summary_success: "Конспект готов! Скачайте Word или PDF.", summary_error: "Не удалось создать конспект.", summary_need_source: "Введите тему или выберите файл PDF/DOCX.", summary_limit_error: "Лимит конспектов исчерпан. Активируйте тариф.", summary_usage_text: "Всего: {limit} | Использовано: {used}", summary_unlimited: "Безлимитные конспекты", summary_file_selected: "Выбран файл: ", referat_card_title: "Создать реферат", referat_card_desc: "Подготовьте реферат с помощью ИИ", referat_screen_title: "Создать реферат", referat_back_aria: "Назад", referat_limit_label: "📄 Мои рефераты", referat_remaining_unit: "осталось", referat_usage_loading: "Загрузка лимита...", referat_builder_title: "ИИ-создатель рефератов", referat_builder_desc: "Создайте структурированный академический реферат по теме или учебному материалу.", referat_topic_label: "Тема реферата", referat_topic_placeholder: "Введите тему реферата...", referat_author_label: "Имя и фамилия студента", referat_author_placeholder: "Имя Фамилия", referat_university_label: "Университет / учебное заведение", referat_university_placeholder: "Название учебного заведения", referat_faculty_label: "Факультет", referat_faculty_placeholder: "Название факультета", referat_group_label: "Группа", referat_group_placeholder: "Номер группы", referat_subject_label: "Предмет", referat_subject_placeholder: "Название предмета", referat_teacher_label: "Проверяющий преподаватель", referat_teacher_placeholder: "Имя и фамилия преподавателя", referat_source_label: "Исходный файл (PDF или DOCX, необязательно)", referat_choose_file: "Выбрать файл", referat_no_file: "Файл не выбран", referat_generate_btn: "📄 Создать реферат", referat_need_source: "Введите тему реферата или выберите файл PDF/DOCX.", referat_author_required: "Введите имя и фамилию студента.", referat_limit_error: "Лимит рефератов исчерпан. Активируйте тариф.", referat_error: "Не удалось создать реферат. Попробуйте ещё раз.", referat_usage_text: "Всего: {limit} | Использовано: {used}", referat_unlimited: "Безлимитные рефераты", referat_generating: "Создаём реферат...", referat_file_selected: "Выбран файл: ", referat_no_file_selected: "Файл не выбран", referat_download_ready: "Реферат готов! Выберите формат для скачивания.", referat_download_docx: "Скачать Word (.DOCX)", referat_download_pdf: "Скачать PDF", referat_download_error: "Не удалось скачать файл. Попробуйте ещё раз.", 
 
                 nav_create: "Создать", nav_library: "Библиотека", nav_teacher: "Учитель", teacher_active: "АКТИВЕН", teacher_center_title: "👨‍🏫 Профессиональный центр учителя", teacher_center_desc: "Группы, задания, тест-сессии, 4 варианта, результаты и экспорт — всё в одном месте.", teacher_groups: "Группы", teacher_groups_desc: "Управление классами и группами", teacher_assignments: "Задания", teacher_assignments_desc: "Назначение теста группе", teacher_variants: "4 варианта", teacher_variants_desc: "Варианты A, B, C, D", teacher_results_title: "Результаты", teacher_results_desc: "Баллы, рейтинг и статистика", teacher_session_title: "🚀 Запустить групповой тест", teacher_session_note: "После создания сессии ученики входят в тест через раздел «Присоединиться к группе». Результаты собираются автоматически.", teacher_variant_title: "🔄 Варианты теста", teacher_variant_note: "Один тест в 4 вариантах A, B, C, D с соответствующими ключами.", teacher_sessions_title: "📚 Активные и прошлые сессии", teacher_group_name_required: "Введите название группы.", teacher_group_created: "Группа создана.", teacher_assignment_created: "Задание назначено группе.", teacher_variant_label: "Вариант", teacher_student: "Ученик", teacher_score: "Баллы", teacher_refresh: "Обновить", teacher_loading: "Загрузка...", nav_settings: "Настройки", nav_premium: "Премиум",
                 tab_tests: "❓ Тесты", tab_public: "🌐 Публичные", tab_cards: "🗂️ Карточки", student_group_join_title: "Присоединиться к группе", student_group_join_desc: "Введите 6-значный код группы, который дал вам учитель.", student_group_code_placeholder: "Например: A7K29P", student_group_join_btn: "➕ Присоединиться", student_group_code_required: "Введите код группы.", student_group_not_found: "Активная группа с таким кодом не найдена. Проверьте код.", student_group_joined: "Вы успешно присоединились к группе.", student_group_already: "Вы уже состоите в этой группе.", student_my_groups: "👥 Мои группы", student_no_groups: "Вы пока не состоите ни в одной группе.", student_active_tests: "🚀 Активные тесты", student_no_active_tests: "Активных тестов пока нет. Когда учитель запустит тест, он появится здесь.", student_test_start: "🚀 Начать тест", student_test_info: "📝 {total} вопросов · ⏱️ {duration} мин.", student_test_remaining: "Осталось: {time}", student_new_test: "🔔 Новый тест начался", student_session_expired: "⏰ Эта сессия теста завершена.", student_session_access: "Чтобы войти в групповой тест, сначала присоединитесь к группе.", student_active_students: "Активные ученики", student_completed_students: "Завершили", student_time_up: "⏰ Время вышло.", student_test_completed: "✅ Тест завершён", student_test_result: "Ваш результат: {score}/{total} ({percent}%)",
@@ -14007,7 +14055,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 btn_next: "Следующий вопрос ➡️", btn_finish: "Сохранить результат 🏁", 
                 alert_del_quiz: "Вы хотите удалить этот тест?", missing_input: "✍️ Пожалуйста, введите текст или загрузите файл!", alert_success: "🎉 Тест успешно создан!", quiz_split_title: "📚 Разделить тест", quiz_split_subtitle: "Подготовлено {total} вопросов. Выберите размер теста:", quiz_split_single: "Один тест", quiz_split_parts: "{count} отдельных тестов", quiz_split_questions: "{count} вопросов", quiz_split_working: "Подготавливаем тесты...", quiz_split_done: "✅ Подготовлено тестов: {count}.", quiz_split_error: "❌ Не удалось разделить тест.", ai_generation_title: "Создаётся AI-тест", ai_generation_subtitle: "Вопросы анализируются и тест подготавливается...", ai_generation_lock_note: "Пожалуйста, подождите. Управление приложением временно заблокировано до завершения создания теста.", 
                 card_front: "Лицевая (Термин):", card_back: "Оборотная (Перевод):", btn_add_card: "Добавить карточку", 
-                premium_status_title: "💎 Ваш Статус", regular_user: "Обычный пользователь", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", limit_unit: "шт", activate_btn: "Активировать",
+                premium_status_title: "💎 Ваш Статус", regular_user: "Обычный пользователь", premium_limit_text: "Ваш бесплатный лимит на 30 дней:", referat_free_limit_label: "Бесплатный лимит рефератов:", limit_unit: "шт", activate_btn: "Активировать",
                 modal_payment_text: "Сумма оплаты:", modal_payment_hint: "Переведите деньги на следующую пластиковую карту через Payme или Click:",
                 copy_hint: "Нажмите на номер карты, чтобы скопировать 📄", toast_copied: "Номер карты скопирован! ✅",
                 btn_send_receipt: "Отправить чек 📑", btn_close: "Закрыть", 
@@ -14026,7 +14074,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 teacher_panel_title: "Режим учителя", teacher_panel_desc: "Выберите тест и создайте групповую сессию. Ученики входят в тест через раздел «Присоединиться к группе», без ссылки.", teacher_create_btn: "🚀 Запустить групповой тест", teacher_no_quizzes: "Сначала создайте тест.", teacher_created: "Сессия создана.", teacher_results: "📊 Результаты", teacher_copy: "🔗 Копировать ссылку", teacher_pdf: "PDF", teacher_word: "Word", teacher_no_results: "Результатов пока нет.", teacher_refresh: "Обновить", teacher_loading: "Загрузка...", teacher_group_name: "Название группы", teacher_group_desc: "Комментарий (необязательно)", teacher_create_group: "➕ Создать группу", teacher_delete: "🗑️ Удалить", teacher_group_empty: "Групп пока нет.", teacher_group_code: "Код группы", teacher_members: "уч.", teacher_active_word: "Активна", teacher_closed_word: "Закрыта", teacher_delete_session: "🗑️ Удалить сессию", teacher_assign_variant: "Обычный тест", teacher_assign_title: "Название задания (необязательно)", teacher_assign_btn: "📋 Назначить задание", teacher_assignment_empty: "Заданий пока нет.", teacher_start_assignment: "🚀 Начать тест", teacher_assignment_started: "Групповая тестовая сессия создана.", teacher_group_test_type: "Групповой тест", teacher_assignment_type: "Задание", teacher_assignment_duration: "Время теста", teacher_assignment_duration_hint: "Выберите длительность теста для задания.", teacher_show_results: "📊 Показать результаты", teacher_no_sessions: "Сессий пока нет.", teacher_no_student_results: "Результатов учеников пока нет.", teacher_generate_variants: "⚙️ Создать варианты A, B, C, D", teacher_variants_ready: "Варианты готовы. Ключ для каждого варианта сохранён.", teacher_export_pdf_key: "PDF + ключ", teacher_export_word_key: "Word + ключ", teacher_variant_a: "Вариант A", teacher_variant_b: "Вариант B", teacher_variant_c: "Вариант C", teacher_variant_d: "Вариант D", teacher_download_confirm: "Вы хотите скачать следующий файл?", teacher_download_failed: "❌ Не удалось скачать файл. Попробуйте ещё раз.", teacher_server_error: "❌ Произошла внутренняя ошибка сервера. Попробуйте ещё раз.", teacher_db_busy: "⚠️ База данных сервера занята. Повторите через несколько секунд.", teacher_select_group_quiz: "Выберите группу и тест.", teacher_select_quiz_variant: "Выберите тест и хотя бы один вариант.", teacher_select_group: "Выберите группу.", public_locked: "🔒 Для использования публичных тестов активируйте тариф Premium или Для Учителей.", public_open: "▶️"
             },
             en: {
-                summary_card_title: "Create notes", summary_card_desc: "Prepare study notes with AI", summary_screen_title: "Create notes", summary_back_aria: "Back", summary_limit_label: "📚 My notes", summary_remaining_unit: "remaining", summary_usage_loading: "Loading limit...", summary_builder_title: "AI notes creator", summary_builder_desc: "Create structured notes from a topic or study material.", summary_topic_label: "Notes topic", summary_topic_placeholder: "Enter a topic or a short description...", summary_source_label: "Source file (PDF or DOCX, optional)", summary_choose_file: "Choose file", summary_no_file: "No file selected", summary_type_label: "Notes type", summary_style_standard: "Standard notes", summary_style_detailed: "Detailed notes", summary_style_exam: "Exam preparation", summary_purpose_label: "Purpose", summary_purpose_notebook: "For copying into a notebook", summary_purpose_digital: "For Word/PDF use", summary_generate_btn: "📚 Create notes", summary_generating: "Creating notes...", summary_success: "Your notes are ready! Download Word or PDF.", summary_error: "Could not create notes.", summary_need_source: "Enter a topic or choose a PDF/DOCX file.", summary_limit_error: "Your notes limit is exhausted. Activate a plan.", summary_usage_text: "Total: {limit} | Used: {used}", summary_unlimited: "Unlimited notes", summary_file_selected: "Selected file: ",
+                summary_card_title: "Create notes", summary_card_desc: "Prepare study notes with AI", summary_screen_title: "Create notes", summary_back_aria: "Back", summary_limit_label: "📚 My notes", summary_remaining_unit: "remaining", summary_usage_loading: "Loading limit...", summary_builder_title: "AI notes creator", summary_builder_desc: "Create structured notes from a topic or study material.", summary_topic_label: "Notes topic", summary_topic_placeholder: "Enter a topic or a short description...", summary_source_label: "Source file (PDF or DOCX, optional)", summary_choose_file: "Choose file", summary_no_file: "No file selected", summary_type_label: "Notes type", summary_style_standard: "Standard notes", summary_style_detailed: "Detailed notes", summary_style_exam: "Exam preparation", summary_purpose_label: "Purpose", summary_purpose_notebook: "For copying into a notebook", summary_purpose_digital: "For Word/PDF use", summary_generate_btn: "📚 Create notes", summary_generating: "Creating notes...", summary_success: "Your notes are ready! Download Word or PDF.", summary_error: "Could not create notes.", summary_need_source: "Enter a topic or choose a PDF/DOCX file.", summary_limit_error: "Your notes limit is exhausted. Activate a plan.", summary_usage_text: "Total: {limit} | Used: {used}", summary_unlimited: "Unlimited notes", summary_file_selected: "Selected file: ", referat_card_title: "Create report", referat_card_desc: "Prepare a report with AI", referat_screen_title: "Create report", referat_back_aria: "Back", referat_limit_label: "📄 My reports", referat_remaining_unit: "remaining", referat_usage_loading: "Loading limit...", referat_builder_title: "AI report creator", referat_builder_desc: "Create a structured academic report from a topic or study material.", referat_topic_label: "Report topic", referat_topic_placeholder: "Enter the report topic...", referat_author_label: "Student full name", referat_author_placeholder: "First and last name", referat_university_label: "University / institution", referat_university_placeholder: "Name of institution", referat_faculty_label: "Faculty", referat_faculty_placeholder: "Faculty name", referat_group_label: "Group", referat_group_placeholder: "Group number", referat_subject_label: "Subject", referat_subject_placeholder: "Subject name", referat_teacher_label: "Instructor", referat_teacher_placeholder: "Instructor full name", referat_source_label: "Source file (PDF or DOCX, optional)", referat_choose_file: "Choose file", referat_no_file: "No file selected", referat_generate_btn: "📄 Create report", referat_need_source: "Enter a report topic or choose a PDF/DOCX file.", referat_author_required: "Enter the student's full name.", referat_limit_error: "Your report limit is exhausted. Activate a plan.", referat_error: "Could not create the report. Please try again.", referat_usage_text: "Total: {limit} | Used: {used}", referat_unlimited: "Unlimited reports", referat_generating: "Creating your report...", referat_file_selected: "Selected file: ", referat_no_file_selected: "No file selected", referat_download_ready: "Your report is ready! Choose a format to download.", referat_download_docx: "Download Word (.DOCX)", referat_download_pdf: "Download PDF", referat_download_error: "Could not download the file. Please try again.", 
 
                 nav_create: "Create", nav_library: "Library", nav_teacher: "Teacher", teacher_active: "ACTIVE", teacher_center_title: "👨‍🏫 Professional Teacher Center", teacher_center_desc: "Groups, assignments, test sessions, 4 variants, results and exports — all in one place.", teacher_groups: "Groups", teacher_groups_desc: "Manage classes and groups", teacher_assignments: "Assignments", teacher_assignments_desc: "Assign a quiz to a group", teacher_variants: "4 variants", teacher_variants_desc: "A, B, C, D variants", teacher_results_title: "Results", teacher_results_desc: "Scores, ranking and statistics", teacher_session_title: "🚀 Start group quiz", teacher_session_note: "After creating a session, students enter the test through the “Join group” section without a link. Results are collected automatically.", teacher_variant_title: "🔄 Quiz variants", teacher_variant_note: "One quiz in 4 variants A, B, C, D with matching answer keys.", teacher_sessions_title: "📚 Active and previous sessions", teacher_group_name_required: "Enter a group name.", teacher_group_created: "Group created.", teacher_assignment_created: "Assignment was assigned to the group.", teacher_variant_label: "Variant", teacher_student: "Student", teacher_score: "Score", teacher_refresh: "Refresh", teacher_loading: "Loading...", nav_settings: "Settings", nav_premium: "Premium",
                 tab_tests: "❓ Quizzes", tab_public: "🌐 Public", tab_cards: "🗂️ Flashcards", student_group_join_title: "Join a group", student_group_join_desc: "Enter the 6-character group code provided by your teacher.", student_group_code_placeholder: "Example: A7K29P", student_group_join_btn: "➕ Join group", student_group_code_required: "Enter the group code.", student_group_not_found: "No active group was found with this code. Check the code.", student_group_joined: "You joined the group successfully.", student_group_already: "You are already a member of this group.", student_my_groups: "👥 My groups", student_no_groups: "You have not joined any groups yet.", student_active_tests: "🚀 Active tests", student_no_active_tests: "No active tests yet. It will appear here when the teacher starts a test.", student_test_start: "🚀 Start test", student_test_info: "📝 {total} questions · ⏱️ {duration} min", student_test_remaining: "Time left: {time}", student_new_test: "🔔 New test started", student_session_expired: "⏰ This test session has ended.", student_session_access: "Join the group first to enter this group test.", student_active_students: "Active students", student_completed_students: "Completed", student_time_up: "⏰ Time is up.", student_test_completed: "✅ Test completed", student_test_result: "Your result: {score}/{total} ({percent}%)",
@@ -14039,7 +14087,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 btn_next: "Next Question ➡️", btn_finish: "Finish & Save 🏁", 
                 alert_del_quiz: "Do you want to delete this quiz?", missing_input: "✍️ Please enter text or upload a file!", alert_success: "🎉 Quiz successfully created!", quiz_split_title: "📚 Split quiz", quiz_split_subtitle: "{total} questions are ready. Choose the quiz size:", quiz_split_single: "One quiz", quiz_split_parts: "{count} separate quizzes", quiz_split_questions: "{count} questions", quiz_split_working: "Preparing quizzes...", quiz_split_done: "✅ {count} quizzes are ready.", quiz_split_error: "❌ Failed to split the quiz.", ai_generation_title: "Creating AI quiz", ai_generation_subtitle: "Questions are being analyzed and the quiz is being prepared...", ai_generation_lock_note: "Please wait. App controls are temporarily locked until the quiz is ready.", 
                 card_front: "Front (Term/Question):", card_back: "Back (Translation/Answer):", btn_add_card: "Add New Flashcard", 
-                premium_status_title: "💎 Your Status", regular_user: "Regular User", premium_limit_text: "Your 30-day free limit:", limit_unit: "pcs", activate_btn: "Activate",
+                premium_status_title: "💎 Your Status", regular_user: "Regular User", premium_limit_text: "Your 30-day free limit:", referat_free_limit_label: "Free report limit:", limit_unit: "pcs", activate_btn: "Activate",
                 modal_payment_text: "Payment amount:", modal_payment_hint: "Transfer money to the following card via Payme or Click:",
                 copy_hint: "Click on the card number to copy 📄", toast_copied: "Card number copied! ✅",
                 btn_send_receipt: "Send Receipt 📑", btn_close: "Close", 
@@ -14091,6 +14139,8 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 const creditLabel = currentLang === 'ru' ? ` • ${tariffCredits.toLocaleString('ru-RU')} кредитов на слайды` : currentLang === 'en' ? ` • ${tariffCredits.toLocaleString('en-US')} slide credits` : ` • ${tariffCredits.toLocaleString('uz-UZ')} ta slayd krediti`;
                 const summaryLimit = Number(item.summary_limit) || 0;
                 const summaryLabel = currentLang === 'ru' ? ` • 📚 ${summaryLimit} конспект(а)` : currentLang === 'en' ? ` • 📚 ${summaryLimit} notes` : ` • 📚 ${summaryLimit} ta konspekt`;
+                const referatLimit = Number(item.referat_limit) || 0;
+                const referatLabel = currentLang === 'ru' ? ` • 📄 ${referatLimit} реферат(а)` : currentLang === 'en' ? ` • 📄 ${referatLimit} reports` : ` • 📄 ${referatLimit} ta referat`;
                 const priceNode = document.getElementById(`tariff-price-${key}`);
                 if (priceNode) priceNode.innerText = tariffDetails[key].price;
                 const card = document.getElementById(`card-${key}`);
@@ -14106,7 +14156,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                         if (currentLang === 'ru') desc.innerText = `${duration} безлимитного использования`;
                         else if (currentLang === 'en') desc.innerText = `${duration} of unlimited access`;
                         else desc.innerText = `${duration} davomida cheksiz foydalanish`;
-                        desc.innerText += creditLabel + summaryLabel;
+                        desc.innerText += creditLabel + summaryLabel + referatLabel;
                     }
                 }
             });
@@ -14115,6 +14165,8 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             const freeLimits = config.free_limits_display || {};
             const quizLimitNode = document.getElementById('p-limit-val');
             if (quizLimitNode && freeLimits.quiz) quizLimitNode.innerText = freeLimits.quiz[currentLang] || freeLimits.quiz.uz || '—';
+            const referatLimitNode = document.getElementById('p-referat-limit-val');
+            if (referatLimitNode && freeLimits.referat) referatLimitNode.innerText = freeLimits.referat[currentLang] || freeLimits.referat.uz || '—';
             window.quizAIFreeLimitConfig = config.free_limits || {};
             tariffConfigLoaded = true;
         }
@@ -14126,6 +14178,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             } catch (e) { console.log('Tarif sozlamalari yuklanmadi:', e); }
         }
         loadTariffConfig();
+        loadReferatUsage();
 
         function showAppAlert(icon, text, callback = null) {
             document.getElementById('app-dialog-icon').innerText = icon;
@@ -14729,6 +14782,128 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             }
         }
 
+        let referatCurrentRemaining = 0;
+        let referatGeneratedFiles = null;
+        const referatFileInput = document.getElementById('referat-source-file');
+        if (referatFileInput) referatFileInput.addEventListener('change', function() {
+            const node = document.getElementById('referat-source-file-name');
+            if (node) node.textContent = this.files && this.files[0]
+                ? (langPack[currentLang].referat_file_selected + this.files[0].name)
+                : langPack[currentLang].referat_no_file_selected;
+        });
+        function openReferatScreen() {
+            switchScreen('referat');
+            loadReferatUsage();
+        }
+        async function loadReferatUsage() {
+            const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+            if (!tgUser || !tgUser.id) return;
+            try {
+                const response = await fetch(`${BASE_URL}/api/referat/usage?user_id=${encodeURIComponent(tgUser.id)}`, {cache:'no-store'});
+                const data = await response.json();
+                if (!response.ok || data.status !== 'ok') throw new Error('referat_usage_failed');
+                const card = document.querySelector('.referat-tool-card');
+                if (card) card.style.display = data.enabled === false ? 'none' : '';
+                if (data.enabled === false) return;
+                referatCurrentRemaining = data.remaining;
+                const remaining = document.getElementById('referat-remaining');
+                const caption = document.getElementById('referat-usage-caption');
+                if (remaining) remaining.textContent = data.unlimited ? '∞' : data.remaining;
+                if (caption) caption.textContent = data.unlimited
+                    ? langPack[currentLang].referat_unlimited
+                    : langPack[currentLang].referat_usage_text.replace('{limit}', data.limit).replace('{used}', data.used);
+                const button = document.getElementById('referat-generate-btn');
+                if (button) button.disabled = !data.allowed;
+            } catch (error) { console.warn('Referat limiti yuklanmadi:', error); }
+        }
+        function showReferatResult(files, title) {
+            referatGeneratedFiles = files || null;
+            const overlay = document.getElementById('referat-result-overlay');
+            const titleNode = document.getElementById('referat-result-title');
+            const subtitleNode = document.getElementById('referat-result-subtitle');
+            if (titleNode) titleNode.textContent = title || 'Referat';
+            if (subtitleNode) subtitleNode.textContent = langPack[currentLang].referat_download_ready;
+            document.querySelectorAll('[data-referat-result-label]').forEach(node => {
+                const format = node.getAttribute('data-referat-result-label');
+                node.textContent = format === 'pdf' ? langPack[currentLang].referat_download_pdf : langPack[currentLang].referat_download_docx;
+            });
+            if (overlay) { overlay.classList.add('active'); overlay.setAttribute('aria-hidden', 'false'); }
+        }
+        function closeReferatResult() {
+            const overlay = document.getElementById('referat-result-overlay');
+            if (overlay) { overlay.classList.remove('active'); overlay.setAttribute('aria-hidden', 'true'); }
+            referatGeneratedFiles = null;
+        }
+        function downloadReferatFile(format) {
+            const item = referatGeneratedFiles && referatGeneratedFiles[format];
+            if (!item || !item.url) {
+                showAppAlert('⚠️', langPack[currentLang].referat_download_error);
+                return;
+            }
+            const fileName = item.filename || (format === 'pdf' ? 'Referat.pdf' : 'Referat.docx');
+            const downloadUrl = new URL(item.url, BASE_URL).href;
+            try {
+                if (tg && typeof tg.downloadFile === 'function') {
+                    tg.downloadFile({url: downloadUrl, file_name: fileName}, function(result) {
+                        if (result && result.status === 'cancelled') return;
+                    });
+                    return;
+                }
+                const anchor = document.createElement('a');
+                anchor.href = downloadUrl;
+                anchor.download = fileName;
+                anchor.rel = 'noopener';
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+            } catch (error) {
+                console.warn('Referat faylini yuklab olishda xato:', error);
+                showAppAlert('⚠️', langPack[currentLang].referat_download_error);
+            }
+        }
+        async function generateReferat() {
+            const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+            const topic = document.getElementById('referat-topic-input')?.value.trim() || '';
+            const file = document.getElementById('referat-source-file')?.files?.[0];
+            const author = document.getElementById('referat-author-input')?.value.trim() || '';
+            const status = document.getElementById('referat-status');
+            const button = document.getElementById('referat-generate-btn');
+            if (!topic && !file) { status.hidden = false; status.textContent = langPack[currentLang].referat_need_source; return; }
+            if (!author) { status.hidden = false; status.textContent = langPack[currentLang].referat_author_required; return; }
+            if (!tgUser || !tgUser.id) { status.hidden = false; status.textContent = langPack[currentLang].referat_error; return; }
+            const form = new FormData();
+            form.append('user_id', tgUser.id);
+            form.append('topic', topic);
+            form.append('author', author);
+            form.append('university', document.getElementById('referat-university-input')?.value.trim() || '');
+            form.append('faculty', document.getElementById('referat-faculty-input')?.value.trim() || '');
+            form.append('group_name', document.getElementById('referat-group-input')?.value.trim() || '');
+            form.append('subject', document.getElementById('referat-subject-input')?.value.trim() || '');
+            form.append('teacher', document.getElementById('referat-teacher-input')?.value.trim() || '');
+            form.append('lang', currentLang);
+            if (file) form.append('file', file);
+            button.disabled = true;
+            status.hidden = true;
+            closeReferatResult();
+            setAIGenerationLock(true, 'referat');
+            try {
+                const response = await fetch(`${BASE_URL}/api/referat/generate`, {method:'POST', body:form});
+                const data = await response.json();
+                if (!response.ok || data.status !== 'ok') {
+                    if (response.status === 402) throw new Error(langPack[currentLang].referat_limit_error);
+                    throw new Error(data.detail || langPack[currentLang].referat_error);
+                }
+                showReferatResult(data.download, data.title);
+                await loadReferatUsage();
+            } catch (error) {
+                status.hidden = false;
+                status.textContent = error.message || langPack[currentLang].referat_error;
+            } finally {
+                setAIGenerationLock(false, 'referat');
+                button.disabled = false;
+            }
+        }
+
         let slidesCreditsPerSlide = 1;
         let slidesCurrentBalance = 0;
 
@@ -15199,8 +15374,14 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
                 ru: {title:'Конспект готовится...', subtitle:'Анализируем тему и создаём конспект.', note:'Ваш конспект готовится, пожалуйста, подождите. Управление приложением временно заблокировано.'},
                 en: {title:'Preparing your notes...', subtitle:'Your topic is being analyzed and your notes are being created.', note:'Your notes are being prepared. Please wait. App controls are temporarily locked.'}
             };
-            if (mode === 'slides' || mode === 'summary') {
-                const copy = (mode === 'summary' ? summaryText : slideText)[currentLang] || (mode === 'summary' ? summaryText : slideText).uz;
+            const referatText = {
+                uz: {title:'Referat tayyorlanmoqda...', subtitle:'Mavzu va manba tahlil qilinib, akademik referat yozilmoqda.', note:'Referatingiz tayyorlanmoqda. Iltimos kuting, jarayon tugagunicha ilova boshqaruvi vaqtincha bloklanadi.'},
+                ru: {title:'Реферат готовится...', subtitle:'Анализируем тему и источник, формируем академический реферат.', note:'Ваш реферат готовится. Пожалуйста, подождите; управление приложением временно заблокировано.'},
+                en: {title:'Preparing your report...', subtitle:'Analyzing the topic and source and writing your academic report.', note:'Your report is being prepared. Please wait; app controls are temporarily locked.'}
+            };
+            if (mode === 'slides' || mode === 'summary' || mode === 'referat') {
+                const selectedText = mode === 'summary' ? summaryText : (mode === 'referat' ? referatText : slideText);
+                const copy = selectedText[currentLang] || selectedText.uz;
                 if (title) title.innerText = copy.title;
                 if (subtitle) subtitle.innerText = copy.subtitle;
                 if (note) note.innerText = copy.note;
@@ -15214,6 +15395,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             document.body.classList.toggle('ai-generation-active', aiGenerationLocked);
             document.body.classList.toggle('slides-generation-active', aiGenerationLocked && mode === 'slides');
             document.body.classList.toggle('summary-generation-active', aiGenerationLocked && mode === 'summary');
+            document.body.classList.toggle('referat-generation-active', aiGenerationLocked && mode === 'referat');
         }
 
         async function startGeneration() {
@@ -16647,6 +16829,17 @@ window.onload = function() {
         </div>
     </div>
 
+    <div id="referat-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="slides-result-card glass-panel">
+            <div class="slides-result-icon">🎉</div>
+            <h2 id="referat-result-title">Referat</h2>
+            <p id="referat-result-subtitle">Referatingiz tayyor! Kerakli formatni tanlab yuklab oling.</p>
+            <button type="button" class="slides-download-btn slides-download-pptx" onclick="downloadReferatFile('docx')"><span>📝</span><span data-referat-result-label="docx">Word (.DOCX) yuklab olish</span></button>
+            <button type="button" class="slides-download-btn slides-download-pdf" onclick="downloadReferatFile('pdf')"><span>📕</span><span data-referat-result-label="pdf">PDF yuklab olish</span></button>
+            <button type="button" class="slides-result-close" onclick="closeReferatResult()">✕</button>
+        </div>
+    </div>
+
     <div id="slides-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
         <div class="slides-result-card glass-panel">
             <div class="slides-result-icon">🎉</div>
@@ -16660,9 +16853,9 @@ window.onload = function() {
 
 
 <style id="quiz-ai-slides-loader-download">
-body.slides-generation-active #ai-generation-overlay,body.summary-generation-active #ai-generation-overlay{background:rgba(3,12,22,.91)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
-body.slides-generation-active #ai-generation-overlay .ai-generation-card,body.summary-generation-active #ai-generation-overlay .ai-generation-card{animation:aiGenerationCardIn .16s ease-out;box-shadow:0 12px 34px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.14)}
-body.slides-generation-active #ai-generation-overlay .ai-loader-orbit,body.summary-generation-active #ai-generation-overlay .ai-loader-orbit{animation:ai-loader-breathe 2.2s ease-in-out infinite}
+body.slides-generation-active #ai-generation-overlay,body.summary-generation-active #ai-generation-overlay,body.referat-generation-active #ai-generation-overlay{background:rgba(3,12,22,.91)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+body.slides-generation-active #ai-generation-overlay .ai-generation-card,body.summary-generation-active #ai-generation-overlay .ai-generation-card,body.referat-generation-active #ai-generation-overlay .ai-generation-card{animation:aiGenerationCardIn .16s ease-out;box-shadow:0 12px 34px rgba(0,0,0,.48),inset 0 1px 0 rgba(255,255,255,.14)}
+body.slides-generation-active #ai-generation-overlay .ai-loader-orbit,body.summary-generation-active #ai-generation-overlay .ai-loader-orbit,body.referat-generation-active #ai-generation-overlay .ai-loader-orbit{animation:ai-loader-breathe 2.2s ease-in-out infinite}
 .slides-result-overlay{position:fixed;inset:0;z-index:18100;display:none;align-items:center;justify-content:center;padding:22px;box-sizing:border-box;background:rgba(3,10,18,.82)}
 .slides-result-overlay.active{display:flex}
 .slides-result-card{width:min(390px,100%);padding:24px 20px 20px;text-align:center;position:relative;background:linear-gradient(145deg,rgba(19,48,62,.98),rgba(7,18,29,.99));border:1px solid rgba(115,210,230,.34);border-radius:20px;box-shadow:0 18px 48px rgba(0,0,0,.48)}
