@@ -55,7 +55,7 @@ def get_branding_config(feature=None):
         "position": position,
         "size": size,
         "color": color,
-        "logo_enabled": False if is_referat else _env_bool("QUIZ_AI_QR_LOGO_ENABLED", False),
+        "logo_enabled": _env_bool("QUIZ_AI_QR_LOGO_ENABLED", False),
         "logo_path": os.getenv("QUIZ_AI_LOGO_PATH", str(Path(__file__).with_name("quiz_ai_logo.jpg"))).strip(),
         "caption": "" if is_referat else os.getenv("QUIZ_AI_QR_CAPTION", "Quiz AI").strip()[:60],
     }
