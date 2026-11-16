@@ -446,6 +446,24 @@ logging.info("Konspekt limitlari Railway'dan yuklandi | free=%s | daily=%s | wee
              SUMMARY_FREE_LIMIT, SUMMARY_TARIFF_LIMITS["daily"], SUMMARY_TARIFF_LIMITS["weekly"],
              SUMMARY_TARIFF_LIMITS["monthly"], SUMMARY_TARIFF_LIMITS["teachers"])
 
+# Referat yaratish limitlari konspekt tizimidan mustaqil boshqariladi.
+# 0 = o'chirilgan, -1 = cheksiz; barcha qiymatlar Railway Variables'dan olinadi.
+REFERAT_ENABLED = os.getenv("REFERAT_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+REFERAT_FREE_LIMIT = _env_summary_limit("REFERAT_FREE_LIMIT", 1)
+REFERAT_TARIFF_LIMITS = {
+    "daily": _env_summary_limit("REFERAT_DAILY_LIMIT", 1),
+    "weekly": _env_summary_limit("REFERAT_WEEKLY_LIMIT", 2),
+    "monthly": _env_summary_limit("REFERAT_MONTHLY_LIMIT", 5),
+    "teachers": _env_summary_limit("REFERAT_TEACHER_LIMIT", 7),
+}
+REFERAT_MAX_FILE_MB = max(1, min(30, _env_positive_int("REFERAT_MAX_FILE_MB", SUMMARY_MAX_FILE_MB)))
+REFERAT_MAX_SOURCE_CHARS = max(1000, min(200000, _env_positive_int("REFERAT_MAX_SOURCE_CHARS", SUMMARY_MAX_SOURCE_CHARS)))
+REFERAT_MAX_TOPIC_CHARS = max(20, min(5000, _env_positive_int("REFERAT_MAX_TOPIC_CHARS", 1500)))
+REFERAT_MAX_OUTPUT_TOKENS = max(3000, min(30000, _env_positive_int("REFERAT_MAX_OUTPUT_TOKENS", 16000)))
+logging.info("Referat limitlari Railway'dan yuklandi | enabled=%s | free=%s | daily=%s | weekly=%s | monthly=%s | teachers=%s",
+             REFERAT_ENABLED, REFERAT_FREE_LIMIT, REFERAT_TARIFF_LIMITS["daily"],
+             REFERAT_TARIFF_LIMITS["weekly"], REFERAT_TARIFF_LIMITS["monthly"], REFERAT_TARIFF_LIMITS["teachers"])
+
 # Bepul limitlar: musbat son = limit, -1 = cheksiz. 0 va boshqa manfiy qiymatlar yaroqsiz.
 def _env_free_limit(name, default=3):
     raw = os.getenv(name, str(default))
@@ -517,9 +535,9 @@ MESSAGES = {
     "uz": {
         "welcome": (
             "👋 *Salom, {name}!*\n"
-            "🎓 *Quiz AI* — Sunʼiy intellekt yordamida test va slaydlar yaratuvchi ilova.\n\n"
+            "🎓 *Quiz AI* — Sunʼiy intellekt yordamida test, slayd, konspekt va referat yaratuvchi ilova.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
-            "🤖 SI yordamida matn, PDF yoki DOCX dan test va slaydlar yaratish.\n"
+            "🤖 SI yordamida matn, PDF yoki DOCX dan test, slayd, konspekt va referatlar yaratish.\n"
             "📚 Testlarni Kutubxona bo'limida saqlash va ishlash.\n"
             "🌐 Ommaviy testlardan foydalanish.\n"
             "🗂 Flash Kartochkalar orqali takrorlash.\n"
@@ -528,7 +546,7 @@ MESSAGES = {
             "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
             "🔊 Ovoz va vibratsiya sozlamalari.\n"
             "🌍 O'zbek, Русский va English tillari.\n"
-            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}, Konspekt — {summary_limit}.\n"
+            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}, Konspekt — {summary_limit}, Referat — {referat_limit}.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -567,9 +585,9 @@ MESSAGES = {
     "ru": {
         "welcome": (
             "👋 *Привет, {name}!*\n"
-            "🎓 *Quiz AI* — Приложение, которое создает тесты и слайды с использованием искусственного интеллекта.\n\n"
+            "🎓 *Quiz AI* — Приложение для создания тестов, слайдов, конспектов и рефератов с помощью ИИ.\n\n"
             "✨ *Возможности приложения:*\n"
-            "🤖 Создавайте тесты и слайды из текста, PDF или DOCX с помощью ИИ.\n"
+            "🤖 Создавайте тесты, слайды, конспекты и рефераты из текста, PDF или DOCX с помощью ИИ.\n"
             "📚 Сохранение и прохождение тестов в разделе «Библиотека».\n"
             "🌐 Публичные тесты.\n"
             "🗂 Флеш-карточки для повторения материала.\n"
@@ -578,7 +596,7 @@ MESSAGES = {
             "📊 Удобный просмотр и анализ результатов.\n"
             "🔊 Настройки звука и вибрации.\n"
             "🌍 Узбекский, русский и английский языки.\n"
-            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}, конспекты — {summary_limit}.\n"
+            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}, конспекты — {summary_limit}, рефераты — {referat_limit}.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
@@ -616,9 +634,9 @@ MESSAGES = {
     "en": {
         "welcome": (
             "👋 *Hello, {name}!*\n"
-            "🎓 *Quiz AI* — An app that creates tests and slides using artificial intelligence.\n\n"
+            "🎓 *Quiz AI* — An app for creating quizzes, slides, study notes and reports with AI.\n\n"
             "✨ *App features:*\n"
-            "🤖 Create tests and slides from text, PDF or DOCX using AI.\n"
+            "🤖 Create quizzes, slides, study notes and reports from text, PDF or DOCX using AI.\n"
             "📚 Save and take quizzes in the Library.\n"
             "🌐 Public quizzes.\n"
             "🗂 Flashcards for revision.\n"
@@ -627,7 +645,7 @@ MESSAGES = {
             "📊 Easy results viewing and analysis.\n"
             "🔊 Sound and vibration settings.\n"
             "🌍 Uzbek, Russian and English languages.\n"
-            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}, notes — {summary_limit}.\n"
+            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}, notes — {summary_limit}, reports — {referat_limit}.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -728,6 +746,12 @@ def init_db():
         premium_source TEXT DEFAULT 'paid')""")
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS summary_usage (
+        user_id INTEGER PRIMARY KEY,
+        period_key TEXT NOT NULL DEFAULT '',
+        used INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0)""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_usage (
         user_id INTEGER PRIMARY KEY,
         period_key TEXT NOT NULL DEFAULT '',
         used INTEGER NOT NULL DEFAULT 0,
@@ -1268,6 +1292,20 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Slayd yuklash havolasi yaroqsiz yoki muddati tugagan."})
         return await call_next(request)
 
+    # Referat fayllari ham faqat qisqa muddatli, tasodifiy yuklash tokeni bilan ochiladi.
+    if path.startswith("/api/referat/download/") and request.method == "GET":
+        parts = path.rstrip("/").split("/")
+        download_token = parts[-2] if len(parts) >= 2 else ""
+        with _REFERAT_DOWNLOAD_LOCK:
+            ticket = _REFERAT_DOWNLOAD_FILES.get(download_token)
+            ticket_valid = bool(ticket and ticket.get("expires_at", 0) >= time.time())
+            if ticket_valid:
+                ticket["uses"] = ticket.get("uses", 0) + 1
+                ticket_valid = ticket["uses"] <= 10
+        if not ticket_valid:
+            return JSONResponse(status_code=401, content={"detail": "Referat yuklash havolasi yaroqsiz yoki muddati tugagan."})
+        return await call_next(request)
+
     # Konspekt fayllari Telegram Android downloader uchun qisqa muddatli token bilan yuklanadi.
     # Token tasodifiy, muddati va foydalanish soni cheklangan.
     if path.startswith("/api/summary/download/") and request.method == "GET":
@@ -1641,6 +1679,7 @@ def process_expired_free_limits():
                 quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, lang),
                 public_limit=format_free_limit(FREE_PUBLIC_LIMIT, lang),
                 flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, lang),
+                referat_limit=format_free_limit(REFERAT_FREE_LIMIT, lang),
             )
             bot.send_message(user_id, text, parse_mode="Markdown")
         except Exception as e:
@@ -1992,7 +2031,7 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang), summary_limit=format_free_limit(SUMMARY_FREE_LIMIT, user_lang))
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang), summary_limit=format_free_limit(SUMMARY_FREE_LIMIT, user_lang), referat_limit=format_free_limit(REFERAT_FREE_LIMIT, user_lang))
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
@@ -3539,6 +3578,7 @@ def get_tariff_config():
                 "names": item["names"],
                 "slide_credits": SLIDE_TARIFF_CREDITS.get(key, 0),
                 "summary_limit": SUMMARY_TARIFF_LIMITS.get(key, 0),
+                "referat_limit": REFERAT_TARIFF_LIMITS.get(key, 0),
             }
             for key, item in TARIFFS.items()
         },
@@ -3548,12 +3588,14 @@ def get_tariff_config():
             "public": None if FREE_PUBLIC_LIMIT == -1 else FREE_PUBLIC_LIMIT,
             "flashcard": None if FREE_FLASHCARD_LIMIT == -1 else FREE_FLASHCARD_LIMIT,
             "summary": None if SUMMARY_FREE_LIMIT == -1 else SUMMARY_FREE_LIMIT,
+            "referat": None if REFERAT_FREE_LIMIT == -1 else REFERAT_FREE_LIMIT,
         },
         "free_limits_display": {
             "quiz": {lang: format_free_limit(FREE_QUIZ_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "public": {lang: format_free_limit(FREE_PUBLIC_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "flashcard": {lang: format_free_limit(FREE_FLASHCARD_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "summary": {lang: format_free_limit(SUMMARY_FREE_LIMIT, lang) for lang in ("uz", "ru", "en")},
+            "referat": {lang: format_free_limit(REFERAT_FREE_LIMIT, lang) for lang in ("uz", "ru", "en")},
         },
     }
 
@@ -4598,6 +4640,10 @@ _SUMMARY_DOWNLOAD_FILES = {}
 _SUMMARY_DOWNLOAD_LOCK = threading.Lock()
 _SUMMARY_DOWNLOAD_TTL = 30 * 60
 
+_REFERAT_DOWNLOAD_FILES = {}
+_REFERAT_DOWNLOAD_LOCK = threading.Lock()
+_REFERAT_DOWNLOAD_TTL = 30 * 60
+
 
 def _summary_user_quota(user_id):
     """Faol tarif yoki 30 kunlik bepul davr uchun konspekt limitini aniqlaydi."""
@@ -4866,6 +4912,392 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
         _refund_summary_quota(user_id, period_key)
         logging.exception("Konspekt yaratishda xato | user_id=%s | sabab=%s", user_id, _safe_ai_error_text(exc))
         raise HTTPException(status_code=502, detail="Konspekt yaratilmadi. Limit hisobingizga qaytarildi.")
+
+
+
+# --- AI REFERAT YARATISH: mustaqil limit, konspekt limitidan alohida ---
+def _referat_user_quota(user_id):
+    add_user_to_db(int(user_id))
+    conn = _connect_db()
+    try:
+        row = conn.execute(
+            "SELECT created_at,status,plan_key,premium_until FROM users WHERE user_id=?",
+            (int(user_id),)
+        ).fetchone()
+        if not row:
+            return {"period_key": "free:0", "limit": REFERAT_FREE_LIMIT, "plan": "free"}
+        created_at, status, plan_key, premium_until = row
+        now = int(time.time())
+        if is_active_paid_status(status or "", premium_until or 0):
+            key = get_plan_key(status or "", plan_key or "")
+            return {
+                "period_key": f"paid:{key}:{int(premium_until or 0)}",
+                "limit": REFERAT_TARIFF_LIMITS.get(key, 0),
+                "plan": key or "paid",
+            }
+        cycle_start = int(created_at or now)
+        if now - cycle_start >= 30 * 86400:
+            cycle_start = now
+            conn.execute(
+                "UPDATE users SET created_at=? WHERE user_id=? AND (premium_until IS NULL OR premium_until<?)",
+                (cycle_start, int(user_id), now)
+            )
+            conn.commit()
+        return {"period_key": f"free:{cycle_start}", "limit": REFERAT_FREE_LIMIT, "plan": "free"}
+    finally:
+        conn.close()
+
+
+def _referat_usage_snapshot(user_id):
+    quota = _referat_user_quota(user_id)
+    conn = _connect_db()
+    try:
+        row = conn.execute("SELECT period_key,used FROM referat_usage WHERE user_id=?", (int(user_id),)).fetchone()
+        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
+        limit = int(quota["limit"])
+        unlimited = limit == -1
+        remaining = None if unlimited else max(0, limit - used)
+        return {
+            "status": "ok", "enabled": REFERAT_ENABLED, "plan": quota["plan"],
+            "used": used, "limit": None if unlimited else limit,
+            "remaining": remaining, "unlimited": unlimited,
+            "allowed": REFERAT_ENABLED and (unlimited or remaining > 0),
+        }
+    finally:
+        conn.close()
+
+
+def _reserve_referat_quota(user_id):
+    quota = _referat_user_quota(user_id)
+    limit = int(quota["limit"])
+    if not REFERAT_ENABLED:
+        return False, "disabled"
+    conn = _connect_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT period_key,used FROM referat_usage WHERE user_id=?", (int(user_id),)).fetchone()
+        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
+        if limit != -1 and used >= limit:
+            conn.rollback()
+            return False, "limit"
+        conn.execute(
+            "INSERT INTO referat_usage(user_id,period_key,used,updated_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET period_key=excluded.period_key,used=excluded.used,updated_at=excluded.updated_at",
+            (int(user_id), quota["period_key"], used + 1, int(time.time()))
+        )
+        conn.commit()
+        return True, quota["period_key"]
+    except Exception:
+        conn.rollback()
+        logging.exception("Referat limitini band qilishda xato | user_id=%s", user_id)
+        return False, "database"
+    finally:
+        conn.close()
+
+
+def _refund_referat_quota(user_id, period_key):
+    conn = _connect_db()
+    try:
+        conn.execute(
+            "UPDATE referat_usage SET used=MAX(0,used-1),updated_at=? WHERE user_id=? AND period_key=?",
+            (int(time.time()), int(user_id), str(period_key))
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("Referat limitini qaytarishda xato | user_id=%s", user_id)
+    finally:
+        conn.close()
+
+
+def _add_referat_body_to_docx(document, content):
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("### "):
+            document.add_heading(line[4:], level=2)
+        elif line.startswith("## "):
+            document.add_heading(line[3:], level=1)
+        elif line.startswith("# "):
+            document.add_heading(line[2:], level=1)
+        elif re.match(r"^[-*•]\s+", line):
+            document.add_paragraph(re.sub(r"^[-*•]\s+", "", line), style="List Bullet")
+        elif re.match(r"^\d+[.)]\s+", line):
+            document.add_paragraph(re.sub(r"^\d+[.)]\s+", "", line), style="List Number")
+        else:
+            document.add_paragraph(line)
+
+
+def _build_referat_docx(title, content, author, university, faculty, group_name, teacher, subject):
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Cm, Pt
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Cm(2.0)
+    section.bottom_margin = Cm(2.0)
+    section.left_margin = Cm(3.0)
+    section.right_margin = Cm(1.5)
+
+    # Titul varag'i: ma'lumotlar foydalanuvchi kiritgan qiymatlar asosida.
+    p = document.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run((university or "TA'LIM MUASSASASI").upper())
+    run.bold = True
+    run.font.size = Pt(14)
+    if faculty:
+        p = document.add_paragraph(faculty)
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    document.add_paragraph("\n\n")
+    p = document.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("REFERAT")
+    run.bold = True
+    run.font.size = Pt(20)
+    p = document.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(title[:220])
+    run.bold = True
+    run.font.size = Pt(16)
+    document.add_paragraph("\n\n\n")
+    for label, value in (
+        ("Fan:", subject), ("Bajardi:", author), ("Guruh:", group_name), ("Tekshirdi:", teacher)
+    ):
+        if value:
+            p = document.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            p.add_run(f"{label} {value}")
+    document.add_paragraph("\n\n")
+    p = document.add_paragraph(str(datetime.now().year))
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    document.add_page_break()
+    _add_referat_body_to_docx(document, content)
+    # Referat QR'i yangi sahifa ochmaydi va caption/Quiz AI yozuvini qo'shmaydi.
+    quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _build_referat_pdf(title, content, author, university, faculty, group_name, teacher, subject):
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    from xml.sax.saxutils import escape
+    output = BytesIO()
+    doc = SimpleDocTemplate(
+        output, pagesize=A4, rightMargin=1.5*cm, leftMargin=3*cm,
+        topMargin=2*cm, bottomMargin=2*cm
+    )
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="ReferatTitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=20, leading=25, spaceAfter=18))
+    styles.add(ParagraphStyle(name="ReferatInstitution", parent=styles["Normal"], alignment=TA_CENTER, fontSize=13, leading=18))
+    styles.add(ParagraphStyle(name="ReferatMeta", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=11, leading=17))
+    styles.add(ParagraphStyle(name="ReferatH1", parent=styles["Heading1"], fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
+    styles.add(ParagraphStyle(name="ReferatH2", parent=styles["Heading2"], fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
+    story = [
+        Spacer(1, 1.0*cm),
+        Paragraph(escape((university or "TA'LIM MUASSASASI").upper()), styles["ReferatInstitution"]),
+    ]
+    if faculty:
+        story.append(Paragraph(escape(faculty), styles["ReferatInstitution"]))
+    story.extend([Spacer(1, 4*cm), Paragraph("REFERAT", styles["ReferatTitle"]),
+                  Paragraph(escape(title[:220]), styles["ReferatTitle"]), Spacer(1, 3*cm)])
+    for label, value in (("Fan:", subject), ("Bajardi:", author), ("Guruh:", group_name), ("Tekshirdi:", teacher)):
+        if value:
+            story.append(Paragraph(f"{label} {escape(value)}", styles["ReferatMeta"]))
+    story.extend([Spacer(1, 3*cm), Paragraph(str(datetime.now().year), styles["ReferatInstitution"]), PageBreak()])
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("### "):
+            story.append(Paragraph(escape(line[4:]), styles["ReferatH2"]))
+        elif line.startswith("## ") or line.startswith("# "):
+            story.append(Paragraph(escape(line.lstrip("#").strip()), styles["ReferatH1"]))
+        elif re.match(r"^[-*•]\s+", line):
+            story.append(Paragraph("• " + escape(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
+        elif re.match(r"^\d+[.)]\s+", line):
+            story.append(Paragraph(escape(line), styles["BodyText"]))
+        else:
+            story.append(Paragraph(escape(line), styles["BodyText"]))
+        story.append(Spacer(1, 5))
+    doc.build(story)
+    return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="REFERAT")
+
+
+@app.get("/api/referat/usage")
+def api_referat_usage(request: Request, user_id: int):
+    if getattr(request.state, "telegram_user_id", None) != int(user_id):
+        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="Noto'g'ri foydalanuvchi ID")
+    return _referat_usage_snapshot(user_id)
+
+
+@app.get("/api/referat/config")
+def api_referat_config():
+    return {"status": "ok", "enabled": REFERAT_ENABLED, "free_limit": REFERAT_FREE_LIMIT,
+            "tariff_limits": REFERAT_TARIFF_LIMITS}
+
+
+@app.get("/api/referat/download/{token}/{file_format}")
+def api_download_referat_file(token: str, file_format: str):
+    if file_format not in ("docx", "pdf"):
+        raise HTTPException(status_code=404, detail="Fayl topilmadi")
+    now = time.time()
+    with _REFERAT_DOWNLOAD_LOCK:
+        for key in [k for k, value in _REFERAT_DOWNLOAD_FILES.items() if value["expires_at"] <= now]:
+            _REFERAT_DOWNLOAD_FILES.pop(key, None)
+        item = _REFERAT_DOWNLOAD_FILES.get(token, {}).get(file_format)
+    if not item:
+        raise HTTPException(status_code=404, detail="Referat fayli muddati tugagan yoki topilmadi")
+    return Response(
+        content=item["data"], media_type=item["mime"],
+        headers={"Content-Disposition": f'attachment; filename="{item["filename"].replace(chr(34), "")}"',
+                 "Cache-Control": "no-store"}
+    )
+
+
+@app.post("/api/referat/generate")
+def api_generate_referat(
+    request: Request,
+    user_id: int = Form(...),
+    topic: str = Form(""),
+    author: str = Form(""),
+    university: str = Form(""),
+    faculty: str = Form(""),
+    group_name: str = Form(""),
+    teacher: str = Form(""),
+    subject: str = Form(""),
+    lang: str = Form("uz"),
+    file: Optional[UploadFile] = File(None),
+):
+    if getattr(request.state, "telegram_user_id", None) != int(user_id):
+        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
+    if not REFERAT_ENABLED:
+        raise HTTPException(status_code=503, detail="Referat yaratish xizmati hozircha o'chirilgan")
+    if not GOOGLE_API_KEYS:
+        raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
+
+    topic = (topic or "").strip()[:REFERAT_MAX_TOPIC_CHARS]
+    author = (author or "").strip()[:160]
+    university = (university or "").strip()[:220]
+    faculty = (faculty or "").strip()[:220]
+    group_name = (group_name or "").strip()[:100]
+    teacher = (teacher or "").strip()[:160]
+    subject = (subject or "").strip()[:160]
+    lang = lang if lang in ("uz", "ru", "en") else "uz"
+    output_language = {"uz": "o'zbek tilida", "ru": "rus tilida", "en": "ingliz tilida"}[lang]
+    source_text = ""
+    if file is not None:
+        raw = file.file.read()
+        if len(raw) > REFERAT_MAX_FILE_MB * 1024 * 1024:
+            raise HTTPException(status_code=413, detail=f"Fayl hajmi {REFERAT_MAX_FILE_MB} MB limitdan oshdi")
+        try:
+            source_text = _extract_slide_source(raw, Path(file.filename or "").name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception:
+            logging.exception("Referat manba faylini o'qishda xato")
+            raise HTTPException(status_code=400, detail="PDF/DOCX faylni o'qib bo'lmadi")
+    source_text = source_text[:REFERAT_MAX_SOURCE_CHARS]
+    if not topic and not source_text.strip():
+        raise HTTPException(status_code=400, detail="Referat mavzusini kiriting yoki PDF/DOCX manba yuklang")
+
+    reserved, period_key = _reserve_referat_quota(user_id)
+    if not reserved:
+        if period_key == "limit":
+            raise HTTPException(status_code=402, detail="Referat yaratish limitingiz tugagan. Tarifni faollashtiring.")
+        if period_key == "disabled":
+            raise HTTPException(status_code=503, detail="Referat yaratish o'chirilgan")
+        raise HTTPException(status_code=409, detail="Referat limitini tekshirib bo'lmadi")
+
+    prompt = (
+        "Siz oliy ta'lim uchun akademik referatlar yozuvchi tajribali ilmiy yordamchisiz. "
+        f"Referatni {output_language}, rasmiy-akademik uslubda yozing. Foydalanuvchi mavzusi va berilgan manbaga "
+        "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
+        "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
+        "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki aniq ma'lum bibliografik ma'lumotlarni kiriting. "
+        "Markdown sarlavhalaridan foydalaning. Tuzilishi: KIRISH; 2-4 ta mantiqiy asosiy bob; XULOSA; "
+        "FOYDALANILGAN ADABIYOTLAR (manba berilmagan bo'lsa, uydirma ro'yxat tuzmang, buni ochiq qayd eting). "
+        "Referat izchil, mazmunli, takrorlarsiz va topshirishga mos bo'lsin. "
+        f"Mavzu: {topic or 'Yuklangan manba asosida'}\nFan: {subject}\n"
+        f"Muallif: {author}\nTa'lim muassasasi: {university}\nFakultet: {faculty}\n"
+        f"Guruh: {group_name}\nTekshiruvchi: {teacher}\nMANBA MATNI:\n{source_text}"
+    )
+    try:
+        deadline = time.monotonic() + max(60, min(900, int(os.getenv("REFERAT_GENERATION_TIMEOUT", "360"))))
+        if not gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic())):
+            raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        try:
+            last_error = None
+            referat_text = None
+            start = _next_generation_key_start(len(GOOGLE_API_KEYS))
+            for offset in range(len(GOOGLE_API_KEYS)):
+                if time.monotonic() >= deadline:
+                    break
+                key = GOOGLE_API_KEYS[(start + offset) % len(GOOGLE_API_KEYS)]
+                try:
+                    client = genai.Client(
+                        api_key=key,
+                        http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000)))
+                    )
+                    response = client.models.generate_content(
+                        model=os.getenv("REFERAT_AI_MODEL", GEMINI_FALLBACK_MODEL),
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            temperature=0.3,
+                            max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS
+                        )
+                    )
+                    referat_text = (response.text or "").strip()
+                    if not referat_text:
+                        raise RuntimeError("AI bo'sh javob qaytardi")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning("Referat Gemini urinish xatosi | kalit=%s | sabab=%s",
+                                    offset + 1, _safe_ai_error_text(exc))
+        finally:
+            gemini_semaphore.release()
+
+        if not referat_text:
+            raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        title = topic or (Path(file.filename).stem if file and file.filename else "Referat")
+        safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_referat"
+        docx_bytes = _build_referat_docx(title, referat_text, author, university, faculty, group_name, teacher, subject)
+        pdf_bytes = _build_referat_pdf(title, referat_text, author, university, faculty, group_name, teacher, subject)
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        with _REFERAT_DOWNLOAD_LOCK:
+            for key in [k for k, value in _REFERAT_DOWNLOAD_FILES.items() if value["expires_at"] <= now]:
+                _REFERAT_DOWNLOAD_FILES.pop(key, None)
+            _REFERAT_DOWNLOAD_FILES[token] = {
+                "expires_at": now + _REFERAT_DOWNLOAD_TTL, "uses": 0,
+                "docx": {
+                    "filename": safe_title + ".docx",
+                    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "data": docx_bytes,
+                },
+                "pdf": {"filename": safe_title + ".pdf", "mime": "application/pdf", "data": pdf_bytes},
+            }
+        return JSONResponse({
+            "status": "ok", "title": title,
+            "download": {
+                "docx": {"url": f"/api/referat/download/{token}/docx", "filename": safe_title + ".docx"},
+                "pdf": {"url": f"/api/referat/download/{token}/pdf", "filename": safe_title + ".pdf"},
+            },
+            "usage": _referat_usage_snapshot(user_id),
+        })
+    except HTTPException:
+        _refund_referat_quota(user_id, period_key)
+        raise
+    except Exception as exc:
+        _refund_referat_quota(user_id, period_key)
+        logging.exception("Referat yaratishda xato | user_id=%s | sabab=%s", user_id, _safe_ai_error_text(exc))
+        raise HTTPException(status_code=502, detail="Referat yaratilmadi. Limit hisobingizga qaytarildi.")
 
 
 # Slayd fayllari Telegram WebView'da barqaror yuklanishi uchun qisqa muddatli saqlanadi.
