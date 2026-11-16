@@ -48,15 +48,16 @@ def get_branding_config(feature=None):
         logger.warning("QUIZ_AI_QR_COLOR noto'g'ri; standart rang ishlatiladi.")
         color = "#2589D8"
 
+    is_referat = str(feature or "").strip().upper() == "REFERAT"
     return {
         "enabled": enabled,
         "url": os.getenv("QUIZ_AI_QR_URL", "https://t.me/Quiz_AI_Test_Bot").strip(),
         "position": position,
         "size": size,
         "color": color,
-        "logo_enabled": _env_bool("QUIZ_AI_QR_LOGO_ENABLED", False),
+        "logo_enabled": False if is_referat else _env_bool("QUIZ_AI_QR_LOGO_ENABLED", False),
         "logo_path": os.getenv("QUIZ_AI_LOGO_PATH", str(Path(__file__).with_name("quiz_ai_logo.jpg"))).strip(),
-        "caption": os.getenv("QUIZ_AI_QR_CAPTION", "Quiz AI").strip()[:60],
+        "caption": "" if is_referat else os.getenv("QUIZ_AI_QR_CAPTION", "Quiz AI").strip()[:60],
     }
 
 
@@ -190,9 +191,11 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     if not reader.pages:
         return pdf_bytes
 
-    is_summary = str(feature).strip().upper() == "SUMMARY"
+    feature_name = str(feature).strip().upper()
+    is_summary = feature_name == "SUMMARY"
+    is_referat = feature_name == "REFERAT"
 
-    # Konspekt PDF'ida oxiriga qo'shilgan faqat "Quiz AI" yozuvi/QR turgan
+    # Konspekt PDF'ida oxiriga qo'shilgan faqat "Quiz AI" yozuvi/QR turgan faqat
     # brending sahifalarini chiqarib tashlaymiz va QR'ni oxirgi mazmunli
     # sahifaning pastki chap tomoniga joylaymiz.
     target_index = len(reader.pages) - 1
@@ -222,7 +225,7 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     layer = canvas.Canvas(overlay_buffer, pagesize=(page_width, page_height))
     layer.saveState()
     layer.setFillColorRGB(1, 1, 1)
-    caption_enabled = bool(config["caption"]) and not is_summary
+    caption_enabled = bool(config["caption"]) and not (is_summary or is_referat)
     layer.roundRect(
         x - 4, y - 4, size + 8,
         size + (22 if caption_enabled else 8), 4, fill=1, stroke=0
@@ -265,7 +268,9 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches, Pt, RGBColor
 
-    is_summary = str(feature).strip().upper() == "SUMMARY"
+    feature_name = str(feature).strip().upper()
+    is_summary = feature_name == "SUMMARY"
+    is_referat = feature_name == "REFERAT"
     position = config["position"]
     alignment = WD_ALIGN_PARAGRAPH.CENTER
     if is_summary:
@@ -273,6 +278,13 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
         # Sarlavha va alohida "Quiz AI" yozuvi qo'shilmaydi.
         alignment = WD_ALIGN_PARAGRAPH.LEFT
         page_break = False
+    elif is_referat:
+        # Referat QR'i yangi sahifaga o'tmaydi; chap/o'ng joylashuv Railway'dan olinadi.
+        page_break = False
+        if position in ("top_left", "bottom_left"):
+            alignment = WD_ALIGN_PARAGRAPH.LEFT
+        elif position in ("top_right", "bottom_right"):
+            alignment = WD_ALIGN_PARAGRAPH.RIGHT
     elif position in ("top_left", "bottom_left"):
         alignment = WD_ALIGN_PARAGRAPH.LEFT
     elif position in ("top_right", "bottom_right"):
@@ -291,7 +303,7 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
     run = paragraph.add_run()
     run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
     # Konspektda faqat QR tasviri qoladi; boshqa hujjatlarning caption'i saqlanadi.
-    if config["caption"] and not is_summary:
+    if config["caption"] and not (is_summary or is_referat):
         caption = document.add_paragraph()
         caption.alignment = alignment
         text_run = caption.add_run(config["caption"])
