@@ -4802,12 +4802,6 @@ def _clean_academic_markdown(content, remove_cover=False):
                 ):
                     cleaned.pop(0)
 
-    # Konspekt boshidagi ortiqcha texnik sarlavhani olib tashlaymiz.
-    while cleaned and re.match(r"^\\s*#*\\s*AKADEMIK\\s+KONSPEKT\\s*:", cleaned[0], re.IGNORECASE):
-        cleaned.pop(0)
-        while cleaned and not cleaned[0].strip():
-            cleaned.pop(0)
-
     # Foydalanilgan adabiyotlar ichidagi AI'ning xizmat izohini hujjatdan olib tashlaymiz.
     # Haqiqiy bibliografik yozuvlar va bo'lim sarlavhalari saqlanadi.
     cleaned_note = []
@@ -4886,18 +4880,10 @@ def _set_docx_page_border(section):
     sect_pr.append(borders)
 
 
-def _clear_docx_page_border(section):
-    """Keyingi Word bo'limlaridan oldingi sahifa ramkasini meros qilib olishni to'xtatadi."""
-    from docx.oxml.ns import qn
-    old = section._sectPr.find(qn("w:pgBorders"))
-    if old is not None:
-        section._sectPr.remove(old)
-
-
 def _draw_referat_pdf_cover_frame(canvas, doc):
     """PDF titul sahifasida to'q ko'k va oltin rangli ikki qavat ramka."""
     # Referatning titul va mundarija sahifalariga bir xil ramka tushadi.
-    if getattr(doc, "page", 1) != 1:
+    if getattr(doc, "page", 1) not in (1, 2):
         return
     from reportlab.lib.colors import HexColor
     page_w, page_h = doc.pagesize
@@ -4911,29 +4897,16 @@ def _draw_referat_pdf_cover_frame(canvas, doc):
     canvas.restoreState()
 
 
-def _is_academic_diagram_line(line):
-    value = str(line or "")
-    markers = ("┌","┐","└","┘","├","┤","┬","┴","─","│","▼","▲","◄","►","↔","←","→","↓","↑","<---","--->","<==","==>","+---","|","\\\\","/")
-    return any(marker in value for marker in markers) and len(value.strip()) > 1
-
-
 def _iter_academic_blocks(content):
-    """Markdown satrlarini matn, sarlavha, ro'yxat va diagrammalarga ajratadi."""
+    """Markdown satrlarini sarlavha, matn, ro'yxat va kod bloklariga ajratadi."""
     lines = _clean_academic_markdown(content, remove_cover=False).splitlines()
     in_code = False
     code_lines = []
-    diagram_lines = []
-    def flush_diagram():
-        nonlocal diagram_lines
-        if diagram_lines:
-            yield ("code", "\\n".join(diagram_lines))
-            diagram_lines = []
     for raw in lines:
         line = raw.strip()
         if line.startswith("```"):
-            yield from flush_diagram()
             if in_code and code_lines:
-                yield ("code", "\\n".join(code_lines))
+                yield ("code", "\n".join(code_lines))
                 code_lines = []
             in_code = not in_code
             continue
@@ -4941,24 +4914,19 @@ def _iter_academic_blocks(content):
             code_lines.append(raw.rstrip())
             continue
         if not line:
-            yield from flush_diagram()
             continue
-        if _is_academic_diagram_line(line):
-            diagram_lines.append(raw.rstrip())
-            continue
-        yield from flush_diagram()
-        if re.match(r"^#{1,6}\\s+", line):
+        if re.match(r"^#{1,6}\s+", line):
             level = len(line) - len(line.lstrip("#"))
             yield ("heading", (min(level, 3), line[level:].strip()))
-        elif re.match(r"^[-*•]\\s+", line):
-            yield ("bullet", re.sub(r"^[-*•]\\s+", "", line))
-        elif re.match(r"^\\d+[.)]\\s+", line):
-            yield ("number", re.sub(r"^\\d+[.)]\\s+", "", line))
+        elif re.match(r"^[-*•]\s+", line):
+            yield ("bullet", re.sub(r"^[-*•]\s+", "", line))
+        elif re.match(r"^\d+[.)]\s+", line):
+            yield ("number", re.sub(r"^\d+[.)]\s+", "", line))
         else:
             yield ("text", line)
-    yield from flush_diagram()
     if code_lines:
-        yield ("code", "\\n".join(code_lines))
+        yield ("code", "\n".join(code_lines))
+
 
 
 def _add_markdown_inline_runs(paragraph, text):
@@ -5137,10 +5105,7 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
     prompt = ("Siz tajribali o'qituvchi va akademik konspekt tuzuvchisiz. Faqat berilgan mavzu va manbaga tayaning; manbada yo'q fakt, sana, formula yoki iqtibosni to'qimang. "
               "Manbadagi muhim bo'lim, kichik mavzu, ta'rif, qonun, formula va xulosalarni tashlab ketmang. Har bir asosiy tushunchani nima ekanligi, qanday ishlashi va ahamiyati bilan izohlang. "
               "Bir xil fikrni takrorlamang, ammo mazmunni bir-ikki jumlaga siqib qo'ymang. Zarur joyda sodda misol yoki bosqichma-bosqich tushuntirish bering; manbada yo'q aniq faktni o'ylab topmang. "
-              "O'zbekcha matn bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yozing. "
-              "'AKADEMIK KONSPEKT:' kabi takroriy texnik sarlavha yozmang; boshida faqat mavzu nomi qolsin. "
-              "Sxema va chizmalarni monospace kod blokida yoki aniq Markdown jadvali ko'rinishida bering; tartibsiz ASCII chiziqlarini oddiy matnga aralashtirmang. "
-              "Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalaning. "
+              "O'zbekcha matn bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yozing. Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalaning. "
               f"Uslub: {style_text}. {purpose_text} {word_target} Yakunda mazmunli xulosa va 5 ta o'zini tekshirish savolini qo'shing.\\n"
               f"Mavzu: {topic or 'Manba material asosida'}\\nMANBA:\\n{source_text}")
     try:
@@ -5409,11 +5374,10 @@ def _build_referat_docx(title, content, author, university, faculty, group_name,
     body_section.bottom_margin = Cm(2.0)
     body_section.left_margin = Cm(3.0)
     body_section.right_margin = Cm(1.5)
-    _clear_docx_page_border(body_section)
     _add_referat_body_to_docx(document, body_text)
 
     # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
-    quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=True)
+    quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
     output = BytesIO()
     document.save(output)
     return output.getvalue()
@@ -5493,7 +5457,6 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
         else:
             story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
 
-    story.append(PageBreak())
     doc.build(story, onFirstPage=_draw_referat_pdf_cover_frame)
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="REFERAT")
 
@@ -5591,7 +5554,7 @@ def api_generate_referat(
         "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
         "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
         "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki bibliografik ma'lumoti ishonchli tasdiqlangan manbalarni kiriting. "
-        "Foydalanilgan adabiyotlar bo'limini imkon qadar 4-6 ta haqiqiy va tekshiriladigan manba bilan to'ldiring. Yuklangan manbadagi bibliografik yozuvlar va nufuzli ilmiy/ta'lim tashkilotlarining rasmiy nashrlaridan foydalaning. Muallif, nom, nashriyot, yil yoki URL ma'lum bo'lmasa, taxmin qilmang. 'Izoh:' yoki AI uzr matnini qo'shmang. "
+        "Manba yetarli bo'lmasa, uydirma bibliografiya ham, 'Izoh:' yoki AI tomonidan yozilgan uzr/izoh matni ham qo'shmang; tasdiqlangan manba bo'lmasa, bo'limni bo'sh qoldiring. "
         "Markdown sarlavhalaridan foydalaning. Tuzilishi: MUNDARIJA (ixtiyoriy); KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
         "FOYDALANILGAN ADABIYOTLAR (faqat haqiqiy, tekshiriladigan manbalar). "
         "MUHIM: titul varag'ini, universitet/fakultet nomini, muallif, guruh, fan yoki tekshiruvchi ma'lumotlarini qayta yozmang. "
