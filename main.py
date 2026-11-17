@@ -4758,6 +4758,157 @@ def _refund_summary_quota(user_id, period_key):
 
 
 
+
+def _clean_academic_markdown(content, remove_cover=False):
+    """AI matnini Word/PDF eksportidan oldin xavfsiz tozalaydi."""
+    text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?(?:div|span|p)[^>]*>", "", text, flags=re.IGNORECASE)
+    lines = text.split("\n")
+
+    # AI ba'zan hujjat ichida kod blokining chegaralarini chiqaradi.
+    cleaned = []
+    in_fence = False
+    for raw in lines:
+        line = raw.rstrip()
+        if re.match(r"^\s*```", line):
+            in_fence = not in_fence
+            cleaned.append("```")
+            continue
+        if re.match(r"^\s*---+\s*$", line) or re.match(r"^\s*\*\*\*+\s*$", line):
+            continue
+        cleaned.append(line)
+
+    # AI yaratgan takroriy titul sahifasini faqat boshida titul belgilari bo'lsa olib tashlaymiz.
+    if remove_cover:
+        head = "\n".join(cleaned[:30]).lower()
+        cover_markers = ("universitet", "fakultet", "bajardi", "tekshirdi", "guruh:", "akademik referat")
+        if any(marker in head for marker in cover_markers):
+            start = None
+            for i, raw in enumerate(cleaned[:60]):
+                plain = re.sub(r"^[#\s]+", "", raw).strip().lower()
+                if (plain in {"mundarija", "reja", "kirish"} or
+                    re.match(r"^(?:\d+(?:\.\d+)*[.)]?\s+)", plain)):
+                    start = i
+                    break
+            if start is not None:
+                cleaned = cleaned[start:]
+            else:
+                # Birinchi mazmunli bo'lim topilmasa, titulga o'xshash dastlabki blokni olib tashlaymiz.
+                while cleaned and (
+                    not cleaned[0].strip() or
+                    any(x in cleaned[0].lower() for x in cover_markers) or
+                    re.match(r"^\s*#*\s*(?:referat|sarlavha)\s*$", cleaned[0], re.I)
+                ):
+                    cleaned.pop(0)
+
+    # Qatorlar orasidagi ortiqcha bo'sh joylarni me'yorlashtiramiz.
+    result = []
+    blank = False
+    for line in cleaned:
+        if not line.strip():
+            if result and not blank:
+                result.append("")
+            blank = True
+        else:
+            result.append(line.strip())
+            blank = False
+    return "\n".join(result).strip()
+
+
+def _register_academic_pdf_fonts():
+    """Referat va Konspekt PDF uchun o'zbek/kirill Unicode shriftlarini ulaydi."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    font_dir = Path(__file__).resolve().parent / "fonts"
+    candidates = [
+        (font_dir / "DejaVuSans.ttf", "QuizAIAcademic"),
+        (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"), "QuizAIAcademic"),
+    ]
+    bold_candidates = [
+        (font_dir / "DejaVuSans-Bold.ttf", "QuizAIAcademic-Bold"),
+        (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"), "QuizAIAcademic-Bold"),
+    ]
+    for path, name in candidates + bold_candidates:
+        if name not in pdfmetrics.getRegisteredFontNames() and path.is_file():
+            try:
+                pdfmetrics.registerFont(TTFont(name, str(path)))
+            except Exception as exc:
+                logging.warning("Akademik PDF shriftini ulab bo'lmadi | %s", exc)
+    regular = "QuizAIAcademic" if "QuizAIAcademic" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
+    bold = "QuizAIAcademic-Bold" if "QuizAIAcademic-Bold" in pdfmetrics.getRegisteredFontNames() else regular
+    return regular, bold
+
+
+def _set_docx_page_border(section):
+    """Word titul varag'iga ikki qavatli, nafis sahifa ramkasini qo'yadi."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    sect_pr = section._sectPr
+    old = sect_pr.find(qn("w:pgBorders"))
+    if old is not None:
+        sect_pr.remove(old)
+    borders = OxmlElement("w:pgBorders")
+    borders.set(qn("w:offsetFrom"), "page")
+    borders.set(qn("w:display"), "firstPage")
+    for edge in ("top", "left", "bottom", "right"):
+        outer = OxmlElement(f"w:{edge}")
+        outer.set(qn("w:val"), "single")
+        outer.set(qn("w:sz"), "18")
+        outer.set(qn("w:space"), "22")
+        outer.set(qn("w:color"), "183153")
+        borders.append(outer)
+    sect_pr.append(borders)
+
+
+def _draw_referat_pdf_cover_frame(canvas, doc):
+    """PDF titul sahifasida to'q ko'k va oltin rangli ikki qavat ramka."""
+    if getattr(doc, "page", 1) != 1:
+        return
+    from reportlab.lib.colors import HexColor
+    page_w, page_h = doc.pagesize
+    canvas.saveState()
+    canvas.setStrokeColor(HexColor("#183153"))
+    canvas.setLineWidth(1.8)
+    canvas.rect(22, 22, page_w - 44, page_h - 44, stroke=1, fill=0)
+    canvas.setStrokeColor(HexColor("#B8944D"))
+    canvas.setLineWidth(0.65)
+    canvas.rect(28, 28, page_w - 56, page_h - 56, stroke=1, fill=0)
+    canvas.restoreState()
+
+
+def _iter_academic_blocks(content):
+    """Markdown satrlarini sarlavha, matn, ro'yxat va kod bloklariga ajratadi."""
+    lines = _clean_academic_markdown(content, remove_cover=False).splitlines()
+    in_code = False
+    code_lines = []
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("```"):
+            if in_code and code_lines:
+                yield ("code", "\n".join(code_lines))
+                code_lines = []
+            in_code = not in_code
+            continue
+        if in_code:
+            code_lines.append(raw.rstrip())
+            continue
+        if not line:
+            continue
+        if re.match(r"^#{1,6}\s+", line):
+            level = len(line) - len(line.lstrip("#"))
+            yield ("heading", (min(level, 3), line[level:].strip()))
+        elif re.match(r"^[-*•]\s+", line):
+            yield ("bullet", re.sub(r"^[-*•]\s+", "", line))
+        elif re.match(r"^\d+[.)]\s+", line):
+            yield ("number", re.sub(r"^\d+[.)]\s+", "", line))
+        else:
+            yield ("text", line)
+    if code_lines:
+        yield ("code", "\n".join(code_lines))
+
+
+
 def _add_markdown_inline_runs(paragraph, text):
     """Markdown inline belgilarini Word run formatiga aylantiradi."""
     value = str(text or "")
@@ -4804,58 +4955,65 @@ def _build_summary_docx(title, content):
     section.bottom_margin = docx.shared.Cm(2.0)
     heading = document.add_heading(title[:180], 0)
     heading.alignment = 1
-    document.add_paragraph("Quiz AI yordamida tayyorlangan o‘quv konspekti", style="Subtitle")
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("### "):
-            document.add_heading(_markdown_heading_text(line[4:]), level=2)
-        elif line.startswith("## "):
-            document.add_heading(_markdown_heading_text(line[3:]), level=1)
-        elif line.startswith("# "):
-            document.add_heading(_markdown_heading_text(line[2:]), level=1)
-        elif re.match(r"^[-*•]\s+", line):
+    for kind, value in _iter_academic_blocks(content):
+        if kind == "heading":
+            level, text = value
+            document.add_heading(_markdown_heading_text(text), level=2 if level >= 3 else 1)
+        elif kind == "bullet":
             paragraph = document.add_paragraph(style="List Bullet")
-            _add_markdown_inline_runs(paragraph, re.sub(r"^[-*•]\s+", "", line))
-        elif re.match(r"^\d+[.)]\s+", line):
+            _add_markdown_inline_runs(paragraph, value)
+        elif kind == "number":
             paragraph = document.add_paragraph(style="List Number")
-            _add_markdown_inline_runs(paragraph, re.sub(r"^\d+[.)]\s+", "", line))
+            _add_markdown_inline_runs(paragraph, value)
+        elif kind == "code":
+            paragraph = document.add_paragraph()
+            run = paragraph.add_run(value)
+            run.font.name = "Consolas"
+            run.font.size = docx.shared.Pt(9)
         else:
             paragraph = document.add_paragraph()
-            _add_markdown_inline_runs(paragraph, line)
+            _add_markdown_inline_runs(paragraph, value)
     quiz_ai_branding.add_qr_to_docx(document, feature="SUMMARY", page_break=True)
-    output = BytesIO(); document.save(output); return output.getvalue()
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
 
 
 def _build_summary_pdf(title, content):
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, ListFlowable, ListItem
     from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted
     from xml.sax.saxutils import escape
     output = BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=1.8*cm, bottomMargin=1.8*cm)
+    regular, bold = _register_academic_pdf_fonts()
+    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm,
+                            topMargin=1.8*cm, bottomMargin=1.8*cm)
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="SummaryTitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=18, leading=23, spaceAfter=14))
-    styles.add(ParagraphStyle(name="SummaryH1", parent=styles["Heading1"], fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
-    styles.add(ParagraphStyle(name="SummaryH2", parent=styles["Heading2"], fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
-    story = [Paragraph(escape(title[:180]), styles["SummaryTitle"]), Paragraph("Quiz AI yordamida tayyorlangan o‘quv konspekti", styles["Italic"]), Spacer(1, 12)]
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("### "):
-            story.append(Paragraph(_markdown_inline_to_reportlab(line[4:]), styles["SummaryH2"]))
-        elif line.startswith("## ") or line.startswith("# "):
-            story.append(Paragraph(_markdown_inline_to_reportlab(line.lstrip("# ").strip()), styles["SummaryH1"]))
-        elif re.match(r"^[-*•]\s+", line):
-            story.append(Paragraph("• " + _markdown_inline_to_reportlab(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
+    styles.add(ParagraphStyle(name="SummaryTitle", parent=styles["Title"], fontName=bold,
+                              alignment=TA_CENTER, fontSize=18, leading=23, spaceAfter=14))
+    styles.add(ParagraphStyle(name="SummaryH1", parent=styles["Heading1"], fontName=bold,
+                              fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
+    styles.add(ParagraphStyle(name="SummaryH2", parent=styles["Heading2"], fontName=bold,
+                              fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
+    styles.add(ParagraphStyle(name="SummaryBody", parent=styles["BodyText"], fontName=regular,
+                              fontSize=10.5, leading=15, spaceAfter=5))
+    styles.add(ParagraphStyle(name="SummaryCode", parent=styles["Code"], fontName=regular,
+                              fontSize=8, leading=10, leftIndent=12))
+    story = [Paragraph(escape(title[:180]), styles["SummaryTitle"]), Spacer(1, 12)]
+    for kind, value in _iter_academic_blocks(content):
+        if kind == "heading":
+            level, text = value
+            story.append(Paragraph(_markdown_inline_to_reportlab(text),
+                                   styles["SummaryH2"] if level >= 3 else styles["SummaryH1"]))
+        elif kind == "bullet":
+            story.append(Paragraph("&#8226;&nbsp; " + _markdown_inline_to_reportlab(value), styles["SummaryBody"]))
+        elif kind == "number":
+            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["SummaryBody"]))
+        elif kind == "code":
+            story.append(Preformatted(escape(value), styles["SummaryCode"]))
         else:
-            story.append(Paragraph(_markdown_inline_to_reportlab(line), styles["BodyText"]))
-        story.append(Spacer(1, 5))
-    story.append(PageBreak())
-    story.append(Paragraph("Quiz AI", styles["SummaryTitle"]))
+            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["SummaryBody"]))
     doc.build(story)
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="SUMMARY")
 
@@ -5068,69 +5226,104 @@ def _refund_referat_quota(user_id, period_key):
 
 
 def _add_referat_body_to_docx(document, content):
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("### "):
-            document.add_heading(_markdown_heading_text(line[4:]), level=2)
-        elif line.startswith("## "):
-            document.add_heading(_markdown_heading_text(line[3:]), level=1)
-        elif line.startswith("# "):
-            document.add_heading(_markdown_heading_text(line[2:]), level=1)
-        elif re.match(r"^[-*•]\s+", line):
+    content = _clean_academic_markdown(content, remove_cover=True)
+    for kind, value in _iter_academic_blocks(content):
+        if kind == "heading":
+            level, text = value
+            document.add_heading(_markdown_heading_text(text), level=2 if level >= 3 else 1)
+        elif kind == "bullet":
             paragraph = document.add_paragraph(style="List Bullet")
-            _add_markdown_inline_runs(paragraph, re.sub(r"^[-*•]\s+", "", line))
-        elif re.match(r"^\d+[.)]\s+", line):
+            _add_markdown_inline_runs(paragraph, value)
+        elif kind == "number":
             paragraph = document.add_paragraph(style="List Number")
-            _add_markdown_inline_runs(paragraph, re.sub(r"^\d+[.)]\s+", "", line))
+            _add_markdown_inline_runs(paragraph, value)
+        elif kind == "code":
+            paragraph = document.add_paragraph()
+            run = paragraph.add_run(value)
+            run.font.name = "Consolas"
+            run.font.size = docx.shared.Pt(9)
         else:
             paragraph = document.add_paragraph()
-            _add_markdown_inline_runs(paragraph, line)
+            _add_markdown_inline_runs(paragraph, value)
+
+
 def _build_referat_docx(title, content, author, university, faculty, group_name, teacher, subject):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Cm, Pt
-    document = Document()
-    section = document.sections[0]
-    section.top_margin = Cm(2.0)
-    section.bottom_margin = Cm(2.0)
-    section.left_margin = Cm(3.0)
-    section.right_margin = Cm(1.5)
+    from docx.enum.section import WD_SECTION
+    from docx.shared import Cm, Pt, RGBColor
 
-    # Titul varag'i: ma'lumotlar foydalanuvchi kiritgan qiymatlar asosida.
+    document = Document()
+    cover = document.sections[0]
+    cover.top_margin = Cm(2.2)
+    cover.bottom_margin = Cm(2.2)
+    cover.left_margin = Cm(2.5)
+    cover.right_margin = Cm(2.5)
+    _set_docx_page_border(cover)
+
+    # Titul sahifasi: ixcham, markazlangan va ramka ichida.
     p = document.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(18)
     run = p.add_run((university or "TA'LIM MUASSASASI").upper())
     run.bold = True
-    run.font.size = Pt(14)
+    run.font.name = "Arial"
+    run.font.size = Pt(15)
+    run.font.color.rgb = RGBColor(24, 49, 83)
+
     if faculty:
-        p = document.add_paragraph(faculty)
+        p = document.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    document.add_paragraph("\n\n")
+        run = p.add_run(faculty)
+        run.font.name = "Arial"
+        run.font.size = Pt(12)
+
+    for _ in range(3):
+        document.add_paragraph()
+
     p = document.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(18)
     run = p.add_run("REFERAT")
     run.bold = True
-    run.font.size = Pt(20)
+    run.font.name = "Arial"
+    run.font.size = Pt(24)
+    run.font.color.rgb = RGBColor(24, 49, 83)
+
     p = document.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(14)
+    p.paragraph_format.space_after = Pt(24)
     run = p.add_run(title[:220])
     run.bold = True
-    run.font.size = Pt(16)
-    document.add_paragraph("\n\n\n")
+    run.font.name = "Arial"
+    run.font.size = Pt(17)
+
     for label, value in (
         ("Fan:", subject), ("Bajardi:", author), ("Guruh:", group_name), ("Tekshirdi:", teacher)
     ):
         if value:
             p = document.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            p.add_run(f"{label} {value}")
-    document.add_paragraph("\n\n")
+            p.paragraph_format.space_after = Pt(7)
+            run = p.add_run(f"{label} {value}")
+            run.font.name = "Arial"
+            run.font.size = Pt(12)
+
+    for _ in range(2):
+        document.add_paragraph()
     p = document.add_paragraph(str(datetime.now().year))
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    document.add_page_break()
+    p.paragraph_format.space_before = Pt(18)
+
+    # Keyingi sahifalar ramkasiz qoladi; titul ramkasi faqat birinchi sahifada.
+    body_section = document.add_section(WD_SECTION.NEW_PAGE)
+    body_section.top_margin = Cm(2.0)
+    body_section.bottom_margin = Cm(2.0)
+    body_section.left_margin = Cm(3.0)
+    body_section.right_margin = Cm(1.5)
     _add_referat_body_to_docx(document, content)
-    # Referat QR'i yangi sahifa ochmaydi va caption/Quiz AI yozuvini qo'shmaydi.
+
+    # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
     quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
     output = BytesIO()
     document.save(output)
@@ -5141,19 +5334,30 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Preformatted
     from xml.sax.saxutils import escape
     output = BytesIO()
+    regular, bold = _register_academic_pdf_fonts()
     doc = SimpleDocTemplate(
-        output, pagesize=A4, rightMargin=1.5*cm, leftMargin=3*cm,
-        topMargin=2*cm, bottomMargin=2*cm
+        output, pagesize=A4, rightMargin=2.5*cm, leftMargin=2.5*cm,
+        topMargin=2.5*cm, bottomMargin=2.5*cm
     )
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="ReferatTitle", parent=styles["Title"], alignment=TA_CENTER, fontSize=20, leading=25, spaceAfter=18))
-    styles.add(ParagraphStyle(name="ReferatInstitution", parent=styles["Normal"], alignment=TA_CENTER, fontSize=13, leading=18))
-    styles.add(ParagraphStyle(name="ReferatMeta", parent=styles["Normal"], alignment=TA_RIGHT, fontSize=11, leading=17))
-    styles.add(ParagraphStyle(name="ReferatH1", parent=styles["Heading1"], fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
-    styles.add(ParagraphStyle(name="ReferatH2", parent=styles["Heading2"], fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
+    styles.add(ParagraphStyle(name="ReferatTitle", parent=styles["Title"], fontName=bold,
+                              alignment=TA_CENTER, fontSize=21, leading=27, spaceAfter=18))
+    styles.add(ParagraphStyle(name="ReferatInstitution", parent=styles["Normal"], fontName=bold,
+                              alignment=TA_CENTER, fontSize=13, leading=18))
+    styles.add(ParagraphStyle(name="ReferatMeta", parent=styles["Normal"], fontName=regular,
+                              alignment=TA_RIGHT, fontSize=11, leading=17))
+    styles.add(ParagraphStyle(name="ReferatH1", parent=styles["Heading1"], fontName=bold,
+                              fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
+    styles.add(ParagraphStyle(name="ReferatH2", parent=styles["Heading2"], fontName=bold,
+                              fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
+    styles.add(ParagraphStyle(name="ReferatBody", parent=styles["BodyText"], fontName=regular,
+                              fontSize=10.5, leading=15, spaceAfter=5))
+    styles.add(ParagraphStyle(name="ReferatCode", parent=styles["Code"], fontName=regular,
+                              fontSize=8, leading=10, leftIndent=12))
+
     story = [
         Spacer(1, 1.0*cm),
         Paragraph(escape((university or "TA'LIM MUASSASASI").upper()), styles["ReferatInstitution"]),
@@ -5166,20 +5370,23 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
         if value:
             story.append(Paragraph(f"{label} {escape(value)}", styles["ReferatMeta"]))
     story.extend([Spacer(1, 3*cm), Paragraph(str(datetime.now().year), styles["ReferatInstitution"]), PageBreak()])
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith("### "):
-            story.append(Paragraph(_markdown_inline_to_reportlab(line[4:]), styles["ReferatH2"]))
-        elif line.startswith("## ") or line.startswith("# "):
-            story.append(Paragraph(_markdown_inline_to_reportlab(line.lstrip("# ").strip()), styles["ReferatH1"]))
-        elif re.match(r"^[-*•]\s+", line):
-            story.append(Paragraph("• " + _markdown_inline_to_reportlab(re.sub(r"^[-*•]\s+", "", line)), styles["BodyText"]))
+
+    clean_content = _clean_academic_markdown(content, remove_cover=True)
+    for kind, value in _iter_academic_blocks(clean_content):
+        if kind == "heading":
+            level, text = value
+            story.append(Paragraph(_markdown_inline_to_reportlab(text),
+                                   styles["ReferatH2"] if level >= 3 else styles["ReferatH1"]))
+        elif kind == "bullet":
+            story.append(Paragraph("&#8226;&nbsp; " + _markdown_inline_to_reportlab(value), styles["ReferatBody"]))
+        elif kind == "number":
+            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
+        elif kind == "code":
+            story.append(Preformatted(escape(value), styles["ReferatCode"]))
         else:
-            story.append(Paragraph(_markdown_inline_to_reportlab(line), styles["BodyText"]))
-        story.append(Spacer(1, 5))
-    doc.build(story)
+            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
+
+    doc.build(story, onFirstPage=_draw_referat_pdf_cover_frame)
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="REFERAT")
 
 
@@ -5276,8 +5483,10 @@ def api_generate_referat(
         "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
         "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
         "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki aniq ma'lum bibliografik ma'lumotlarni kiriting. "
-        "Markdown sarlavhalaridan foydalaning. Tuzilishi: KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
+        "Markdown sarlavhalaridan foydalaning. Tuzilishi: MUNDARIJA (ixtiyoriy); KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
         "FOYDALANILGAN ADABIYOTLAR (manba berilmagan bo'lsa, uydirma ro'yxat tuzmang, buni ochiq qayd eting). "
+        "MUHIM: titul varag'ini, universitet/fakultet nomini, muallif, guruh, fan yoki tekshiruvchi ma'lumotlarini qayta yozmang. "
+        "Hujjat matnini bevosita MUNDARIJA yoki KIRISH bo'limidan boshlang. "
         "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
         "har bir bobda sabab-oqibat, tushuncha, jarayon va amaliy ahamiyatni izchil tahlil qiling; boblar orasida mantiqiy bog'lanish bo'lsin. "
         "Asosiy matnni kamida 1800-2400 so'z atrofida yozing. Agar berilgan manba hajmi bunga yetmasa, manbadagi barcha ma'lumotlarni batafsil oching, lekin fakt yoki manba to'qib hajmni sun'iy oshirmang. "
@@ -5324,6 +5533,7 @@ def api_generate_referat(
 
         if not referat_text:
             raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        referat_text = _clean_academic_markdown(referat_text, remove_cover=True)
         title = topic or (Path(file.filename).stem if file and file.filename else "Referat")
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_referat"
         docx_bytes = _build_referat_docx(title, referat_text, author, university, faculty, group_name, teacher, subject)
