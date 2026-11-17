@@ -763,6 +763,12 @@ def init_db():
         balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
         updated_at INTEGER NOT NULL DEFAULT 0)""")
 
+    # Admin referat bonuslari tarif va bepul limitdan mustaqil saqlanadi.
+    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_bonus_wallets (
+        user_id INTEGER PRIMARY KEY,
+        balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
+        updated_at INTEGER NOT NULL DEFAULT 0)""")
+
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
 
@@ -3137,6 +3143,112 @@ def admin_bonus_summary_command(message):
         logging.exception("Konspekt bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
 
 
+@bot.message_handler(commands=["bonus_referat"])
+def admin_bonus_referat_command(message):
+    """Faqat administrator foydalanuvchiga referat bonusini beradi."""
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) != 3:
+        bot.send_message(message.chat.id, "Format: /bonus_referat USER_ID MIQDOR\nMisol: /bonus_referat 123456789 5")
+        return
+    try:
+        target_id, amount = int(parts[1]), int(parts[2])
+        if target_id <= 0 or amount <= 0 or amount > 1000000:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID musbat son, bonus miqdori esa 1–1 000 000 oralig‘ida bo‘lishi kerak.")
+        return
+
+    add_user_to_db(target_id)
+    conn = _connect_db(timeout=30)
+    try:
+        conn.execute(
+            "INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance,updated_at=excluded.updated_at",
+            (target_id, amount, int(time.time()))
+        )
+        conn.commit()
+        row = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (target_id,)).fetchone()
+        balance = int(row[0] or 0) if row else amount
+    except Exception:
+        conn.rollback()
+        logging.exception("Admin referat bonusi berishda xato | target_id=%s", target_id)
+        bot.send_message(message.chat.id, "❌ Referat bonusi qo‘shilmadi. Baza xatosini tekshiring.")
+        return
+    finally:
+        conn.close()
+
+    admin_id = int(message.from_user.id)
+    bot.send_message(
+        message.chat.id,
+        f"📄 Referat bonusi berildi.\n👤 User: {target_id}\n➕ Qo‘shildi: {amount} ta\n🎁 Jami bonus qoldig‘i: {balance} ta\n🛡 Admin: {admin_id}"
+    )
+    try:
+        lang = get_user_lang(target_id)
+        texts = {
+            "uz": f"🎁 Sizga administrator tomonidan {amount} ta qo‘shimcha referat bonusi berildi!\n📄 Bonuslar tarif limitingizdan alohida hisoblanadi.",
+            "ru": f"🎁 Администратор начислил вам {amount} дополнительных рефератов!\n📄 Бонусы учитываются отдельно от лимита тарифа.",
+            "en": f"🎁 The administrator granted you {amount} additional report bonuses!\n📄 Bonuses are counted separately from your plan limit.",
+        }
+        bot.send_message(target_id, texts.get(lang, texts["uz"]))
+    except Exception:
+        logging.exception("Referat bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
+
+
+@bot.message_handler(commands=["bonus_referat_revoke"])
+def admin_bonus_referat_revoke_command(message):
+    """Foydalanuvchining qolgan referat bonuslarini faqat admin bekor qiladi."""
+    if not _admin_only(message):
+        return
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        bot.send_message(message.chat.id, "Format: /bonus_referat_revoke USER_ID\nMisol: /bonus_referat_revoke 123456789")
+        return
+    try:
+        target_id = int(parts[1])
+        if target_id <= 0:
+            raise ValueError
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ USER_ID musbat son bo‘lishi kerak.")
+        return
+
+    conn = _connect_db(timeout=30)
+    try:
+        row = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (target_id,)).fetchone()
+        balance = int(row[0] or 0) if row else 0
+        if balance <= 0:
+            bot.send_message(message.chat.id, "ℹ️ Bu foydalanuvchida bekor qilinadigan referat bonusi yo‘q.")
+            return
+        conn.execute(
+            "UPDATE referat_bonus_wallets SET balance=0,updated_at=? WHERE user_id=?",
+            (int(time.time()), target_id)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception("Admin referat bonusini bekor qilishda xato | target_id=%s", target_id)
+        bot.send_message(message.chat.id, "❌ Referat bonusini bekor qilib bo‘lmadi.")
+        return
+    finally:
+        conn.close()
+
+    bot.send_message(
+        message.chat.id,
+        f"🗑 Referat bonusi bekor qilindi.\n👤 User: {target_id}\n➖ Bekor qilindi: {balance} ta"
+    )
+    try:
+        lang = get_user_lang(target_id)
+        texts = {
+            "uz": f"ℹ️ Administrator hisobingizdagi {balance} ta ishlatilmagan referat bonusini bekor qildi.",
+            "ru": f"ℹ️ Администратор отменил {balance} неиспользованных бонусов на рефераты.",
+            "en": f"ℹ️ The administrator revoked your {balance} unused report bonuses.",
+        }
+        bot.send_message(target_id, texts.get(lang, texts["uz"]))
+    except Exception:
+        logging.exception("Referat bonusi bekor qilingani haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
+
+
 @bot.message_handler(commands=["bonus_credits_revoke"])
 def admin_bonus_credits_revoke_command(message):
     """Bekor qilishda faqat ishlatilmay qolgan admin bergan Slayd kreditlarini yechadi."""
@@ -5169,14 +5281,20 @@ def _referat_usage_snapshot(user_id):
     try:
         row = conn.execute("SELECT period_key,used FROM referat_usage WHERE user_id=?", (int(user_id),)).fetchone()
         used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
+        bonus_row = conn.execute(
+            "SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)
+        ).fetchone()
+        bonus_remaining = int(bonus_row[0] or 0) if bonus_row else 0
         limit = int(quota["limit"])
         unlimited = limit == -1
-        remaining = None if unlimited else max(0, limit - used)
+        regular_remaining = None if unlimited else max(0, limit - used)
+        remaining = None if unlimited else regular_remaining + bonus_remaining
         return {
             "status": "ok", "enabled": REFERAT_ENABLED, "plan": quota["plan"],
             "used": used, "limit": None if unlimited else limit,
-            "remaining": remaining, "unlimited": unlimited,
-            "allowed": REFERAT_ENABLED and (unlimited or remaining > 0),
+            "remaining": remaining, "regular_remaining": regular_remaining,
+            "bonus_remaining": bonus_remaining, "unlimited": unlimited,
+            "allowed": REFERAT_ENABLED and (unlimited or regular_remaining > 0 or bonus_remaining > 0),
         }
     finally:
         conn.close()
@@ -5193,8 +5311,23 @@ def _reserve_referat_quota(user_id):
         row = conn.execute("SELECT period_key,used FROM referat_usage WHERE user_id=?", (int(user_id),)).fetchone()
         used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
         if limit != -1 and used >= limit:
-            conn.rollback()
-            return False, "limit"
+            bonus_row = conn.execute(
+                "SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)
+            ).fetchone()
+            bonus_balance = int(bonus_row[0] or 0) if bonus_row else 0
+            if bonus_balance <= 0:
+                conn.rollback()
+                return False, "limit"
+            cursor = conn.execute(
+                "UPDATE referat_bonus_wallets SET balance=balance-1,updated_at=? "
+                "WHERE user_id=? AND balance>0",
+                (int(time.time()), int(user_id))
+            )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return False, "limit"
+            conn.commit()
+            return True, "bonus"
         conn.execute(
             "INSERT INTO referat_usage(user_id,period_key,used,updated_at) VALUES(?,?,?,?) "
             "ON CONFLICT(user_id) DO UPDATE SET period_key=excluded.period_key,used=excluded.used,updated_at=excluded.updated_at",
@@ -5213,10 +5346,17 @@ def _reserve_referat_quota(user_id):
 def _refund_referat_quota(user_id, period_key):
     conn = _connect_db()
     try:
-        conn.execute(
-            "UPDATE referat_usage SET used=MAX(0,used-1),updated_at=? WHERE user_id=? AND period_key=?",
-            (int(time.time()), int(user_id), str(period_key))
-        )
+        if str(period_key) == "bonus":
+            conn.execute(
+                "INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,1,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET balance=balance+1,updated_at=excluded.updated_at",
+                (int(user_id), int(time.time()))
+            )
+        else:
+            conn.execute(
+                "UPDATE referat_usage SET used=MAX(0,used-1),updated_at=? WHERE user_id=? AND period_key=?",
+                (int(time.time()), int(user_id), str(period_key))
+            )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -8736,6 +8876,8 @@ def _admin_panel_bonus_markup():
         telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
         telebot.types.InlineKeyboardButton("💎 Slayd kreditlari bonusi", callback_data="adminpanel:guide:bonus_credits"),
         telebot.types.InlineKeyboardButton("📚 Konspekt bonusi", callback_data="adminpanel:guide:bonus_summary"),
+        telebot.types.InlineKeyboardButton("📄 Referat bonusi", callback_data="adminpanel:guide:bonus_referat"),
+        telebot.types.InlineKeyboardButton("🗑 Referat bonusini bekor qilish", callback_data="adminpanel:guide:bonus_referat_revoke"),
         telebot.types.InlineKeyboardButton("🗑 Slayd kredit bonusini bekor qilish", callback_data="adminpanel:guide:bonus_credits_revoke"),
         telebot.types.InlineKeyboardButton("🗑 Konspekt bonusini bekor qilish", callback_data="adminpanel:guide:bonus_summary_revoke"),
         telebot.types.InlineKeyboardButton("🗑 Premium bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
@@ -8758,7 +8900,7 @@ def admin_help_panel_command(message):
         "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
         "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
         "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
-        "🎁 Bonuslar — Premium, Teacher, Slayd kreditlari va Konspekt bonuslarini boshqarish.\n\n"
+        "🎁 Bonuslar — Premium, Teacher, Slayd kreditlari, Konspekt va Referat bonuslarini boshqarish.\n\n"
         "🔐 Ushbu menyu faqat administrator uchun ochiq."
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
@@ -8803,6 +8945,8 @@ def admin_help_panel_callback(call):
             "bonus_credits_revoke": "🗑 <b>Slayd kredit bonusini bekor qilish</b>\nFormat: <code>/bonus_credits_revoke USER_ID</code>\nMisol: <code>/bonus_credits_revoke 123456789</code>\nFaqat ishlatilmay qolgan administrator bonusi bekor qilinadi; sotib olingan va tarif kreditlari saqlanadi.",
             "bonus_summary": "📚 <b>Konspekt bonusi</b>\nFormat: <code>/bonus_summary USER_ID MIQDOR</code>\nMisol: <code>/bonus_summary 123456789 5</code>\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
             "bonus_summary_revoke": "🗑 <b>Konspekt bonusini bekor qilish</b>\nFormat: <code>/bonus_summary_revoke USER_ID</code>\nMisol: <code>/bonus_summary_revoke 123456789</code>\nFoydalanuvchining qolgan konspekt bonuslari bekor qilinadi.",
+            "bonus_referat": "📄 <b>Referat bonusi</b>\nFormat: <code>/bonus_referat USER_ID MIQDOR</code>\nMisol: <code>/bonus_referat 123456789 5</code>\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
+            "bonus_referat_revoke": "🗑 <b>Referat bonusini bekor qilish</b>\nFormat: <code>/bonus_referat_revoke USER_ID</code>\nMisol: <code>/bonus_referat_revoke 123456789</code>\nFoydalanuvchining qolgan referat bonuslari bekor qilinadi.",
             "bonus_revoke": "🗑 <b>Premium bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
         }
         bot.answer_callback_query(call.id)
