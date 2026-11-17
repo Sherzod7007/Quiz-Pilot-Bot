@@ -4802,24 +4802,6 @@ def _clean_academic_markdown(content, remove_cover=False):
                 ):
                     cleaned.pop(0)
 
-    # Foydalanilgan adabiyotlar ichidagi AI'ning xizmat izohini hujjatdan olib tashlaymiz.
-    # Haqiqiy bibliografik yozuvlar va bo'lim sarlavhalari saqlanadi.
-    cleaned_note = []
-    skip_note_continuation = False
-    for line in cleaned:
-        stripped = line.strip()
-        if re.match(r"^Izoh\s*:", stripped, re.IGNORECASE):
-            skip_note_continuation = True
-            continue
-        if skip_note_continuation:
-            if not stripped:
-                skip_note_continuation = False
-                cleaned_note.append(line)
-            # Izoh matni bitta yoki bir nechta qator bo'lsa, bo'sh qatorgacha tashlanadi.
-            continue
-        cleaned_note.append(line)
-    cleaned = cleaned_note
-
     # Qatorlar orasidagi ortiqcha bo'sh joylarni me'yorlashtiramiz.
     result = []
     blank = False
@@ -4871,19 +4853,17 @@ def _set_docx_page_border(section):
     borders.set(qn("w:display"), "firstPage")
     for edge in ("top", "left", "bottom", "right"):
         outer = OxmlElement(f"w:{edge}")
-        outer.set(qn("w:val"), "double")
+        outer.set(qn("w:val"), "single")
         outer.set(qn("w:sz"), "18")
         outer.set(qn("w:space"), "22")
-        # Word sahifa ramkasi bitta rangli bo'ladi; oltin double chiziq tanlandi.
-        outer.set(qn("w:color"), "B8944D")
+        outer.set(qn("w:color"), "183153")
         borders.append(outer)
     sect_pr.append(borders)
 
 
 def _draw_referat_pdf_cover_frame(canvas, doc):
     """PDF titul sahifasida to'q ko'k va oltin rangli ikki qavat ramka."""
-    # Referatning titul va mundarija sahifalariga bir xil ramka tushadi.
-    if getattr(doc, "page", 1) not in (1, 2):
+    if getattr(doc, "page", 1) != 1:
         return
     from reportlab.lib.colors import HexColor
     page_w, page_h = doc.pagesize
@@ -5267,26 +5247,6 @@ def _add_referat_body_to_docx(document, content):
             _add_markdown_inline_runs(paragraph, value)
 
 
-def _split_referat_contents(content):
-    """MUNDARIJA qismini alohida sahifaga, KIRISH va qolgan matnni asosiy qismga ajratadi."""
-    cleaned = _clean_academic_markdown(content, remove_cover=True)
-    lines = cleaned.splitlines()
-    start = None
-    for index, line in enumerate(lines):
-        plain = re.sub(r"^\s*#{1,6}\s*", "", line).strip().lower()
-        if plain in {"kirish", "introduction"}:
-            start = index
-            break
-    if start is None:
-        return "", cleaned
-    contents = "\n".join(lines[:start]).strip()
-    body = "\n".join(lines[start:]).strip()
-    # Mundarija sarlavhasi bo'lmasa, alohida mundarija sahifasi yaratmaymiz.
-    if not re.search(r"(?im)^\s*#{0,6}\s*m u n d a r i j a\s*$|^\s*#{0,6}\s*mundarija\s*$|^\s*#{0,6}\s*reja\s*$", contents):
-        return "", cleaned
-    return contents, body
-
-
 def _build_referat_docx(title, content, author, university, faculty, group_name, teacher, subject):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.enum.section import WD_SECTION
@@ -5355,26 +5315,13 @@ def _build_referat_docx(title, content, author, university, faculty, group_name,
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.space_before = Pt(18)
 
-    # Mundarija alohida, oltin ramkali sahifada; asosiy matn esa ramkasiz boshlanadi.
-    contents_text, body_text = _split_referat_contents(content)
-    if contents_text:
-        contents_section = document.add_section(WD_SECTION.NEW_PAGE)
-        contents_section.top_margin = Cm(2.0)
-        contents_section.bottom_margin = Cm(2.0)
-        contents_section.left_margin = Cm(2.5)
-        contents_section.right_margin = Cm(2.5)
-        _set_docx_page_border(contents_section)
-        _add_referat_body_to_docx(document, contents_text)
-
-        body_section = document.add_section(WD_SECTION.NEW_PAGE)
-    else:
-        body_section = document.add_section(WD_SECTION.NEW_PAGE)
-        body_text = content
+    # Keyingi sahifalar ramkasiz qoladi; titul ramkasi faqat birinchi sahifada.
+    body_section = document.add_section(WD_SECTION.NEW_PAGE)
     body_section.top_margin = Cm(2.0)
     body_section.bottom_margin = Cm(2.0)
     body_section.left_margin = Cm(3.0)
     body_section.right_margin = Cm(1.5)
-    _add_referat_body_to_docx(document, body_text)
+    _add_referat_body_to_docx(document, content)
 
     # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
     quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
@@ -5424,25 +5371,7 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
             story.append(Paragraph(f"{label} {escape(value)}", styles["ReferatMeta"]))
     story.extend([Spacer(1, 3*cm), Paragraph(str(datetime.now().year), styles["ReferatInstitution"]), PageBreak()])
 
-    contents_text, body_text = _split_referat_contents(content)
-    if contents_text:
-        story.append(PageBreak())
-        for kind, value in _iter_academic_blocks(contents_text):
-            if kind == "heading":
-                level, heading_text = value
-                story.append(Paragraph(_markdown_inline_to_reportlab(heading_text),
-                                       styles["ReferatH2"] if level >= 3 else styles["ReferatH1"]))
-            elif kind == "bullet":
-                story.append(Paragraph("&#8226;&nbsp; " + _markdown_inline_to_reportlab(value), styles["ReferatBody"]))
-            elif kind == "number":
-                story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
-            elif kind == "code":
-                story.append(Preformatted(escape(value), styles["ReferatCode"]))
-            else:
-                story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
-        story.append(PageBreak())
-
-    clean_content = _clean_academic_markdown(body_text, remove_cover=True)
+    clean_content = _clean_academic_markdown(content, remove_cover=True)
     for kind, value in _iter_academic_blocks(clean_content):
         if kind == "heading":
             level, text = value
@@ -5553,10 +5482,9 @@ def api_generate_referat(
         f"Referatni {output_language}, rasmiy-akademik uslubda yozing. Foydalanuvchi mavzusi va berilgan manbaga "
         "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
         "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
-        "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki bibliografik ma'lumoti ishonchli tasdiqlangan manbalarni kiriting. "
-        "Manba yetarli bo'lmasa, uydirma bibliografiya ham, 'Izoh:' yoki AI tomonidan yozilgan uzr/izoh matni ham qo'shmang; tasdiqlangan manba bo'lmasa, bo'limni bo'sh qoldiring. "
+        "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki aniq ma'lum bibliografik ma'lumotlarni kiriting. "
         "Markdown sarlavhalaridan foydalaning. Tuzilishi: MUNDARIJA (ixtiyoriy); KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
-        "FOYDALANILGAN ADABIYOTLAR (faqat haqiqiy, tekshiriladigan manbalar). "
+        "FOYDALANILGAN ADABIYOTLAR (manba berilmagan bo'lsa, uydirma ro'yxat tuzmang, buni ochiq qayd eting). "
         "MUHIM: titul varag'ini, universitet/fakultet nomini, muallif, guruh, fan yoki tekshiruvchi ma'lumotlarini qayta yozmang. "
         "Hujjat matnini bevosita MUNDARIJA yoki KIRISH bo'limidan boshlang. "
         "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
