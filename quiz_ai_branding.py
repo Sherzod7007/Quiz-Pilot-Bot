@@ -55,7 +55,6 @@ def get_branding_config(feature=None):
         "color": color,
         "logo_enabled": _env_bool("QUIZ_AI_QR_LOGO_ENABLED", False),
         "logo_path": os.getenv("QUIZ_AI_LOGO_PATH", str(Path(__file__).with_name("quiz_ai_logo.jpg"))).strip(),
-        "caption": os.getenv("QUIZ_AI_QR_CAPTION", "Quiz AI").strip()[:60],
     }
 
 
@@ -118,17 +117,18 @@ def _make_qr_png(config):
         return None
 
 
-def _position_xy(position, page_width, page_height, size, margin=22, caption_height=14):
+def _position_xy(position, page_width, page_height, size, margin=22):
+    """Calculate the position of the same square QR image for fixed-page formats."""
     if position == "top_left":
-        return margin, page_height - margin - size - caption_height
+        return margin, page_height - margin - size
     if position == "top_right":
-        return page_width - margin - size, page_height - margin - size - caption_height
+        return page_width - margin - size, page_height - margin - size
     if position == "bottom_left":
-        return margin, margin + caption_height
+        return margin, margin
     if position == "center":
         return (page_width - size) / 2, (page_height - size) / 2
     # document_end is treated as bottom-right for fixed-page formats.
-    return page_width - margin - size, margin + caption_height
+    return page_width - margin - size, margin
 
 
 def add_qr_to_pptx(presentation, feature="SLIDES"):
@@ -138,10 +138,7 @@ def add_qr_to_pptx(presentation, feature="SLIDES"):
     if not png or not presentation.slides:
         return False
 
-    from pptx.util import Inches, Pt
-    from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
-    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
 
     slide = presentation.slides[-1]
     slide_w = presentation.slide_width
@@ -160,16 +157,8 @@ def add_qr_to_pptx(presentation, feature="SLIDES"):
     else:
         left, top = slide_w - margin - size, slide_h - margin - size
 
-    # Oq fonli QR rasm; mavjud slayd dizaynining ustiga minimal joy egallaydi.
+    # PDF, Word va PPTX uchun bir xil kvadrat QR PNG ishlatiladi.
     slide.shapes.add_picture(io.BytesIO(png), left, top, width=size, height=size)
-    if config["caption"]:
-        caption = slide.shapes.add_textbox(left, top + size, size, Inches(0.20))
-        paragraph = caption.text_frame.paragraphs[0]
-        paragraph.text = config["caption"]
-        paragraph.alignment = PP_ALIGN.CENTER
-        paragraph.font.size = Pt(8)
-        paragraph.font.bold = True
-        paragraph.font.color.rgb = RGBColor(35, 80, 110)
     return True
 
 
@@ -198,13 +187,12 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     overlay_buffer = io.BytesIO()
     layer = canvas.Canvas(overlay_buffer, pagesize=(page_width, page_height))
     layer.saveState()
-    layer.setFillColorRGB(1, 1, 1)
-    layer.roundRect(x - 4, y - 4, size + 8, size + 22, 4, fill=1, stroke=0)
-    layer.drawImage(ImageReader(io.BytesIO(png)), x, y, width=size, height=size, preserveAspectRatio=True, mask="auto")
-    if config["caption"]:
-        layer.setFillColorRGB(0.12, 0.28, 0.40)
-        layer.setFont("Helvetica-Bold", 8)
-        layer.drawCentredString(x + size / 2, y - 13, config["caption"])
+    # PDF ham PPTX va Word kabi faqat umumiy QR PNG tasvirini joylaydi.
+    layer.drawImage(
+        ImageReader(io.BytesIO(png)),
+        x, y, width=size, height=size,
+        preserveAspectRatio=True, mask="auto"
+    )
     layer.restoreState()
     layer.save()
     overlay_buffer.seek(0)
@@ -227,7 +215,7 @@ def add_qr_to_docx(document, feature="TEACHER"):
         return False
 
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Inches
 
     position = config["position"]
     alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -239,12 +227,6 @@ def add_qr_to_docx(document, feature="TEACHER"):
     paragraph = document.add_paragraph()
     paragraph.alignment = alignment
     run = paragraph.add_run()
+    # Word ham PDF va PPTX kabi aynan shu QR PNG'ni ishlatadi; alohida yozuv yo'q.
     run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
-    if config["caption"]:
-        caption = document.add_paragraph()
-        caption.alignment = alignment
-        text_run = caption.add_run(config["caption"])
-        text_run.bold = True
-        text_run.font.size = Pt(8)
-        text_run.font.color.rgb = RGBColor(35, 80, 110)
     return True
