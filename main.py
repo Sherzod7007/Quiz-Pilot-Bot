@@ -4453,6 +4453,8 @@ def api_generate_slides(
     prompt = (
         "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
+        "OXIRGI SLAYD albatta taqdimotning yakuniy XULOSA qismi bo'lsin: unda mavzuning asosiy fikrlari, muhim natijalari va kerak bo'lsa amaliy takliflari qisqa jamlansin. Oxirgi slaydni yangi mavzu yoki navbatdagi bob bilan tugatmang. Sarlavhani mazmunga va foydalanuvchi tiliga mos ravishda 'Xulosa', 'Xulosa va takliflar', 'Asosiy natijalar' kabi tanlang. "
+        "Birinchi cover slaydi va oxirgi xulosa slaydi foydalanuvchi so'ragan umumiy slaydlar soni ichida bo'lsin; qo'shimcha slayd yaratmang. "
         "Qolgan HAR BIR slaydda 2-5 ta aniq, qisqa bullet va mazmunga mos kamida BITTA vizual diagramma/sxema bo'lishi SHART. visual_type faqat bar, column, pie, line, process, timeline, cards, cycle, pyramid yoki funnel bo'lsin; none ishlatmang. "
         "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa hech qanday raqam to'qimang va cards/process/timeline/cycle/pyramid/funnel kabi mazmuniy sxemalardan foydalaning. "
         "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column; mavzu bosqichlari uchun process/timeline, tarkibiy qismlar uchun cards, davriy jarayon uchun cycle, darajalar uchun pyramid, ketma-ket kamayish uchun funnel. "
