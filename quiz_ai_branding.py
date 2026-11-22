@@ -37,10 +37,11 @@ def get_branding_config(feature=None):
         logger.warning("QUIZ_AI_QR_POSITION noto'g'ri; bottom_right ishlatiladi.")
         position = "bottom_right"
 
-    # Barcha formatlarda bir xil fizik o'lcham: 54 pt = 0.75 inch.
-    # Railway'dagi eski QR_SIZE qiymati formatlar orasidagi farqni keltirib
-    # chiqarmasligi uchun umumiy standart qat'iy belgilanadi.
-    size = 54
+    # QR kodning asl o'lchami saqlanadi; barcha formatlar aynan shu qiymatdan foydalanadi.
+    try:
+        size = max(36, min(180, int(os.getenv("QUIZ_AI_QR_SIZE", "84"))))
+    except (TypeError, ValueError):
+        size = 84
 
     color = os.getenv("QUIZ_AI_QR_COLOR", "#2589D8").strip()
     if not (len(color) == 7 and color.startswith("#") and
@@ -202,7 +203,6 @@ def _find_safe_pdf_position(page, preferred, page_width, page_height, size, marg
         if position not in unique_positions:
             unique_positions.append(position)
 
-    qr_box = size + 8  # oq himoya cheti bilan birga tekshiriladi
     for position in unique_positions:
         if position == "top_left":
             x, y = margin, page_height - margin - size
@@ -213,7 +213,7 @@ def _find_safe_pdf_position(page, preferred, page_width, page_height, size, marg
         else:
             x, y = page_width - margin - size, margin
 
-        candidate = (x - 4, y - 4, x + size + 4, y + size + 4)
+        candidate = (x, y, x + size, y + size)
         if candidate[0] < 0 or candidate[1] < 0 or candidate[2] > page_width or candidate[3] > page_height:
             continue
         if not any(not (candidate[2] < bx1 or candidate[0] > bx2 or
@@ -266,8 +266,8 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
 
     overlay_buffer = io.BytesIO()
     layer = canvas.Canvas(overlay_buffer, pagesize=(page_width, page_height))
-    layer.setFillColorRGB(1, 1, 1)
-    layer.roundRect(x - 4, y - 4, size + 8, size + 8, 4, fill=1, stroke=0)
+    # Word, PDF va PPTX'da bir xil PNG ishlatiladi; qo'shimcha oq ramka
+    # chizilmaydi. PNG ichidagi standart QR quiet-zone saqlanadi.
     layer.drawImage(ImageReader(io.BytesIO(png)), x, y,
                     width=size, height=size, preserveAspectRatio=True, mask="auto")
     layer.save()
