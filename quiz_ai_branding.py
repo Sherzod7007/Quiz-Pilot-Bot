@@ -37,10 +37,10 @@ def get_branding_config(feature=None):
         logger.warning("QUIZ_AI_QR_POSITION noto'g'ri; bottom_right ishlatiladi.")
         position = "bottom_right"
 
-    try:
-        size = max(36, min(180, int(os.getenv("QUIZ_AI_QR_SIZE", "84"))))
-    except (TypeError, ValueError):
-        size = 84
+    # Barcha formatlarda bir xil fizik o'lcham: 54 pt = 0.75 inch.
+    # Railway'dagi eski QR_SIZE qiymati formatlar orasidagi farqni keltirib
+    # chiqarmasligi uchun umumiy standart qat'iy belgilanadi.
+    size = 54
 
     color = os.getenv("QUIZ_AI_QR_COLOR", "#2589D8").strip()
     if not (len(color) == 7 and color.startswith("#") and
@@ -57,7 +57,8 @@ def get_branding_config(feature=None):
         "color": color,
         "logo_enabled": _env_bool("QUIZ_AI_QR_LOGO_ENABLED", False),
         "logo_path": os.getenv("QUIZ_AI_LOGO_PATH", str(Path(__file__).with_name("quiz_ai_logo.jpg"))).strip(),
-        "caption": "" if is_referat else os.getenv("QUIZ_AI_QR_CAPTION", "Quiz AI").strip()[:60],
+        # QR ostida hech qanday yozuv chiqarilmaydi.
+        "caption": "",
     }
 
 
@@ -140,10 +141,7 @@ def add_qr_to_pptx(presentation, feature="SLIDES"):
     if not png or not presentation.slides:
         return False
 
-    from pptx.util import Inches, Pt
-    from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
-    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
 
     slide = presentation.slides[-1]
     slide_w = presentation.slide_width
@@ -164,19 +162,69 @@ def add_qr_to_pptx(presentation, feature="SLIDES"):
 
     # Oq fonli QR rasm; mavjud slayd dizaynining ustiga minimal joy egallaydi.
     slide.shapes.add_picture(io.BytesIO(png), left, top, width=size, height=size)
-    if config["caption"]:
-        caption = slide.shapes.add_textbox(left, top + size, size, Inches(0.20))
-        paragraph = caption.text_frame.paragraphs[0]
-        paragraph.text = config["caption"]
-        paragraph.alignment = PP_ALIGN.CENTER
-        paragraph.font.size = Pt(8)
-        paragraph.font.bold = True
-        paragraph.font.color.rgb = RGBColor(35, 80, 110)
     return True
 
 
+def _find_safe_pdf_position(page, preferred, page_width, page_height, size, margin=18):
+    """Find a free corner on a PDF page; return None when all corners are occupied."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    occupied = []
+
+    def visitor(text, cm, tm, font_dict, font_size):
+        if not text or not text.strip():
+            return
+        try:
+            x, y = float(tm[4]), float(tm[5])
+            font_size = max(5.0, float(font_size or 10))
+            font_name = (font_dict or {}).get("/BaseFont", "Helvetica")
+            try:
+                width = stringWidth(text, "Helvetica", font_size)
+            except Exception:
+                width = max(font_size * 0.45, len(text) * font_size * 0.45)
+            occupied.append((x - 2, y - font_size * 0.45,
+                             x + max(width, 2) + 2, y + font_size * 1.25))
+        except Exception:
+            # Noma'lum matn koordinatasi bo'lsa, xavfsiz tomonga og'amiz:
+            # keyingi tekshiruv barcha burchaklarni band deb hisoblaydi.
+            occupied.append((0, 0, page_width, page_height))
+
+    try:
+        page.extract_text(visitor_text=visitor)
+    except Exception:
+        return None
+
+    positions = [preferred, "bottom_right", "bottom_left", "top_right", "top_left"]
+    unique_positions = []
+    for position in positions:
+        if position in ("center", "document_end"):
+            continue
+        if position not in unique_positions:
+            unique_positions.append(position)
+
+    qr_box = size + 8  # oq himoya cheti bilan birga tekshiriladi
+    for position in unique_positions:
+        if position == "top_left":
+            x, y = margin, page_height - margin - size
+        elif position == "top_right":
+            x, y = page_width - margin - size, page_height - margin - size
+        elif position == "bottom_left":
+            x, y = margin, margin
+        else:
+            x, y = page_width - margin - size, margin
+
+        candidate = (x - 4, y - 4, x + size + 4, y + size + 4)
+        if candidate[0] < 0 or candidate[1] < 0 or candidate[2] > page_width or candidate[3] > page_height:
+            continue
+        if not any(not (candidate[2] < bx1 or candidate[0] > bx2 or
+                        candidate[3] < by1 or candidate[1] > by2)
+                   for bx1, by1, bx2, by2 in occupied):
+            return x, y
+    return None
+
+
 def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
-    """Overlay QR on the final content page; summary branding pages are omitted."""
+    """Add a compact QR without covering page text; use a clean page if needed."""
     config = get_branding_config(feature)
     png = _make_qr_png(config)
     if not png:
@@ -186,69 +234,57 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
 
-    source = io.BytesIO(pdf_bytes)
-    reader = PdfReader(source)
+    reader = PdfReader(io.BytesIO(pdf_bytes))
     if not reader.pages:
         return pdf_bytes
 
-    feature_name = str(feature).strip().upper()
-    is_summary = feature_name == "SUMMARY"
-    is_referat = feature_name == "REFERAT"
-
-    # Konspekt PDF'ida oxiriga qo'shilgan faqat "Quiz AI" yozuvi/QR turgan faqat
-    # brending sahifalarini chiqarib tashlaymiz va QR'ni oxirgi mazmunli
-    # sahifaning pastki chap tomoniga joylaymiz.
+    is_summary = str(feature).strip().upper() == "SUMMARY"
     target_index = len(reader.pages) - 1
     if is_summary:
         while target_index > 0:
-            page_text = (reader.pages[target_index].extract_text() or "")
-            # "Quiz AI" sarlavhasi va caption'i bir yoki bir necha marta
-            # uchrasa ham ularni chiqarib, sahifada haqiqiy matn qolganini tekshiramiz.
+            page_text = reader.pages[target_index].extract_text() or ""
             without_brand = re.sub(r"quiz\s*ai", "", page_text, flags=re.IGNORECASE)
             normalized = re.sub(r"[^a-z0-9]+", "", without_brand.lower())
-            # Faqat brending yozuvi bo'lgan yoki mutlaqo bo'sh sahifa.
-            if normalized == "":
+            if not normalized:
                 target_index -= 1
                 continue
             break
 
     page = reader.pages[target_index]
-    box = page.mediabox
-    page_width = float(box.width)
-    page_height = float(box.height)
+    page_width = float(page.mediabox.width)
+    page_height = float(page.mediabox.height)
     size = float(config["size"])
+    preferred = "bottom_left" if is_summary else config["position"]
+    safe_xy = _find_safe_pdf_position(page, preferred, page_width, page_height, size)
 
-    # PDF Konspekt QR'i doim pastki chapda; Word funksiyasiga tegilmaydi.
-    position = "bottom_left" if is_summary else config["position"]
-    x, y = _position_xy(position, page_width, page_height, size)
+    # Matn bilan to'qnashadigan joy topilmasa, QR uchun alohida toza sahifa.
+    add_separate_page = safe_xy is None
+    if add_separate_page:
+        x, y = page_width - 18 - size, 18
+    else:
+        x, y = safe_xy
+
     overlay_buffer = io.BytesIO()
     layer = canvas.Canvas(overlay_buffer, pagesize=(page_width, page_height))
-    layer.saveState()
     layer.setFillColorRGB(1, 1, 1)
-    caption_enabled = bool(config["caption"]) and not (is_summary or is_referat)
-    layer.roundRect(
-        x - 4, y - 4, size + 8,
-        size + (22 if caption_enabled else 8), 4, fill=1, stroke=0
-    )
-    layer.drawImage(
-        ImageReader(io.BytesIO(png)), x, y,
-        width=size, height=size, preserveAspectRatio=True, mask="auto"
-    )
-    if caption_enabled:
-        layer.setFillColorRGB(0.12, 0.28, 0.40)
-        layer.setFont("Helvetica-Bold", 8)
-        layer.drawCentredString(x + size / 2, y - 13, config["caption"])
-    layer.restoreState()
+    layer.roundRect(x - 4, y - 4, size + 8, size + 8, 4, fill=1, stroke=0)
+    layer.drawImage(ImageReader(io.BytesIO(png)), x, y,
+                    width=size, height=size, preserveAspectRatio=True, mask="auto")
     layer.save()
     overlay_buffer.seek(0)
     overlay_page = PdfReader(overlay_buffer).pages[0]
-    page.merge_page(overlay_page)
 
     writer = PdfWriter()
     for index, item in enumerate(reader.pages):
         if is_summary and index > target_index:
             continue
         writer.add_page(item)
+    if add_separate_page:
+        qr_page = writer.add_blank_page(width=page_width, height=page_height)
+        qr_page.merge_page(overlay_page)
+    else:
+        writer.pages[target_index].merge_page(overlay_page)
+
     output = io.BytesIO()
     writer.write(output)
     return output.getvalue()
@@ -266,7 +302,7 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
         return False
 
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Inches, Pt
 
     feature_name = str(feature).strip().upper()
     is_summary = feature_name == "SUMMARY"
@@ -292,22 +328,11 @@ def add_qr_to_docx(document, feature="TEACHER", page_break=False):
 
     if page_break:
         document.add_page_break()
-        heading = document.add_paragraph()
-        heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        heading_run = heading.add_run("Quiz AI")
-        heading_run.bold = True
-        heading_run.font.size = Pt(18)
-        heading_run.font.color.rgb = RGBColor(35, 80, 110)
     paragraph = document.add_paragraph()
     paragraph.alignment = alignment if not page_break else WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.keep_together = True
     run = paragraph.add_run()
     run.add_picture(io.BytesIO(png), width=Inches(config["size"] / 72.0))
-    # Konspektda faqat QR tasviri qoladi; boshqa hujjatlarning caption'i saqlanadi.
-    if config["caption"] and not (is_summary or is_referat):
-        caption = document.add_paragraph()
-        caption.alignment = alignment
-        text_run = caption.add_run(config["caption"])
-        text_run.bold = True
-        text_run.font.size = Pt(8)
-        text_run.font.color.rgb = RGBColor(35, 80, 110)
     return True
