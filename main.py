@@ -263,12 +263,14 @@ logging.info(
 #   AI_RETRY_PER_KEY=2
 #   AI_REQUEST_TIMEOUT=600
 #   AI_TOTAL_TIMEOUT=1800
+#   AI_QUEUE_WAIT_TIMEOUT=120
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
 GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", "10")))
 AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "500")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
+AI_QUEUE_WAIT_TIMEOUT = max(5, min(600, int(os.getenv("AI_QUEUE_WAIT_TIMEOUT", "120"))))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
 # Katta testlar uchun chiqish tokenlari limitini Railway Variables orqali boshqarish.
@@ -320,12 +322,26 @@ _ai_monitor_state = {
     "key_attempts": {},
     "key_success": {},
     "key_failures": {},
+    "feature_requests": {},
+    "feature_success": {},
+    "feature_failures": {},
     "last_errors": [],
 }
 logging.info(
     "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
     GEMINI_INCLUDE_EXPLANATIONS, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
+)
+logging.info(
+    "AI navbatini kutish chegarasi | maksimal_kutish=%s soniya",
+    AI_QUEUE_WAIT_TIMEOUT,
+)
+logging.info(
+    "AI generatorlari yagona boshqaruvchiga ulangan | test=%s/%s | slayd=%s/%s | referat=%s/%s | konspekt=%s/%s",
+    GEMINI_MODEL, GEMINI_FALLBACK_MODEL,
+    os.getenv("SLIDE_AI_MODEL", GEMINI_MODEL), os.getenv("SLIDE_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
+    os.getenv("REFERAT_AI_MODEL", GEMINI_MODEL), os.getenv("REFERAT_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
+    os.getenv("SUMMARY_AI_MODEL", GEMINI_MODEL), os.getenv("SUMMARY_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
 )
 logging.info(
     "IZOH SOZLAMASI | Gemini izoh yaratishi: %s",
@@ -5201,24 +5217,19 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
               f"Uslub: {style_text}. {purpose_text} {word_target} Yakunda mazmunli xulosa va 5 ta o'zini tekshirish savolini qo'shing.\\n"
               f"Mavzu: {topic or 'Manba material asosida'}\\nMANBA:\\n{source_text}")
     try:
-        deadline = time.monotonic() + max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
-        if not gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic())): raise RuntimeError("AI navbatida kutish vaqti tugadi")
-        try:
-            last_error = None; summary_text = None; start = _next_generation_key_start(len(GOOGLE_API_KEYS))
-            for offset in range(len(GOOGLE_API_KEYS)):
-                if time.monotonic() >= deadline: break
-                key = GOOGLE_API_KEYS[(start+offset) % len(GOOGLE_API_KEYS)]
-                try:
-                    client = genai.Client(api_key=key, http_options=genai_types.HttpOptions(timeout=max(1000,int((deadline-time.monotonic())*1000))))
-                    response = client.models.generate_content(model=os.getenv("SUMMARY_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
-                        config=genai_types.GenerateContentConfig(temperature=0.25, max_output_tokens=max(6000,min(30000,int(os.getenv("SUMMARY_MAX_OUTPUT_TOKENS","20000"))))))
-                    summary_text = (response.text or "").strip()
-                    if not summary_text: raise RuntimeError("AI bo'sh javob qaytardi")
-                    break
-                except Exception as exc:
-                    last_error = exc; logging.warning("Konspekt Gemini urinish xatosi | kalit=%s | sabab=%s", offset+1, _safe_ai_error_text(exc))
-        finally: gemini_semaphore.release()
-        if not summary_text: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        summary_timeout = max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
+        summary_text = _run_gemini_generation(
+            feature_name="Konspekt",
+            prompt=prompt,
+            generation_config=genai_types.GenerateContentConfig(
+                temperature=0.25,
+                max_output_tokens=max(6000, min(30000, int(os.getenv("SUMMARY_MAX_OUTPUT_TOKENS", "20000")))),
+            ),
+            primary_model=os.getenv("SUMMARY_AI_MODEL", GEMINI_MODEL),
+            fallback_model=os.getenv("SUMMARY_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
+            total_timeout=summary_timeout,
+            response_validator=_require_gemini_text,
+        )
         title = topic or (Path(file.filename).stem if file and file.filename else "O'quv konspekti")
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_summary"
         docx_bytes = _build_summary_docx(title, summary_text)
@@ -5636,43 +5647,19 @@ def api_generate_referat(
         f"Guruh: {group_name}\nTekshiruvchi: {teacher}\nMANBA MATNI:\n{source_text}"
     )
     try:
-        deadline = time.monotonic() + max(60, min(900, int(os.getenv("REFERAT_GENERATION_TIMEOUT", "360"))))
-        if not gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic())):
-            raise RuntimeError("AI navbatida kutish vaqti tugadi")
-        try:
-            last_error = None
-            referat_text = None
-            start = _next_generation_key_start(len(GOOGLE_API_KEYS))
-            for offset in range(len(GOOGLE_API_KEYS)):
-                if time.monotonic() >= deadline:
-                    break
-                key = GOOGLE_API_KEYS[(start + offset) % len(GOOGLE_API_KEYS)]
-                try:
-                    client = genai.Client(
-                        api_key=key,
-                        http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000)))
-                    )
-                    response = client.models.generate_content(
-                        model=os.getenv("REFERAT_AI_MODEL", GEMINI_FALLBACK_MODEL),
-                        contents=prompt,
-                        config=genai_types.GenerateContentConfig(
-                            temperature=0.3,
-                            max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS
-                        )
-                    )
-                    referat_text = (response.text or "").strip()
-                    if not referat_text:
-                        raise RuntimeError("AI bo'sh javob qaytardi")
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    logging.warning("Referat Gemini urinish xatosi | kalit=%s | sabab=%s",
-                                    offset + 1, _safe_ai_error_text(exc))
-        finally:
-            gemini_semaphore.release()
-
-        if not referat_text:
-            raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        referat_timeout = max(60, min(900, int(os.getenv("REFERAT_GENERATION_TIMEOUT", "360"))))
+        referat_text = _run_gemini_generation(
+            feature_name="Referat",
+            prompt=prompt,
+            generation_config=genai_types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS,
+            ),
+            primary_model=os.getenv("REFERAT_AI_MODEL", GEMINI_MODEL),
+            fallback_model=os.getenv("REFERAT_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
+            total_timeout=referat_timeout,
+            response_validator=_require_gemini_text,
+        )
         referat_text = _clean_academic_markdown(referat_text, remove_cover=True)
         title = topic or (Path(file.filename).stem if file and file.filename else "Referat")
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_referat"
@@ -5808,32 +5795,29 @@ def api_generate_slides(
         "Agar titul ma'lumotlari berilgan bo'lsa, birinchi slayd subtitle qismiga ixcham va tartibli joylashtiring.\\n"
         f"Manba matni:\\n{source_text}"
     )
-    deadline = time.monotonic() + max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
-    deck = None; last_error = None
-    start_index = _next_generation_key_start(len(GOOGLE_API_KEYS))
+    slide_timeout = max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
+
+    def _validate_slide_response(response):
+        deck_result = SlideDeckSchema.model_validate_json(response.text)
+        if len(deck_result.slides) != slide_count:
+            raise ValueError(f"Slaydlar soni mos emas: {len(deck_result.slides)}/{slide_count}")
+        return deck_result
+
     try:
-        acquired = gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic()))
-        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
-        try:
-            for offset in range(len(GOOGLE_API_KEYS)):
-                if time.monotonic() >= deadline: break
-                key_index = (start_index + offset) % len(GOOGLE_API_KEYS)
-                try:
-                    client = genai.Client(api_key=GOOGLE_API_KEYS[key_index], http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000))))
-                    response = client.models.generate_content(
-                        model=os.getenv("SLIDE_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
-                        config=genai_types.GenerateContentConfig(response_mime_type="application/json", response_schema=SlideDeckSchema, temperature=.35, max_output_tokens=12000),
-                    )
-                    if not response or not response.text: raise RuntimeError("AI bo'sh javob qaytardi")
-                    deck = SlideDeckSchema.model_validate_json(response.text)
-                    if len(deck.slides) != slide_count: raise RuntimeError(f"Slaydlar soni mos emas: {len(deck.slides)}/{slide_count}")
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    logging.warning("Slayd Gemini urinish muvaffaqiyatsiz | kalit_indeksi=%s | sabab=%s", key_index+1, _safe_ai_error_text(exc))
-        finally:
-            gemini_semaphore.release()
-        if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
+        deck = _run_gemini_generation(
+            feature_name="Slayd",
+            prompt=prompt,
+            generation_config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=SlideDeckSchema,
+                temperature=0.35,
+                max_output_tokens=12000,
+            ),
+            primary_model=os.getenv("SLIDE_AI_MODEL", GEMINI_MODEL),
+            fallback_model=os.getenv("SLIDE_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
+            total_timeout=slide_timeout,
+            response_validator=_validate_slide_response,
+        )
         deck = _ensure_slide_visuals(deck)
         allowed_slide_themes = ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature", "elegant")
         safe_theme = (deck.design_theme if deck.design_theme in allowed_slide_themes else "modern") if theme == "auto" else (theme if theme in allowed_slide_themes else "modern")
@@ -6469,11 +6453,11 @@ _ai_queue_last_alert_at = 0.0
 
 
 def _safe_ai_error_text(error):
-    """AI provider xatolaridan maxfiy kalitlarni olib tashlab, xavfsiz matn qaytaradi."""
+    """AI xatolaridan maxfiy kalitlarni olib tashlab, xavfsiz matn qaytaradi."""
     try:
         message = str(error or "Noma'lum AI xatosi")
     except Exception:
-        message = "AI provider xatosi (tafsilotni o'qib bo'lmadi)"
+        message = "AI xizmatida xatolik (tafsilotni o'qib bo'lmadi)"
 
     # API kalitlari log yoki /ai_monitor xabariga hech qachon chiqmasin.
     for secret in GOOGLE_API_KEYS:
@@ -6488,6 +6472,206 @@ def _safe_ai_error_text(error):
     )
     message = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [MAXFIY]", message)
     return message[:180]
+
+
+def _gemini_error_status(error):
+    """Gemini xatosidan HTTP holat kodini xavfsiz aniqlashga urinadi."""
+    for value in (
+        getattr(error, "code", None),
+        getattr(error, "status_code", None),
+        getattr(getattr(error, "response", None), "status_code", None),
+    ):
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _run_gemini_generation(
+    feature_name,
+    prompt,
+    generation_config,
+    primary_model=None,
+    fallback_model=None,
+    total_timeout=None,
+    response_validator=None,
+):
+    """Barcha AI generatorlari uchun yagona navbat, retry, fallback va kalit rotatsiyasi."""
+    if not GOOGLE_API_KEYS:
+        raise RuntimeError("AI API kalitlari sozlanmagan")
+
+    feature = str(feature_name or "Noma'lum generator")[:40]
+    timeout_seconds = max(60, min(900, int(total_timeout or AI_TOTAL_TIMEOUT), AI_TOTAL_TIMEOUT))
+    queue_wait_limit = min(timeout_seconds, AI_QUEUE_WAIT_TIMEOUT)
+    deadline = time.monotonic() + timeout_seconds
+    started_at = time.monotonic()
+    queue_wait_started = started_at
+
+    models = []
+    for model_name in (primary_model or GEMINI_MODEL, fallback_model or GEMINI_FALLBACK_MODEL):
+        model_name = str(model_name or "").strip()
+        if model_name and model_name not in models:
+            models.append(model_name)
+    if not models:
+        raise RuntimeError("Gemini modellari sozlanmagan")
+
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] += 1
+
+    queue_acquired = ai_queue_slots.acquire(timeout=max(0.0, min(queue_wait_limit, deadline - time.monotonic())))
+    with _ai_monitor_lock:
+        _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
+        if queue_acquired:
+            _ai_monitor_state["accepted_requests"] += 1
+            _ai_monitor_state["feature_requests"][feature] = _ai_monitor_state["feature_requests"].get(feature, 0) + 1
+
+    if not queue_acquired:
+        message = f"{feature}: AI navbatida kutish muddati tugadi"
+        with _ai_monitor_lock:
+            _ai_monitor_state["feature_failures"][feature] = _ai_monitor_state["feature_failures"].get(feature, 0) + 1
+            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": message})
+            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
+        logging.error("%s | navbatni_kutish_limit=%s soniya", message, queue_wait_limit)
+        raise TimeoutError(message)
+
+    queue_wait_seconds = time.monotonic() - queue_wait_started
+    _maybe_alert_ai_queue_load()
+    if queue_wait_seconds >= 1.0:
+        logging.info("AI NAVBATI | generator=%s | navbatni_kutish=%.2f soniya", feature, queue_wait_seconds)
+
+    total_keys = len(GOOGLE_API_KEYS)
+    start_index = _next_generation_key_start(total_keys)
+    last_error = None
+    successful = False
+    attempts_this_request = 0
+
+    try:
+        # Har bir model uchun barcha kalitlar aylanadi. Asosiy modeldan natija
+        # olinmasa, zaxira modelga o'tiladi. Qayta urinishlar umumiy deadline ichida.
+        stop_retry_rounds = False
+        for retry_round in range(AI_RETRY_PER_KEY):
+            for model_index, model_name in enumerate(models):
+                model_failed = False
+                for offset in range(total_keys):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        last_error = TimeoutError("AI yaratish uchun umumiy vaqt chegarasi tugadi")
+                        break
+
+                    key_index = (start_index + offset) % total_keys
+                    api_key = GOOGLE_API_KEYS[key_index].strip()
+                    if not api_key:
+                        continue
+
+                    semaphore_wait_started = time.monotonic()
+                    if not gemini_semaphore.acquire(timeout=remaining):
+                        last_error = TimeoutError("AI parallel so'rovlar chegarasida kutish muddati tugadi")
+                        model_failed = True
+                        break
+                    semaphore_wait = time.monotonic() - semaphore_wait_started
+                    attempt_started = time.monotonic()
+                    attempts_this_request += 1
+                    with _ai_monitor_lock:
+                        _ai_monitor_state["key_attempts"][key_index] = _ai_monitor_state["key_attempts"].get(key_index, 0) + 1
+
+                    try:
+                        remaining_for_api = deadline - time.monotonic()
+                        if remaining_for_api <= 0:
+                            last_error = TimeoutError("AI umumiy vaqt chegarasi tugadi")
+                            model_failed = True
+                            break
+                        request_timeout_ms = max(1000, int(min(AI_REQUEST_TIMEOUT, remaining_for_api) * 1000))
+                        client = genai.Client(
+                            api_key=api_key,
+                            http_options=genai_types.HttpOptions(timeout=request_timeout_ms),
+                        )
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config=generation_config,
+                        )
+                        if not response or not getattr(response, "text", None):
+                            raise RuntimeError("Gemini bo'sh javob qaytardi")
+
+                        result = response_validator(response) if response_validator else response
+                        elapsed = time.monotonic() - attempt_started
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_success"][key_index] = _ai_monitor_state["key_success"].get(key_index, 0) + 1
+                            _ai_monitor_state["feature_success"][feature] = _ai_monitor_state["feature_success"].get(feature, 0) + 1
+                        successful = True
+                        logging.info(
+                            "AI YARATISH MUVAFFAQIYATLI | generator=%s | model=%s | kalit_indeksi=%s | qayta_urinish=%s/%s | model_urinishlari=%s | API_vaqti=%.2f soniya | navbat_kutishi=%.2f soniya | parallel_kutish=%.2f soniya | jami_vaqt=%.2f soniya",
+                            feature, model_name, key_index + 1, retry_round + 1,
+                            AI_RETRY_PER_KEY, attempts_this_request, elapsed,
+                            queue_wait_seconds, semaphore_wait, time.monotonic() - started_at,
+                        )
+                        return result
+
+                    except Exception as exc:
+                        last_error = exc
+                        model_failed = True
+                        safe_error = _safe_ai_error_text(exc)
+                        status_code = _gemini_error_status(exc)
+                        with _ai_monitor_lock:
+                            _ai_monitor_state["key_failures"][key_index] = _ai_monitor_state["key_failures"].get(key_index, 0) + 1
+                            _ai_monitor_state["last_errors"].append({
+                                "time": time.time(),
+                                "message": f"{feature} | {model_name} | Kalit #{key_index + 1} | {type(exc).__name__}: {safe_error}",
+                            })
+                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
+                        logging.warning(
+                            "AI SO'ROVI BAJARILMADI | generator=%s | model=%s | kalit_indeksi=%s | qayta_urinish=%s/%s | HTTP_kod=%s | xato_turi=%s | sabab=%s",
+                            feature, model_name, key_index + 1, retry_round + 1,
+                            AI_RETRY_PER_KEY, status_code or "aniqlanmadi", type(exc).__name__, safe_error,
+                        )
+
+                        # Aniq noto'g'ri so'rovda shu model/kalitlarni qayta-qayta
+                        # urinish foydasiz; keyingi (zaxira) model tekshiriladi.
+                        if status_code in (400, 404, 422):
+                            model_failed = True
+                            stop_retry_rounds = True
+                            break
+                    finally:
+                        gemini_semaphore.release()
+
+                    if time.monotonic() >= deadline:
+                        break
+
+                if model_failed and model_index + 1 < len(models):
+                    logging.warning(
+                        "AI ZAXIRA MODELGA O'TMOQDA | generator=%s | oldingi_model=%s | zaxira_model=%s",
+                        feature, model_name, models[model_index + 1],
+                    )
+                if time.monotonic() >= deadline:
+                    break
+
+            if time.monotonic() >= deadline or stop_retry_rounds:
+                break
+            if retry_round + 1 < AI_RETRY_PER_KEY:
+                pause = min(2.0, 0.5 * (2 ** retry_round), max(0.0, deadline - time.monotonic()))
+                if pause > 0:
+                    time.sleep(pause)
+
+        safe_last_error = _safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi")
+        raise RuntimeError(f"{feature}: barcha model va API kalit urinishlari muvaffaqiyatsiz. Sabab: {safe_last_error}")
+
+    except Exception:
+        if not successful:
+            with _ai_monitor_lock:
+                _ai_monitor_state["feature_failures"][feature] = _ai_monitor_state["feature_failures"].get(feature, 0) + 1
+        raise
+    finally:
+        ai_queue_slots.release()
+
+
+def _require_gemini_text(response):
+    """Gemini javobida bo'sh bo'lmagan matn borligini tekshiradi."""
+    result = (getattr(response, "text", None) or "").strip()
+    if not result:
+        raise RuntimeError("Gemini bo'sh javob qaytardi")
+    return result
 
 
 def _maybe_alert_ai_queue_load():
@@ -6514,7 +6698,7 @@ def _maybe_alert_ai_queue_load():
             "⚠️ <b>Quiz AI — AI navbati band</b>\n"
             f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\n"
             f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\n"
-            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /monitor buyrug'idan foydalaning."
+            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /ai_monitor buyrug'idan foydalaning."
         )
         bot.send_message(ADMIN_ID, alert, parse_mode="HTML", disable_web_page_preview=True)
         logging.warning(
@@ -6523,7 +6707,7 @@ def _maybe_alert_ai_queue_load():
         )
     except Exception:
         # Monitoring xatosi test yaratish jarayoniga xalaqit bermasligi kerak.
-        logging.exception("AI navbati bo'yicha admin ogohlantirishini yuborishda xatolik")
+        logging.exception("AI navbati bo'yicha administrator ogohlantirishini yuborishda xatolik")
 
 
 def _generate_quiz_from_gemini_impl(extracted_text):
@@ -6592,7 +6776,7 @@ MUHIM QOIDALAR:
     queue_wait_started = request_started
     with _ai_monitor_lock:
         _ai_monitor_state["waiting_for_queue"] += 1
-    queue_remaining = max(0.0, deadline - time.monotonic())
+    queue_remaining = max(0.0, min(AI_QUEUE_WAIT_TIMEOUT, deadline - time.monotonic()))
     queue_acquired = ai_queue_slots.acquire(timeout=queue_remaining)
     with _ai_monitor_lock:
         _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
@@ -6602,7 +6786,7 @@ MUHIM QOIDALAR:
             _ai_monitor_state["last_errors"].append({"time": time.time(), "message": "AI navbatida kutish muddati tugadi"})
             _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
     if not queue_acquired:
-        logging.error("AI testlar navbatida kutish muddati tugadi | umumiy_limit=%s soniya", AI_TOTAL_TIMEOUT)
+        logging.error("AI testlar navbatida kutish muddati tugadi | navbat_kutish_limit=%s soniya", AI_QUEUE_WAIT_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
     _maybe_alert_ai_queue_load()
@@ -6826,6 +7010,9 @@ def admin_ai_monitor_command(message):
             key_attempts = dict(_ai_monitor_state["key_attempts"])
             key_success = dict(_ai_monitor_state["key_success"])
             key_failures = dict(_ai_monitor_state["key_failures"])
+            feature_requests = dict(_ai_monitor_state.get("feature_requests", {}))
+            feature_success = dict(_ai_monitor_state.get("feature_success", {}))
+            feature_failures = dict(_ai_monitor_state.get("feature_failures", {}))
             recent_errors = list(_ai_monitor_state["last_errors"])
 
         with _ai_stats_lock:
@@ -6838,11 +7025,13 @@ def admin_ai_monitor_command(message):
             "⚙️ <b>Joriy yuklama</b>\n"
             f"🔄 Ishlayotgan AI so‘rovlari: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
             f"⏳ Navbat slotlari band: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
-            f"🕰 Navbat joyini kutayotgan so‘rovlar: <b>{waiting}</b>\n"
+            f"🕰 Navbatga kirishni kutayotgan so‘rovlar: <b>{waiting}</b>\n"
             f"🟢 Bo‘sh navbat slotlari: <b>{queue_slots_free}</b>\n\n"
-            "📊 <b>Test yaratish natijalari (server ishga tushganidan beri)</b>\n"
-            f"✅ Muvaffaqiyatli: <b>{successful_generations}</b>\n"
-            f"❌ Muvaffaqiyatsiz: <b>{failed_generations}</b>\n"
+            "📊 <b>Generatorlar natijalari (server ishga tushganidan beri)</b>\n"
+            f"📝 Test: muvaffaqiyatli <b>{successful_generations}</b>, xato <b>{failed_generations}</b>\n"
+            f"📚 Konspekt: so‘rov <b>{feature_requests.get('Konspekt', 0)}</b>, muvaffaqiyat <b>{feature_success.get('Konspekt', 0)}</b>, xato <b>{feature_failures.get('Konspekt', 0)}</b>\n"
+            f"📄 Referat: so‘rov <b>{feature_requests.get('Referat', 0)}</b>, muvaffaqiyat <b>{feature_success.get('Referat', 0)}</b>, xato <b>{feature_failures.get('Referat', 0)}</b>\n"
+            f"🖥 Slayd: so‘rov <b>{feature_requests.get('Slayd', 0)}</b>, muvaffaqiyat <b>{feature_success.get('Slayd', 0)}</b>, xato <b>{feature_failures.get('Slayd', 0)}</b>\n"
             f"📥 Navbatga qabul qilingan jami so‘rovlar: <b>{accepted}</b>\n\n"
             "🔑 <b>API kalitlari statistikasi</b>\n"
             f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
