@@ -32,10 +32,10 @@ def get_branding_config(feature=None):
         if feature_key in os.environ:
             enabled = enabled and _env_bool(feature_key, True)
 
-    position = os.getenv("QUIZ_AI_QR_POSITION", "bottom_right").strip().lower()
+    position = os.getenv("QUIZ_AI_QR_POSITION", "bottom_left").strip().lower()
     if position not in _VALID_POSITIONS:
-        logger.warning("QUIZ_AI_QR_POSITION noto'g'ri; bottom_right ishlatiladi.")
-        position = "bottom_right"
+        logger.warning("QUIZ_AI_QR_POSITION noto'g'ri; bottom_left ishlatiladi.")
+        position = "bottom_left"
 
     # QR kodning asl o'lchami saqlanadi; barcha formatlar aynan shu qiymatdan foydalanadi.
     try:
@@ -50,6 +50,10 @@ def get_branding_config(feature=None):
         color = "#2589D8"
 
     is_referat = str(feature or "").strip().upper() == "REFERAT"
+    logger.info(
+        "Quiz AI QR sozlamasi | modul=%s | yoqilgan=%s | pozitsiya=%s | o'lcham=%s pt",
+        str(feature or "UMUMIY").upper(), enabled, position, size,
+    )
     return {
         "enabled": enabled,
         "url": os.getenv("QUIZ_AI_QR_URL", "https://t.me/Quiz_AI_Test_Bot").strip(),
@@ -195,7 +199,7 @@ def _find_safe_pdf_position(page, preferred, page_width, page_height, size, marg
     except Exception:
         return None
 
-    positions = [preferred, "bottom_right", "bottom_left", "top_right", "top_left"]
+    positions = [preferred]
     unique_positions = []
     for position in positions:
         if position in ("center", "document_end"):
@@ -260,7 +264,7 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     # Matn bilan to'qnashadigan joy topilmasa, QR uchun alohida toza sahifa.
     add_separate_page = safe_xy is None
     if add_separate_page:
-        x, y = page_width - 18 - size, 18
+        x, y = 18, 18
     else:
         x, y = safe_xy
 
