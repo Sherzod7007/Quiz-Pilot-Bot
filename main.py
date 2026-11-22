@@ -4894,6 +4894,25 @@ def _clean_academic_markdown(content, remove_cover=False):
     text = re.sub(r"</?(?:div|span|p)[^>]*>", "", text, flags=re.IGNORECASE)
     lines = text.split("\n")
 
+    # Bibliografiya ostidagi modelning texnik izohi hujjatga kiritilmaydi.
+    bibliography_seen = False
+    filtered_lines = []
+    for raw_line in lines:
+        plain_line = re.sub(r"^[#*\\s]+", "", raw_line).strip().lower()
+        if re.search(r"foydalanilgan\\s+adabiyotlar|references|bibliography", plain_line):
+            bibliography_seen = True
+            filtered_lines.append(raw_line)
+            continue
+        if bibliography_seen and (
+            plain_line.startswith("(izoh") or plain_line.startswith("izoh:") or
+            "manba matni kiritilmagani" in plain_line or
+            "bibliografik manbalarni uydirish" in plain_line or
+            "ro'yxati shakllantirilmadi" in plain_line
+        ):
+            continue
+        filtered_lines.append(raw_line)
+    lines = filtered_lines
+
     # AI ba'zan hujjat ichida kod blokining chegaralarini chiqaradi.
     cleaned = []
     in_fence = False
@@ -5210,12 +5229,22 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
         if style == "standard" else
         "Taxminan 2200-3200 so'z hajmida yozing; manba qisqa bo'lsa, hajmni sun'iy to'ldirmang, mavjud mazmunni to'liq oching."
     )
-    prompt = ("Siz tajribali o'qituvchi va akademik konspekt tuzuvchisiz. Faqat berilgan mavzu va manbaga tayaning; manbada yo'q fakt, sana, formula yoki iqtibosni to'qimang. "
-              "Manbadagi muhim bo'lim, kichik mavzu, ta'rif, qonun, formula va xulosalarni tashlab ketmang. Har bir asosiy tushunchani nima ekanligi, qanday ishlashi va ahamiyati bilan izohlang. "
-              "Bir xil fikrni takrorlamang, ammo mazmunni bir-ikki jumlaga siqib qo'ymang. Zarur joyda sodda misol yoki bosqichma-bosqich tushuntirish bering; manbada yo'q aniq faktni o'ylab topmang. "
-              "O'zbekcha matn bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yozing. Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalaning. "
-              f"Uslub: {style_text}. {purpose_text} {word_target} Yakunda mazmunli xulosa va 5 ta o'zini tekshirish savolini qo'shing.\\n"
-              f"Mavzu: {topic or 'Manba material asosida'}\\nMANBA:\\n{source_text}")
+    source_mode_instruction = (
+        "Quyidagi MANBA MATNI asosiy va ustuvor manbadir. Undagi muhim bo'lim, ta'rif, qonun, formula va xulosalarni to'liq yorit. "
+        "Manbada yo'q aniq fakt, sana, formula yoki iqtibosni qo'shma.\\n"
+        f"MANBA MATNI:\\n{source_text}"
+        if source_text.strip() else
+        "Foydalanuvchi fayl yuklamagan. Bu xato emas: MAVZU bo'yicha o'z bilimlaring asosida mustaqil, to'liq akademik konspekt yarat. "
+        "Hech qachon 'MANBA berilmagan', 'matn yuboring' yoki texnik rad javobini yozma. "
+        "Ishonchsiz statistik raqam, sana, formula yoki soxta iqtibos kiritma."
+    )
+    prompt = ("Siz tajribali o'qituvchi va akademik konspekt tuzuvchisiz. "
+              "Maqsad — tayyor, mazmunli va o'rganishga qulay konspekt berish. Bir-ikki jumlalik javob yoki faqat reja yozish taqiqlanadi. "
+              "Har bir asosiy tushunchani nima ekanligi, qanday ishlashi, tarkibiy qismlari va amaliy ahamiyati bilan tushuntir. "
+              "Bir xil fikrni takrorlama, lekin mazmunni haddan tashqari siqma. Zarur joyda sodda misol va bosqichma-bosqich tushuntirish ber. "
+              "O'zbekcha mavzu bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yoz. Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalan. "
+              f"Uslub: {style_text}. {purpose_text} {word_target} Yakunda mazmunli xulosa va 5 ta o'zini tekshirish savolini qo'sh.\\n"
+              f"MAVZU: {topic or 'Yuklangan manba asosida'}\\n{source_mode_instruction}")
     try:
         summary_timeout = max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
         summary_text = _run_gemini_generation(
@@ -5633,9 +5662,10 @@ def api_generate_referat(
         f"Referatni {output_language}, rasmiy-akademik uslubda yozing. Foydalanuvchi mavzusi va berilgan manbaga "
         "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
         "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
-        "adabiyotlar bo'limida faqat manbada ko'rsatilgan yoki aniq ma'lum bibliografik ma'lumotlarni kiriting. "
+        "adabiyotlar bo'limida faqat haqiqiyligi va bibliografik ma'lumoti ishonchli bo'lgan manbalarni kiriting. "
+        "Ma'lumot yetarli bo'lmasa, bibliografik ma'lumotni taxmin qilmang va izoh, uzr, eslatma yoki qavs ichidagi tushuntirish yozmang. "
         "Markdown sarlavhalaridan foydalaning. Tuzilishi: MUNDARIJA (ixtiyoriy); KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
-        "FOYDALANILGAN ADABIYOTLAR (manba berilmagan bo'lsa, uydirma ro'yxat tuzmang, buni ochiq qayd eting). "
+        "FOYDALANILGAN ADABIYOTLAR (faqat tekshiriladigan manbalar ro'yxati; tasdiqlanmagan manbalar o'rniga izoh yozma). "
         "MUHIM: titul varag'ini, universitet/fakultet nomini, muallif, guruh, fan yoki tekshiruvchi ma'lumotlarini qayta yozmang. "
         "Hujjat matnini bevosita MUNDARIJA yoki KIRISH bo'limidan boshlang. "
         "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
