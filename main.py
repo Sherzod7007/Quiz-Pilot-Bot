@@ -4898,8 +4898,8 @@ def _clean_academic_markdown(content, remove_cover=False):
     bibliography_seen = False
     filtered_lines = []
     for raw_line in lines:
-        plain_line = re.sub(r"^[#*\\s]+", "", raw_line).strip().lower()
-        if re.search(r"foydalanilgan\\s+adabiyotlar|references|bibliography", plain_line):
+        plain_line = re.sub(r"^[#*\s]+", "", raw_line).strip().lower()
+        if re.search(r"foydalanilgan\s+adabiyotlar|references|bibliography", plain_line):
             bibliography_seen = True
             filtered_lines.append(raw_line)
             continue
@@ -5080,15 +5080,25 @@ def _add_markdown_inline_runs(paragraph, text):
 
 
 def _markdown_inline_to_reportlab(value):
-    """Markdown inline formatini ReportLab Paragraph belgilashiga xavfsiz o'tkazadi."""
+    """Markdown inline formatini kesishmaydigan, xavfsiz ReportLab XML'iga aylantiradi."""
     from xml.sax.saxutils import escape
-    escaped = escape(str(value or ""))
-    escaped = re.sub(r'`([^`]+)`', r'<font name="Courier">\1</font>', escaped)
-    escaped = re.sub(r'\*\*(.+?)\*\*|__(.+?)__',
-                     lambda m: '<b>' + (m.group(1) or m.group(2)) + '</b>', escaped)
-    escaped = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)',
-                     lambda m: '<i>' + (m.group(1) or m.group(2)) + '</i>', escaped)
-    return escaped
+    text = str(value or "")
+    token_pattern = re.compile(
+        r'(\*\*[^*\n]+?\*\*|__[^_\n]+?__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)'
+    )
+    output, cursor = [], 0
+    for match in token_pattern.finditer(text):
+        output.append(escape(text[cursor:match.start()]))
+        token = match.group(0)
+        if token.startswith(("**", "__")):
+            output.append("<b>" + escape(token[2:-2]) + "</b>")
+        elif token.startswith("`"):
+            output.append('<font name="Courier">' + escape(token[1:-1]) + "</font>")
+        else:
+            output.append("<i>" + escape(token[1:-1]) + "</i>")
+        cursor = match.end()
+    output.append(escape(text[cursor:]))
+    return "".join(output)
 
 
 def _markdown_heading_text(value):
@@ -5134,8 +5144,9 @@ def _build_summary_pdf(title, content):
     from xml.sax.saxutils import escape
     output = BytesIO()
     regular, bold = _register_academic_pdf_fonts()
+    # Pastki 4 sm QR uchun bo'sh zona: QR matnni yopmaydi va alohida sahifa talab qilmaydi.
     doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm,
-                            topMargin=1.8*cm, bottomMargin=1.8*cm)
+                            topMargin=1.8*cm, bottomMargin=4.0*cm)
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="SummaryTitle", parent=styles["Title"], fontName=bold,
                               alignment=TA_CENTER, fontSize=18, leading=23, spaceAfter=14))
@@ -5247,6 +5258,19 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
               f"MAVZU: {topic or 'Yuklangan manba asosida'}\\n{source_mode_instruction}")
     try:
         summary_timeout = max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
+        def _validate_summary_response(response):
+            text = _require_gemini_text(response)
+            words = len(re.findall(r"\b[\w'-]+\b", text, flags=re.UNICODE))
+            if not source_text.strip():
+                minimum_words = max(700, min(1800, int(os.getenv("SUMMARY_MIN_WORDS", "1600"))))
+                if words < minimum_words:
+                    raise ValueError(f"Konspekt juda qisqa: {words} so'z; kamida {minimum_words} so'z kerak")
+            elif words < 450:
+                raise ValueError(f"Manbaga asoslangan konspekt juda qisqa: {words} so'z")
+            if not re.search(r"(?im)^#+\s*(xulosa|conclusion|заключение)\b", text):
+                raise ValueError("Konspektda Xulosa bo'limi yo'q")
+            return text
+
         summary_text = _run_gemini_generation(
             feature_name="Konspekt",
             prompt=prompt,
@@ -5257,7 +5281,7 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
             primary_model=os.getenv("SUMMARY_AI_MODEL", GEMINI_MODEL),
             fallback_model=os.getenv("SUMMARY_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
             total_timeout=summary_timeout,
-            response_validator=_require_gemini_text,
+            response_validator=_validate_summary_response,
         )
         title = topic or (Path(file.filename).stem if file and file.filename else "O'quv konspekti")
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_summary"
@@ -5405,9 +5429,92 @@ def _refund_referat_quota(user_id, period_key):
         conn.close()
 
 
+def _referat_heading_key(text):
+    """Sarlavhani Mundarija va majburiy bo'lim tekshiruvi uchun normallashtiradi."""
+    value = re.sub(r"^#+\s*", "", str(text or "")).strip().strip("*_ ")
+    value = re.sub(r"^\d+(?:\.\d+)*[.)]?\s*", "", value)
+    return re.sub(r"[^a-zа-яё0-9]+", "", value.lower())
+
+
+def _prepare_referat_sections(content):
+    """AI Mundarijasini olib tashlab, sarlavhalar asosida hujjat tarkibini tayyorlaydi."""
+    blocks = list(_iter_academic_blocks(_clean_academic_markdown(content, remove_cover=True)))
+    body, toc_entries = [], []
+    skip_toc = False
+    required = {"kirish": False, "xulosa": False, "bibliography": False}
+    excluded = {
+        "kirish", "introduction", "xulosa", "conclusion", "заключение",
+        "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"
+    }
+    for kind, value in blocks:
+        if kind == "heading":
+            level, heading_text = value
+            key = _referat_heading_key(heading_text)
+            if key in {"mundarija", "reja", "contents", "tableofcontents"}:
+                skip_toc = True
+                continue
+            if skip_toc:
+                if key in {"kirish", "introduction"}:
+                    skip_toc = False
+                else:
+                    continue
+            if key in {"kirish", "introduction"}:
+                required["kirish"] = True
+                heading_text, level = "KIRISH", 1
+            elif key in {"xulosa", "conclusion", "заключение"}:
+                required["xulosa"] = True
+                heading_text, level = "XULOSA", 1
+            elif key in {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
+                required["bibliography"] = True
+                heading_text, level = "FOYDALANILGAN ADABIYOTLAR", 1
+            body.append(("heading", (level, heading_text)))
+            if key not in excluded:
+                toc_entries.append((0 if level <= 2 else 1, heading_text))
+        else:
+            if not skip_toc:
+                body.append((kind, value))
+
+    missing = [name for name, present in required.items() if not present]
+    if missing:
+        raise ValueError("Referatning majburiy bo'limlari yetishmaydi: " + ", ".join(missing))
+    main_titles = [name for level, name in toc_entries if level == 0]
+    if len(main_titles) < 3:
+        raise ValueError("Referatda kamida 3 ta asosiy bob bo'lishi kerak")
+    return body, toc_entries[:20]
+
+
+def _add_docx_toc_field(paragraph):
+    """Word ochilganda sahifa raqamlarini yangilaydigan avtomatik Mundarija maydoni."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    run = OxmlElement("w:r")
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = ' TOC \\o "1-2" \\h \\z \\u '
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    text = OxmlElement("w:t")
+    text.text = "Mundarijani ko'rsatish uchun Word'da maydonni yangilang."
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    for element in (begin, instr, separate, text, end):
+        run.append(element)
+    paragraph._p.append(run)
+
+
 def _add_referat_body_to_docx(document, content):
-    content = _clean_academic_markdown(content, remove_cover=True)
-    for kind, value in _iter_academic_blocks(content):
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    body_blocks, toc_entries = _prepare_referat_sections(content)
+
+    # Ikkinchi sahifa: alohida Mundarija.
+    toc_heading = document.add_heading("MUNDARIJA", level=1)
+    toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_docx_toc_field(document.add_paragraph())
+    document.add_page_break()
+
+    for kind, value in body_blocks:
         if kind == "heading":
             level, text = value
             document.add_heading(_markdown_heading_text(text), level=2 if level >= 3 else 1)
@@ -5502,6 +5609,16 @@ def _build_referat_docx(title, content, author, university, faculty, group_name,
     body_section.left_margin = Cm(3.0)
     body_section.right_margin = Cm(1.5)
     _add_referat_body_to_docx(document, content)
+    try:
+        from docx.oxml import OxmlElement
+        settings = document.settings.element
+        update_fields = settings.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}updateFields")
+        if update_fields is None:
+            update_fields = OxmlElement("w:updateFields")
+            settings.append(update_fields)
+        update_fields.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "true")
+    except Exception:
+        logging.warning("Referat Word Mundarija maydonini avtomatik yangilash sozlanmadi")
 
     # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
     quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
@@ -5514,14 +5631,17 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Preformatted
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, PageBreak, Preformatted,
+    )
+    from reportlab.platypus.tableofcontents import TableOfContents
     from xml.sax.saxutils import escape
+
     output = BytesIO()
     regular, bold = _register_academic_pdf_fonts()
-    doc = SimpleDocTemplate(
-        output, pagesize=A4, rightMargin=2.5*cm, leftMargin=2.5*cm,
-        topMargin=2.5*cm, bottomMargin=2.5*cm
-    )
+    # Pastki 4 sm QR uchun bo'sh zona ajratiladi.
+    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2.5*cm, leftMargin=2.5*cm,
+                            topMargin=2.2*cm, bottomMargin=4.0*cm)
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="ReferatTitle", parent=styles["Title"], fontName=bold,
                               alignment=TA_CENTER, fontSize=21, leading=27, spaceAfter=18))
@@ -5530,18 +5650,22 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
     styles.add(ParagraphStyle(name="ReferatMeta", parent=styles["Normal"], fontName=regular,
                               alignment=TA_RIGHT, fontSize=11, leading=17))
     styles.add(ParagraphStyle(name="ReferatH1", parent=styles["Heading1"], fontName=bold,
-                              fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
+                              fontSize=15, leading=19, spaceBefore=12, spaceAfter=7, keepWithNext=True))
     styles.add(ParagraphStyle(name="ReferatH2", parent=styles["Heading2"], fontName=bold,
-                              fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
+                              fontSize=12, leading=16, spaceBefore=9, spaceAfter=5, keepWithNext=True))
     styles.add(ParagraphStyle(name="ReferatBody", parent=styles["BodyText"], fontName=regular,
                               fontSize=10.5, leading=15, spaceAfter=5))
     styles.add(ParagraphStyle(name="ReferatCode", parent=styles["Code"], fontName=regular,
                               fontSize=8, leading=10, leftIndent=12))
+    styles.add(ParagraphStyle(name="TOCHeading", parent=styles["Heading1"], fontName=bold,
+                              alignment=TA_CENTER, fontSize=16, leading=20, spaceAfter=16))
+    styles.add(ParagraphStyle(name="TOCLevel0", fontName=regular, fontSize=9.5,
+                              leading=13, leftIndent=0, spaceAfter=3))
+    styles.add(ParagraphStyle(name="TOCLevel1", fontName=regular, fontSize=8.8,
+                              leading=11, leftIndent=18, spaceAfter=2))
 
-    story = [
-        Spacer(1, 1.0*cm),
-        Paragraph(escape((university or "TA'LIM MUASSASASI").upper()), styles["ReferatInstitution"]),
-    ]
+    story = [Spacer(1, cm), Paragraph(escape((university or "TA'LIM MUASSASASI").upper()),
+                                      styles["ReferatInstitution"])]
     if faculty:
         story.append(Paragraph(escape(faculty), styles["ReferatInstitution"]))
     story.extend([Spacer(1, 4*cm), Paragraph("REFERAT", styles["ReferatTitle"]),
@@ -5549,14 +5673,21 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
     for label, value in (("Fan:", subject), ("Bajardi:", author), ("Guruh:", group_name), ("Tekshirdi:", teacher)):
         if value:
             story.append(Paragraph(f"{label} {escape(value)}", styles["ReferatMeta"]))
-    story.extend([Spacer(1, 3*cm), Paragraph(str(datetime.now().year), styles["ReferatInstitution"]), PageBreak()])
+    story.extend([Spacer(1, 3*cm), Paragraph(str(datetime.now().year), styles["ReferatInstitution"]),
+                  PageBreak()])
 
-    clean_content = _clean_academic_markdown(content, remove_cover=True)
-    for kind, value in _iter_academic_blocks(clean_content):
+    body_blocks, toc_entries = _prepare_referat_sections(content)
+    story.extend([Paragraph("MUNDARIJA", styles["TOCHeading"]), TableOfContents(), PageBreak()])
+    toc = story[-2]
+    toc.levelStyles = [styles["TOCLevel0"], styles["TOCLevel1"]]
+
+    for kind, value in body_blocks:
         if kind == "heading":
-            level, text = value
-            story.append(Paragraph(_markdown_inline_to_reportlab(text),
-                                   styles["ReferatH2"] if level >= 3 else styles["ReferatH1"]))
+            level, heading_text = value
+            style = styles["ReferatH2"] if level >= 3 else styles["ReferatH1"]
+            paragraph = Paragraph(_markdown_inline_to_reportlab(heading_text), style)
+            paragraph._quiz_toc_level = 1 if level >= 3 else 0
+            story.append(paragraph)
         elif kind == "bullet":
             story.append(Paragraph("&#8226;&nbsp; " + _markdown_inline_to_reportlab(value), styles["ReferatBody"]))
         elif kind == "number":
@@ -5566,7 +5697,17 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
         else:
             story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
 
-    doc.build(story, onFirstPage=_draw_referat_pdf_cover_frame)
+    def _after_flowable(self, flowable):
+        level = getattr(flowable, "_quiz_toc_level", None)
+        if level is None:
+            return
+        heading_text = flowable.getPlainText()
+        key = "referat-%s-%s" % (self.page, abs(hash(heading_text)) % 100000000)
+        self.canv.bookmarkPage(key)
+        self.notify("TOCEntry", (level, heading_text, self.page, key))
+
+    doc.afterFlowable = _after_flowable.__get__(doc, type(doc))
+    doc.multiBuild(story, maxPasses=4)
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="REFERAT")
 
 
@@ -5664,10 +5805,11 @@ def api_generate_referat(
         "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
         "adabiyotlar bo'limida faqat haqiqiyligi va bibliografik ma'lumoti ishonchli bo'lgan manbalarni kiriting. "
         "Ma'lumot yetarli bo'lmasa, bibliografik ma'lumotni taxmin qilmang va izoh, uzr, eslatma yoki qavs ichidagi tushuntirish yozmang. "
-        "Markdown sarlavhalaridan foydalaning. Tuzilishi: MUNDARIJA (ixtiyoriy); KIRISH; 3-4 ta mantiqiy asosiy bob va ularning kichik bo'limlari; XULOSA; "
+        "Markdown sarlavhalaridan foydalaning. Mundarijani AI yozmasin — dastur uni bob sarlavhalaridan avtomatik tuzadi. "
+        "Tarkib tartibi: KIRISH; 3-4 ta mantiqiy asosiy bob va kichik bo'limlari; XULOSA; "
         "FOYDALANILGAN ADABIYOTLAR (faqat tekshiriladigan manbalar ro'yxati; tasdiqlanmagan manbalar o'rniga izoh yozma). "
         "MUHIM: titul varag'ini, universitet/fakultet nomini, muallif, guruh, fan yoki tekshiruvchi ma'lumotlarini qayta yozmang. "
-        "Hujjat matnini bevosita MUNDARIJA yoki KIRISH bo'limidan boshlang. "
+        "AI javobi bevosita KIRISH sarlavhasidan boshlansin. Mundarija va titul varag'ini javobga kiritmang. "
         "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
         "har bir bobda sabab-oqibat, tushuncha, jarayon va amaliy ahamiyatni izchil tahlil qiling; boblar orasida mantiqiy bog'lanish bo'lsin. "
         "Asosiy matnni kamida 1800-2400 so'z atrofida yozing. Agar berilgan manba hajmi bunga yetmasa, manbadagi barcha ma'lumotlarni batafsil oching, lekin fakt yoki manba to'qib hajmni sun'iy oshirmang. "
@@ -5676,6 +5818,31 @@ def api_generate_referat(
         f"Muallif: {author}\nTa'lim muassasasi: {university}\nFakultet: {faculty}\n"
         f"Guruh: {group_name}\nTekshiruvchi: {teacher}\nMANBA MATNI:\n{source_text}"
     )
+    def _validate_referat_response(response):
+        text = _require_gemini_text(response)
+        normalized = _clean_academic_markdown(text, remove_cover=True)
+        heading_keys = {
+            _referat_heading_key(line.strip().lstrip("#").strip())
+            for line in normalized.splitlines() if re.match(r"^#{1,6}\s+", line.strip())
+        }
+        required_groups = (
+            {"kirish", "introduction"},
+            {"xulosa", "conclusion", "заключение"},
+            {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"},
+        )
+        if any(not (group & heading_keys) for group in required_groups):
+            raise ValueError("Referatda KIRISH, XULOSA va FOYDALANILGAN ADABIYOTLAR majburiy")
+        main_titles = heading_keys - set().union(*required_groups)
+        if len(main_titles) < 3:
+            raise ValueError("Referatda kamida 3 ta asosiy bob bo'lishi kerak")
+        _prepare_referat_sections(text)
+        word_count = len(re.findall(r"\b[\w'-]+\b", normalized, flags=re.UNICODE))
+        if not source_text.strip() and word_count < max(900, int(os.getenv("REFERAT_MIN_WORDS", "1500"))):
+            raise ValueError(f"Referat juda qisqa: {word_count} so'z; hajmni kengaytirish kerak")
+        if source_text.strip() and word_count < 500:
+            raise ValueError(f"Manbaga asoslangan referat juda qisqa: {word_count} so'z")
+        return text
+
     try:
         referat_timeout = max(60, min(900, int(os.getenv("REFERAT_GENERATION_TIMEOUT", "360"))))
         referat_text = _run_gemini_generation(
@@ -5688,7 +5855,7 @@ def api_generate_referat(
             primary_model=os.getenv("REFERAT_AI_MODEL", GEMINI_MODEL),
             fallback_model=os.getenv("REFERAT_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
             total_timeout=referat_timeout,
-            response_validator=_require_gemini_text,
+            response_validator=_validate_referat_response,
         )
         referat_text = _clean_academic_markdown(referat_text, remove_cover=True)
         title = topic or (Path(file.filename).stem if file and file.filename else "Referat")
@@ -5811,6 +5978,7 @@ def api_generate_slides(
     prompt = (
         "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
+        "ENG OXIRGI SLAYD MAJBURIY XULOSA bo'lsin: sarlavhasi matn tiliga mos ravishda XULOSA/Conclusion/Заключение bo'lsin va unda 3-5 yakuniy fikr bo'lsin. "
         "Qolgan HAR BIR slaydda 2-5 ta aniq, qisqa bullet va mazmunga mos kamida BITTA vizual diagramma/sxema bo'lishi SHART. visual_type faqat bar, column, pie, line, process, timeline, cards, cycle, pyramid yoki funnel bo'lsin; none ishlatmang. "
         "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa hech qanday raqam to'qimang va cards/process/timeline/cycle/pyramid/funnel kabi mazmuniy sxemalardan foydalaning. "
         "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column; mavzu bosqichlari uchun process/timeline, tarkibiy qismlar uchun cards, davriy jarayon uchun cycle, darajalar uchun pyramid, ketma-ket kamayish uchun funnel. "
@@ -5831,6 +5999,17 @@ def api_generate_slides(
         deck_result = SlideDeckSchema.model_validate_json(response.text)
         if len(deck_result.slides) != slide_count:
             raise ValueError(f"Slaydlar soni mos emas: {len(deck_result.slides)}/{slide_count}")
+        if len(deck_result.slides) < 2:
+            raise ValueError("Taqdimotda titul va Xulosa slaydlari bo'lishi kerak")
+        final_title = re.sub(r"[^a-zа-яё]+", "", deck_result.slides[-1].title.lower())
+        if not any(marker in final_title for marker in ("xulosa", "conclusion", "заключение", "итог")):
+            raise ValueError("Oxirgi slayd XULOSA bo'lishi shart")
+        if not 3 <= len(deck_result.slides[-1].bullets) <= 5:
+            raise ValueError("Xulosa slaydida 3-5 ta yakuniy fikr bo'lishi shart")
+        if not source_text.strip():
+            for item in deck_result.slides:
+                if item.visual_type in {"bar", "column", "pie", "line"} and item.visual_values:
+                    raise ValueError("Manba yo'q: statistik qiymatlarni to'qish taqiqlanadi")
         return deck_result
 
     try:
