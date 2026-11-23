@@ -5120,7 +5120,7 @@ def _build_summary_docx(title, content):
         else:
             paragraph = document.add_paragraph()
             _add_markdown_inline_runs(paragraph, value)
-    quiz_ai_branding.add_qr_to_docx(document, feature="SUMMARY", page_break=True)
+    quiz_ai_branding.add_qr_to_docx(document, feature="SUMMARY", page_break=False)
     output = BytesIO()
     document.save(output)
     return output.getvalue()
