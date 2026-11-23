@@ -199,9 +199,11 @@ def _find_safe_pdf_position(page, preferred, page_width, page_height, size, marg
     except Exception:
         return None
 
-    positions = [preferred]
+    # Avval Railway'da tanlangan burchak, keyin qolgan burchaklar tekshiriladi.
+    # Markazga joylash matnni yopishi mumkin, shu sababli PDF uchun ishlatilmaydi.
+    corner_order = [preferred, "bottom_left", "bottom_right", "top_left", "top_right"]
     unique_positions = []
-    for position in positions:
+    for position in corner_order:
         if position in ("center", "document_end"):
             continue
         if position not in unique_positions:
@@ -228,7 +230,7 @@ def _find_safe_pdf_position(page, preferred, page_width, page_height, size, marg
 
 
 def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
-    """Add a compact QR without covering page text; use a clean page if needed."""
+    """Add QR to an existing page without creating an extra QR-only page."""
     config = get_branding_config(feature)
     png = _make_qr_png(config)
     if not png:
@@ -259,21 +261,44 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     page_height = float(page.mediabox.height)
     size = float(config["size"])
     preferred = "bottom_left" if is_summary else config["position"]
+
+    # Birinchi navbatda belgilangan o'lchamdagi QR uchun barcha burchaklarni tekshiramiz.
     safe_xy = _find_safe_pdf_position(page, preferred, page_width, page_height, size)
 
-    # Matn bilan to'qnashadigan joy topilmasa, QR uchun alohida toza sahifa.
-    add_separate_page = safe_xy is None
-    if add_separate_page:
-        x, y = 18, 18
-    else:
-        x, y = safe_xy
+    # Sahifada joy tor bo'lsa, QR kodni bosqichma-bosqich kichraytirib ko'ramiz.
+    # Hech qachon faqat QR uchun yangi bo'sh sahifa qo'shilmaydi.
+    actual_size = size
+    if safe_xy is None:
+        for smaller_size in (72.0, 60.0, 48.0, 36.0):
+            if smaller_size >= size:
+                continue
+            safe_xy = _find_safe_pdf_position(
+                page, preferred, page_width, page_height, smaller_size
+            )
+            if safe_xy is not None:
+                actual_size = smaller_size
+                logger.info(
+                    "QR joyi kichraytirildi | modul=%s | asl_o'lcham=%s pt | yangi_o'lcham=%s pt",
+                    str(feature).upper(), size, actual_size,
+                )
+                break
+
+    if safe_xy is None:
+        logger.warning(
+            "QR joylashtirilmadi: oxirgi sahifada matnni yopmaydigan joy topilmadi | modul=%s | sahifa=%s",
+            str(feature).upper(), target_index + 1,
+        )
+        return pdf_bytes
+
+    x, y = safe_xy
 
     overlay_buffer = io.BytesIO()
     layer = canvas.Canvas(overlay_buffer, pagesize=(page_width, page_height))
     # Word, PDF va PPTX'da bir xil PNG ishlatiladi; qo'shimcha oq ramka
     # chizilmaydi. PNG ichidagi standart QR quiet-zone saqlanadi.
     layer.drawImage(ImageReader(io.BytesIO(png)), x, y,
-                    width=size, height=size, preserveAspectRatio=True, mask="auto")
+                    width=actual_size, height=actual_size,
+                    preserveAspectRatio=True, mask="auto")
     layer.save()
     overlay_buffer.seek(0)
     overlay_page = PdfReader(overlay_buffer).pages[0]
@@ -283,11 +308,7 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
         if is_summary and index > target_index:
             continue
         writer.add_page(item)
-    if add_separate_page:
-        qr_page = writer.add_blank_page(width=page_width, height=page_height)
-        qr_page.merge_page(overlay_page)
-    else:
-        writer.pages[target_index].merge_page(overlay_page)
+    writer.pages[target_index].merge_page(overlay_page)
 
     output = io.BytesIO()
     writer.write(output)
