@@ -5015,12 +5015,10 @@ def _draw_referat_pdf_cover_frame(canvas, doc):
     from reportlab.lib.colors import HexColor
     page_w, page_h = doc.pagesize
     canvas.saveState()
+    # Word titul ramkasiga mos bitta to'q-ko'k chiziq.
     canvas.setStrokeColor(HexColor("#183153"))
-    canvas.setLineWidth(1.8)
+    canvas.setLineWidth(2.25)
     canvas.rect(22, 22, page_w - 44, page_h - 44, stroke=1, fill=0)
-    canvas.setStrokeColor(HexColor("#B8944D"))
-    canvas.setLineWidth(0.65)
-    canvas.rect(28, 28, page_w - 56, page_h - 56, stroke=1, fill=0)
     canvas.restoreState()
 
 
@@ -5497,8 +5495,9 @@ def _prepare_referat_sections(content):
                 required["bibliography"] = True
                 heading_text, level = "FOYDALANILGAN ADABIYOTLAR", 1
             body.append(("heading", (level, heading_text)))
-            if key not in excluded:
-                toc_entries.append((0 if level <= 2 else 1, heading_text))
+            # Statik Word mundarijasida KIRISH, XULOSA va adabiyotlar ham ko'rsatiladi.
+            # PDF mundarijasi ham barcha asosiy bo'limlarni o'z ichiga oladi.
+            toc_entries.append((0 if level <= 2 else 1, heading_text))
         else:
             if not skip_toc:
                 body.append((kind, value))
@@ -5527,7 +5526,7 @@ def _add_docx_static_toc(document, toc_entries):
         run.font.name = "Arial"
         run.font.size = Pt(11 if level else 12)
         run.bold = not bool(level)
-        run.font.color.rgb = RGBColor(35, 55, 80)
+        run.font.color.rgb = RGBColor(0, 0, 0)
 
 
 def _add_referat_body_to_docx(document, content):
@@ -5537,6 +5536,8 @@ def _add_referat_body_to_docx(document, content):
     # Ikkinchi sahifa: alohida Mundarija.
     toc_heading = document.add_heading("MUNDARIJA", level=1)
     toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in toc_heading.runs:
+        run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
     _add_docx_static_toc(document, toc_entries)
     document.add_page_break()
 
@@ -5638,6 +5639,12 @@ def _build_referat_docx(title, content, author, university, faculty, group_name,
     body_section.bottom_margin = Cm(2.0)
     body_section.left_margin = Cm(3.0)
     body_section.right_margin = Cm(1.5)
+    # Word sahifa ramkasini yangi sectionga meros qilib o'tkazib yubormasligi uchun
+    # Mundarija va asosiy matn sectionidan pgBorders tugunini aniq olib tashlaymiz.
+    from docx.oxml.ns import qn
+    body_pg_borders = body_section._sectPr.find(qn("w:pgBorders"))
+    if body_pg_borders is not None:
+        body_section._sectPr.remove(body_pg_borders)
     _add_referat_body_to_docx(document, content)
     # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
     quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
@@ -5659,8 +5666,11 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
     output = BytesIO()
     regular, bold = _register_academic_pdf_fonts()
     # Pastki 4 sm QR uchun bo'sh zona ajratiladi.
-    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2.5*cm, leftMargin=2.5*cm,
-                            topMargin=2.2*cm, bottomMargin=4.0*cm)
+    doc = SimpleDocTemplate(
+        output, pagesize=A4, rightMargin=2.5*cm, leftMargin=2.5*cm,
+        topMargin=2.2*cm, bottomMargin=4.0*cm,
+        onFirstPage=_draw_referat_pdf_cover_frame,
+    )
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="ReferatTitle", parent=styles["Title"], fontName=bold,
                               alignment=TA_CENTER, fontSize=21, leading=27, spaceAfter=18))
@@ -6029,9 +6039,24 @@ def api_generate_slides(
         if not 3 <= len(deck_result.slides[-1].bullets) <= 5:
             raise ValueError("Xulosa slaydida 3-5 ta yakuniy fikr bo'lishi shart")
         if not source_text.strip():
-            for item in deck_result.slides:
-                if item.visual_type in {"bar", "column", "pie", "line"} and item.visual_values:
-                    raise ValueError("Manba yo'q: statistik qiymatlarni to'qish taqiqlanadi")
+            # Faqat mavzu berilgan holatda AI statistik sonlarni taxminan to'ldirishi mumkin.
+            # Bunday slaydni butunlay rad etish o'rniga, chartni fakt to'qimaydigan
+            # mazmuniy sxemaga aylantiramiz. Natijada slaydlar yaratiladi, raqamlar esa
+            # manbada bo'lmaganda taqdimotga kiritilmaydi.
+            safe_flow_types = ("cards", "process", "timeline", "cycle", "pyramid", "funnel")
+            for index, item in enumerate(deck_result.slides):
+                if item.visual_type in {"bar", "column", "pie", "line"}:
+                    labels = [
+                        str(value).strip()[:90]
+                        for value in (item.bullets or [])
+                        if str(value).strip()
+                    ][:6]
+                    if len(labels) < 2:
+                        labels = [str(item.title).strip()[:90], "Asosiy jihatlar"]
+                    item.visual_type = safe_flow_types[index % len(safe_flow_types)]
+                    item.visual_title = (item.visual_title or item.title)[:120]
+                    item.visual_labels = labels
+                    item.visual_values = []
         return deck_result
 
     try:
