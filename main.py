@@ -5043,6 +5043,12 @@ def _iter_academic_blocks(content):
         if re.match(r"^#{1,6}\s+", line):
             level = len(line) - len(line.lstrip("#"))
             yield ("heading", (min(level, 3), line[level:].strip()))
+        elif re.match(r"^(?:KIRISH|INTRODUCTION|XULOSA|CONCLUSION|FOYDALANILGAN\s+ADABIYOTLAR|REFERENCES|BIBLIOGRAPHY)(?:\s*[:—–]\s*.*)?$", line, re.I):
+            yield ("heading", (1, line))
+        elif re.match(r"^\d+\.\d+(?:\.\d+)?\s+.{5,120}$", line) and len(line.split()) <= 18:
+            yield ("heading", (3, line))
+        elif re.match(r"^\d+\.\s+.{5,120}$", line) and len(line.split()) <= 18 and not line.endswith((".", "!", "?")):
+            yield ("heading", (1, line))
         elif re.match(r"^[-*•]\s+", line):
             yield ("bullet", re.sub(r"^[-*•]\s+", "", line))
         elif re.match(r"^\d+[.)]\s+", line):
@@ -5477,6 +5483,7 @@ def _prepare_referat_sections(content):
         if kind == "heading":
             level, heading_text = value
             key = _referat_heading_key(heading_text)
+            heading_prefix = _referat_heading_key(re.split(r"[:—–]", heading_text, maxsplit=1)[0])
             if key in {"mundarija", "reja", "contents", "tableofcontents"}:
                 skip_toc = True
                 continue
@@ -5485,13 +5492,13 @@ def _prepare_referat_sections(content):
                     skip_toc = False
                 else:
                     continue
-            if key in {"kirish", "introduction"}:
+            if key in {"kirish", "introduction"} or heading_prefix in {"kirish", "introduction"}:
                 required["kirish"] = True
                 heading_text, level = "KIRISH", 1
-            elif key in {"xulosa", "conclusion", "заключение"}:
+            elif key in {"xulosa", "conclusion", "заключение"} or heading_prefix in {"xulosa", "conclusion", "заключение"}:
                 required["xulosa"] = True
                 heading_text, level = "XULOSA", 1
-            elif key in {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
+            elif key in {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"} or heading_prefix in {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
                 required["bibliography"] = True
                 heading_text, level = "FOYDALANILGAN ADABIYOTLAR", 1
             body.append(("heading", (level, heading_text)))
@@ -5844,36 +5851,76 @@ def api_generate_referat(
         "AI javobi bevosita KIRISH sarlavhasidan boshlansin. Mundarija va titul varag'ini javobga kiritmang. "
         "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
         "har bir bobda sabab-oqibat, tushuncha, jarayon va amaliy ahamiyatni izchil tahlil qiling; boblar orasida mantiqiy bog'lanish bo'lsin. "
-        "Asosiy matnni kamida 1800-2400 so'z atrofida yozing. Agar berilgan manba hajmi bunga yetmasa, manbadagi barcha ma'lumotlarni batafsil oching, lekin fakt yoki manba to'qib hajmni sun'iy oshirmang. "
+        "Asosiy matnni imkon qadar 1200-1600 so'z atrofida yozing; mazmunni takrorlash yoki fakt to'qish hisobiga hajmni oshirmang. "
+        "Har bir asosiy bo'lim sarlavhasini alohida Markdown sarlavhasi (# yoki ##) qilib yozing. Sarlavhalar aniq bo'lsin: # KIRISH, # 1. ..., # 2. ..., # 3. ..., # XULOSA, # FOYDALANILGAN ADABIYOTLAR. "
+        "Asosiy boblar kamida 3 ta bo'lsin. O'zini tekshirish savollari yoki test savollarini referat oxiriga qo'shmang. "
         "Xulosa boblarda ko'rib chiqilgan fikrlarni umumlashtirsin. Referat izchil, mazmunli, takrorlarsiz va topshirishga mos bo'lsin. "
         f"Mavzu: {topic or 'Yuklangan manba asosida'}\nFan: {subject}\n"
         f"Muallif: {author}\nTa'lim muassasasi: {university}\nFakultet: {faculty}\n"
         f"Guruh: {group_name}\nTekshiruvchi: {teacher}\nMANBA MATNI:\n{source_text}"
     )
     def _validate_referat_response(response):
-        text = _require_gemini_text(response)
-        normalized = _clean_academic_markdown(text, remove_cover=True)
-        heading_keys = {
-            _referat_heading_key(line.strip().lstrip("#").strip())
-            for line in normalized.splitlines() if re.match(r"^#{1,6}\s+", line.strip())
-        }
+        raw_text = _require_gemini_text(response)
+        normalized = _clean_academic_markdown(raw_text, remove_cover=True)
+
+        # Majburiy bo'limlarni Markdown belgisi bo'lmasa ham mazmunidan aniqlaymiz.
+        heading_keys = set()
+        main_count = 0
+        for line in normalized.splitlines():
+            candidate = re.sub(r"^\s*#{1,6}\s*", "", line).strip().strip("*_ ")
+            key = _referat_heading_key(candidate)
+            if key in {
+                "kirish", "introduction", "xulosa", "conclusion", "заключение",
+                "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar",
+            }:
+                heading_keys.add(key)
+                continue
+            prefix = re.split(r"[:—–]", candidate, maxsplit=1)[0].strip()
+            prefix_key = _referat_heading_key(prefix)
+            if prefix_key in {
+                "kirish", "introduction", "xulosa", "conclusion", "заключение",
+                "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar",
+            }:
+                heading_keys.add(prefix_key)
+            if re.match(r"^\d+\.\s+.{5,120}$", candidate) and len(candidate.split()) <= 16:
+                main_count += 1
+
         required_groups = (
             {"kirish", "introduction"},
             {"xulosa", "conclusion", "заключение"},
             {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"},
         )
         if any(not (group & heading_keys) for group in required_groups):
-            raise ValueError("Referatda KIRISH, XULOSA va FOYDALANILGAN ADABIYOTLAR majburiy")
-        main_titles = heading_keys - set().union(*required_groups)
-        if len(main_titles) < 3:
-            raise ValueError("Referatda kamida 3 ta asosiy bob bo'lishi kerak")
-        _prepare_referat_sections(text)
+            raise ValueError("Referatda KIRISH, XULOSA va FOYDALANILGAN ADABIYOTLAR bo'limlari aniq sarlavha bilan bo'lishi kerak")
+
+        markdown_main = sum(
+            1 for line in normalized.splitlines()
+            if re.match(r"^#{1,2}\s+\d+\.\s+", line.strip())
+        )
+        if max(main_count, markdown_main) < 3:
+            raise ValueError("Referatda kamida 3 ta raqamlangan asosiy bob bo'lishi kerak")
+
         word_count = len(re.findall(r"\b[\w'-]+\b", normalized, flags=re.UNICODE))
-        if not source_text.strip() and word_count < max(900, int(os.getenv("REFERAT_MIN_WORDS", "1500"))):
-            raise ValueError(f"Referat juda qisqa: {word_count} so'z; hajmni kengaytirish kerak")
+        min_words = max(750, min(1200, int(os.getenv("REFERAT_MIN_WORDS", "900"))))
+        if not source_text.strip() and word_count < min_words:
+            raise ValueError(f"Referat juda qisqa: {word_count} so'z; kamida {min_words} so'z kerak")
         if source_text.strip() and word_count < 500:
             raise ValueError(f"Manbaga asoslangan referat juda qisqa: {word_count} so'z")
-        return text
+        return raw_text
+
+    def _referat_quality_retry_prompt(original_text, validation_error):
+        return (
+            "Quyidagi referat loyihasini sifat talablariga moslab qayta yozing. "
+            "Mavjud mazmunni saqlang, mavzuni kengaytiring, lekin yangi tekshirilmagan fakt, sana, statistika yoki bibliografiya to'qimang. "
+            "Kamida 3 ta raqamlangan asosiy bob bo'lsin. Sarlavhalarni alohida Markdown ko'rinishida yozing: "
+            "# KIRISH, # 1. ..., # 2. ..., # 3. ..., # XULOSA, # FOYDALANILGAN ADABIYOTLAR. "
+            "Mundarija, titul varag'i, o'zini tekshirish savollari, izoh va uzr yozmang. "
+            "Manba matni bo'lmaganida umumiy ilmiy tushuntirish bilan 1000-1300 so'zga yetkazing; "
+            "manba berilgan bo'lsa, faqat undagi ma'lumotlarni batafsil oching. "
+            "Faqat yakuniy referatni qaytaring.\n\n"
+            f"Sifat tekshiruvida aniqlangan kamchilik: {validation_error}\n\n"
+            "QAYTA ISHLANADIGAN REFERAT:\n" + str(original_text or "")
+        )
 
     try:
         referat_timeout = max(60, min(900, int(os.getenv("REFERAT_GENERATION_TIMEOUT", "360"))))
@@ -5888,6 +5935,7 @@ def api_generate_referat(
             fallback_model=os.getenv("REFERAT_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
             total_timeout=referat_timeout,
             response_validator=_validate_referat_response,
+            quality_retry_prompt_builder=_referat_quality_retry_prompt,
         )
         referat_text = _clean_academic_markdown(referat_text, remove_cover=True)
         title = topic or (Path(file.filename).stem if file and file.filename else "Referat")
