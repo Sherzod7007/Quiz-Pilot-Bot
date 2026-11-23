@@ -199,9 +199,9 @@ def _find_safe_pdf_position(page, preferred, page_width, page_height, size, marg
     except Exception:
         return None
 
-    # Avval Railway'da tanlangan burchak, keyin qolgan burchaklar tekshiriladi.
-    # Markazga joylash matnni yopishi mumkin, shu sababli PDF uchun ishlatilmaydi.
-    corner_order = [preferred, "bottom_left", "bottom_right", "top_left", "top_right"]
+    # Railway Variables'dagi joylashuvga qat'iy amal qilamiz.
+    # QR boshqa burchakka avtomatik ko'chirilmaydi.
+    corner_order = [preferred]
     unique_positions = []
     for position in corner_order:
         if position in ("center", "document_end"):
@@ -260,7 +260,7 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
     page_width = float(page.mediabox.width)
     page_height = float(page.mediabox.height)
     size = float(config["size"])
-    preferred = "bottom_left" if is_summary else config["position"]
+    preferred = config["position"]
 
     # Birinchi navbatda belgilangan o'lchamdagi QR uchun barcha burchaklarni tekshiramiz.
     safe_xy = _find_safe_pdf_position(page, preferred, page_width, page_height, size)
@@ -283,9 +283,26 @@ def add_qr_to_pdf_bytes(pdf_bytes, feature="SLIDES"):
                 )
                 break
 
+    if safe_xy is None and str(feature).strip().upper() in {"REFERAT", "SUMMARY"}:
+        # Akademik PDF generatorlari oxirgi sahifaning pastki 4 sm qismini QR uchun
+        # oldindan bo'sh qoldiradi. pypdf matn koordinatalari ba'zi shriftlarda
+        # noto'g'ri baholanishi mumkin; shu holatda Railway joylashuviga amal qilamiz.
+        actual_size = min(size, 84.0)
+        if preferred == "bottom_left":
+            safe_xy = (18.0, 18.0)
+        elif preferred == "bottom_right":
+            safe_xy = (page_width - 18.0 - actual_size, 18.0)
+        elif preferred == "top_left":
+            safe_xy = (18.0, page_height - 18.0 - actual_size)
+        elif preferred == "top_right":
+            safe_xy = (page_width - 18.0 - actual_size, page_height - 18.0 - actual_size)
+        if safe_xy:
+            logger.info("QR ajratilgan pastki zona ichiga joylashtirildi | modul=%s | sahifa=%s",
+                        str(feature).upper(), target_index + 1)
+
     if safe_xy is None:
         logger.warning(
-            "QR joylashtirilmadi: oxirgi sahifada matnni yopmaydigan joy topilmadi | modul=%s | sahifa=%s",
+            "QR joylashtirilmadi: tanlangan joy band yoki aniqlanmadi | modul=%s | sahifa=%s",
             str(feature).upper(), target_index + 1,
         )
         return pdf_bytes
