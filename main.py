@@ -5236,9 +5236,9 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
         "Word/PDF uchun to'liq, batafsil bo'limlar, izohlar, misollar va zarur joylarda formulalar bilan yozing."
     )
     word_target = (
-        "Konspektni odatda 900-1400 so'z atrofida yozing; mavzu yoki manba mazmuni qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
+        "Konspektni odatda 1200-1400 so'z atrofida yozing; mavzu yoki manba mazmuni qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
         if style == "standard" else
-        "Konspektni odatda 1400-2200 so'z atrofida yozing; manba qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
+        "Konspektni odatda 1600-2200 so'z atrofida yozing; manba qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
     )
     source_mode_instruction = (
         "Quyidagi MANBA MATNI asosiy va ustuvor manbadir. Undagi muhim bo'lim, ta'rif, qonun, formula va xulosalarni to'liq yorit. "
@@ -5270,8 +5270,16 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
                 minimum_words = max(700, min(1400, int(os.getenv("SUMMARY_MIN_WORDS", "1000"))))
                 if words < minimum_words:
                     raise ValueError(f"Konspekt juda qisqa: {words} so'z; kamida {minimum_words} so'z kerak")
-            elif words < 300:
-                raise ValueError(f"Manbaga asoslangan konspekt juda qisqa: {words} so'z")
+            else:
+                source_word_count = len(re.findall(r"\b[\w'-]+\b", source_text, flags=re.UNICODE))
+                # Qisqa manbadan sun'iy ravishda uzun matn talab qilmaymiz.
+                # Uzun manbalarda esa kamida 300 so'zlik mazmunli konspekt saqlanadi.
+                minimum_source_words = min(300, max(80, int(source_word_count * 0.5)))
+                if words < minimum_source_words:
+                    raise ValueError(
+                        f"Manbaga asoslangan konspekt juda qisqa: {words} so'z; "
+                        f"manba hajmiga mos minimum {minimum_source_words} so'z"
+                    )
             # Model sarlavhani Markdown'siz yoki raqam bilan berishi mumkin.
             # Shuning uchun faqat '## XULOSA' shakliga bog'lanib qolmaymiz.
             conclusion_pattern = (
@@ -5294,6 +5302,15 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
             fallback_model=os.getenv("SUMMARY_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
             total_timeout=summary_timeout,
             response_validator=_validate_summary_response,
+            quality_retry_prompt_builder=lambda previous_text, validation_error: (
+                prompt
+                + "\n\nSIFATNI YAXSHILASH UCHUN BIR MARTALIK QAYTA ISHLASH: "
+                + "Quyidagi avvalgi javobni boshidan takrorlamasdan, mazmunini kengaytirib va tuzilishini tuzatib, "
+                + "to'liq yakuniy konspekt sifatida qayta yoz. Odatdagi mavzularda 1200-1400 so'zga intil, "
+                + "lekin manba qisqa bo'lsa sun'iy ma'lumot, takror yoki uydirma qo'shma. "
+                + "Alohida ## XULOSA sarlavhasi va undan keyin 5 ta o'zini tekshirish savoli bo'lishi shart. "
+                + f"Avvalgi tekshiruv izohi: {validation_error}\nAVVALGI JAVOB:\n{previous_text}"
+            ),
         )
         title = topic or (Path(file.filename).stem if file and file.filename else "O'quv konspekti")
         safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_summary"
@@ -5495,25 +5512,22 @@ def _prepare_referat_sections(content):
     return body, toc_entries[:20]
 
 
-def _add_docx_toc_field(paragraph):
-    """Word ochilganda sahifa raqamlarini yangilaydigan avtomatik Mundarija maydoni."""
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    run = OxmlElement("w:r")
-    begin = OxmlElement("w:fldChar")
-    begin.set(qn("w:fldCharType"), "begin")
-    instr = OxmlElement("w:instrText")
-    instr.set(qn("xml:space"), "preserve")
-    instr.text = ' TOC \\o "1-2" \\h \\z \\u '
-    separate = OxmlElement("w:fldChar")
-    separate.set(qn("w:fldCharType"), "separate")
-    text = OxmlElement("w:t")
-    text.text = "Mundarijani ko'rsatish uchun Word'da maydonni yangilang."
-    end = OxmlElement("w:fldChar")
-    end.set(qn("w:fldCharType"), "end")
-    for element in (begin, instr, separate, text, end):
-        run.append(element)
-    paragraph._p.append(run)
+def _add_docx_static_toc(document, toc_entries):
+    """Word maydonlarisiz, ochilganda tasdiq talab qilmaydigan statik Mundarija."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
+
+    for level, title in toc_entries:
+        paragraph = document.add_paragraph()
+        paragraph.paragraph_format.left_indent = Pt(18 if level else 0)
+        paragraph.paragraph_format.space_after = Pt(5)
+        paragraph.paragraph_format.keep_together = True
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        run = paragraph.add_run(str(title))
+        run.font.name = "Arial"
+        run.font.size = Pt(11 if level else 12)
+        run.bold = not bool(level)
+        run.font.color.rgb = RGBColor(35, 55, 80)
 
 
 def _add_referat_body_to_docx(document, content):
@@ -5523,7 +5537,7 @@ def _add_referat_body_to_docx(document, content):
     # Ikkinchi sahifa: alohida Mundarija.
     toc_heading = document.add_heading("MUNDARIJA", level=1)
     toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _add_docx_toc_field(document.add_paragraph())
+    _add_docx_static_toc(document, toc_entries)
     document.add_page_break()
 
     for kind, value in body_blocks:
@@ -5625,17 +5639,6 @@ def _build_referat_docx(title, content, author, university, faculty, group_name,
     body_section.left_margin = Cm(3.0)
     body_section.right_margin = Cm(1.5)
     _add_referat_body_to_docx(document, content)
-    try:
-        from docx.oxml import OxmlElement
-        settings = document.settings.element
-        update_fields = settings.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}updateFields")
-        if update_fields is None:
-            update_fields = OxmlElement("w:updateFields")
-            settings.append(update_fields)
-        update_fields.set("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val", "true")
-    except Exception:
-        logging.warning("Referat Word Mundarija maydonini avtomatik yangilash sozlanmadi")
-
     # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
     quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
     output = BytesIO()
@@ -6717,6 +6720,10 @@ def _gemini_error_status(error):
     return None
 
 
+class _AIQualityValidationError(ValueError):
+    """Model javobi sifat tekshiruvidan o'tmagan; API kalitining xatosi emas."""
+
+
 def _run_gemini_generation(
     feature_name,
     prompt,
@@ -6725,6 +6732,7 @@ def _run_gemini_generation(
     fallback_model=None,
     total_timeout=None,
     response_validator=None,
+    quality_retry_prompt_builder=None,
 ):
     """Barcha AI generatorlari uchun yagona navbat, retry, fallback va kalit rotatsiyasi."""
     if not GOOGLE_API_KEYS:
@@ -6806,11 +6814,18 @@ def _run_gemini_generation(
 
                     try:
                         remaining_for_api = deadline - time.monotonic()
-                        if remaining_for_api <= 0:
-                            last_error = TimeoutError("AI umumiy vaqt chegarasi tugadi")
+                        # Google GenAI SDK manually-set deadline uchun kamida 10 soniya talab qiladi.
+                        # Qolgan vaqt bundan kam bo'lsa, noto'g'ri timeout bilan so'rov yubormaymiz.
+                        if remaining_for_api < 10.0:
+                            last_error = TimeoutError(
+                                f"AI so'rovi uchun yetarli vaqt qolmadi ({max(0, remaining_for_api):.1f}s); "
+                                "yangi API so'rovi yuborilmadi"
+                            )
                             model_failed = True
+                            stop_retry_rounds = True
                             break
-                        request_timeout_ms = max(1000, int(min(AI_REQUEST_TIMEOUT, remaining_for_api) * 1000))
+                        request_timeout_ms = int(min(AI_REQUEST_TIMEOUT, remaining_for_api) * 1000)
+                        request_timeout_ms = max(10000, request_timeout_ms)
                         client = genai.Client(
                             api_key=api_key,
                             http_options=genai_types.HttpOptions(timeout=request_timeout_ms),
@@ -6823,7 +6838,48 @@ def _run_gemini_generation(
                         if not response or not getattr(response, "text", None):
                             raise RuntimeError("Gemini bo'sh javob qaytardi")
 
-                        result = response_validator(response) if response_validator else response
+                        if response_validator:
+                            try:
+                                result = response_validator(response)
+                            except Exception as validation_exc:
+                                if not quality_retry_prompt_builder:
+                                    raise _AIQualityValidationError(str(validation_exc)) from validation_exc
+                                # Sifat xatosida boshqa API kalitlarini aylantirmaymiz:
+                                # ayni model va kalit bilan faqat bitta kengaytirish urinishini qilamiz.
+                                retry_prompt = quality_retry_prompt_builder(
+                                    _require_gemini_text(response), str(validation_exc)
+                                )
+                                retry_remaining = deadline - time.monotonic()
+                                if retry_remaining < 10.0:
+                                    raise _AIQualityValidationError(
+                                        f"{validation_exc}; sifatni tuzatish uchun 10 soniyadan kam vaqt qoldi"
+                                    ) from validation_exc
+                                retry_timeout_ms = max(
+                                    10000, int(min(AI_REQUEST_TIMEOUT, retry_remaining) * 1000)
+                                )
+                                retry_client = genai.Client(
+                                    api_key=api_key,
+                                    http_options=genai_types.HttpOptions(timeout=retry_timeout_ms),
+                                )
+                                retry_response = retry_client.models.generate_content(
+                                    model=model_name,
+                                    contents=retry_prompt,
+                                    config=generation_config,
+                                )
+                                if not retry_response or not getattr(retry_response, "text", None):
+                                    raise RuntimeError("Gemini sifatni tuzatish urinishida bo'sh javob qaytardi")
+                                try:
+                                    result = response_validator(retry_response)
+                                except Exception as retry_validation_exc:
+                                    raise _AIQualityValidationError(
+                                        f"Bir martalik sifatni tuzatish ham o'tmadi: {retry_validation_exc}"
+                                    ) from retry_validation_exc
+                                logging.info(
+                                    "AI SIFAT QAYTA ISHLASHI MUVAFFAQIYATLI | generator=%s | model=%s | kalit_indeksi=%s",
+                                    feature, model_name, key_index + 1
+                                )
+                        else:
+                            result = response
                         elapsed = time.monotonic() - attempt_started
                         with _ai_monitor_lock:
                             _ai_monitor_state["key_success"][key_index] = _ai_monitor_state["key_success"].get(key_index, 0) + 1
@@ -6842,6 +6898,14 @@ def _run_gemini_generation(
                         model_failed = True
                         safe_error = _safe_ai_error_text(exc)
                         status_code = _gemini_error_status(exc)
+                        if isinstance(exc, _AIQualityValidationError):
+                            # Bu kalit/API xatosi emas. Javob sifati talabga javob bermadi.
+                            logging.warning(
+                                "AI JAVOBI SIFAT TEKSHIRUVIDAN O'TMADI | generator=%s | model=%s | kalit_indeksi=%s | sabab=%s",
+                                feature, model_name, key_index + 1, safe_error
+                            )
+                            stop_retry_rounds = True
+                            break
                         with _ai_monitor_lock:
                             _ai_monitor_state["key_failures"][key_index] = _ai_monitor_state["key_failures"].get(key_index, 0) + 1
                             _ai_monitor_state["last_errors"].append({
@@ -6867,12 +6931,12 @@ def _run_gemini_generation(
                     if time.monotonic() >= deadline:
                         break
 
-                if model_failed and model_index + 1 < len(models):
+                if model_failed and model_index + 1 < len(models) and not stop_retry_rounds:
                     logging.warning(
                         "AI ZAXIRA MODELGA O'TMOQDA | generator=%s | oldingi_model=%s | zaxira_model=%s",
                         feature, model_name, models[model_index + 1],
                     )
-                if time.monotonic() >= deadline:
+                if stop_retry_rounds or time.monotonic() >= deadline:
                     break
 
             if time.monotonic() >= deadline or stop_retry_rounds:
