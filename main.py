@@ -5236,9 +5236,9 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
         "Word/PDF uchun to'liq, batafsil bo'limlar, izohlar, misollar va zarur joylarda formulalar bilan yozing."
     )
     word_target = (
-        "Kamida 1800-2400 so'z atrofida yozing; manba qisqa bo'lsa, hajmni sun'iy to'ldirmang, mavjud mazmunni to'liq oching."
+        "Konspektni odatda 900-1400 so'z atrofida yozing; mavzu yoki manba mazmuni qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
         if style == "standard" else
-        "Taxminan 2200-3200 so'z hajmida yozing; manba qisqa bo'lsa, hajmni sun'iy to'ldirmang, mavjud mazmunni to'liq oching."
+        "Konspektni odatda 1400-2200 so'z atrofida yozing; manba qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
     )
     source_mode_instruction = (
         "Quyidagi MANBA MATNI asosiy va ustuvor manbadir. Undagi muhim bo'lim, ta'rif, qonun, formula va xulosalarni to'liq yorit. "
@@ -5254,7 +5254,10 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
               "Har bir asosiy tushunchani nima ekanligi, qanday ishlashi, tarkibiy qismlari va amaliy ahamiyati bilan tushuntir. "
               "Bir xil fikrni takrorlama, lekin mazmunni haddan tashqari siqma. Zarur joyda sodda misol va bosqichma-bosqich tushuntirish ber. "
               "O'zbekcha mavzu bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yoz. Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalan. "
-              f"Uslub: {style_text}. {purpose_text} {word_target} Yakunda mazmunli xulosa va 5 ta o'zini tekshirish savolini qo'sh.\\n"
+              f"Uslub: {style_text}. {purpose_text} {word_target} "
+              "Javob oxirida alohida Markdown sarlavhasi aynan '## XULOSA' bo'lsin. "
+              "XULOSA 1-2 mazmunli paragrafdan iborat bo'lsin; undan keyin '## O'ZINI TEKSHIRISH SAVOLLARI' sarlavhasi ostida 5 ta savol yozilsin. "
+              "Xulosa sarlavhasini savollar bilan birlashtirmang va sarlavhani tashlab ketmang.\\n"
               f"MAVZU: {topic or 'Yuklangan manba asosida'}\\n{source_mode_instruction}")
     try:
         summary_timeout = max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
@@ -5262,13 +5265,22 @@ def api_generate_summary(request: Request, user_id: int = Form(...), topic: str 
             text = _require_gemini_text(response)
             words = len(re.findall(r"\b[\w'-]+\b", text, flags=re.UNICODE))
             if not source_text.strip():
-                minimum_words = max(700, min(1800, int(os.getenv("SUMMARY_MIN_WORDS", "1600"))))
+                # 1 600 so'zlik eski qat'iy chegara 1 100-1 300 so'zli sifatli
+                # javoblarni ham rad etardi. Standart minimumni pasaytiramiz.
+                minimum_words = max(700, min(1400, int(os.getenv("SUMMARY_MIN_WORDS", "1000"))))
                 if words < minimum_words:
                     raise ValueError(f"Konspekt juda qisqa: {words} so'z; kamida {minimum_words} so'z kerak")
-            elif words < 450:
+            elif words < 300:
                 raise ValueError(f"Manbaga asoslangan konspekt juda qisqa: {words} so'z")
-            if not re.search(r"(?im)^#+\s*(xulosa|conclusion|заключение)\b", text):
-                raise ValueError("Konspektda Xulosa bo'limi yo'q")
+            # Model sarlavhani Markdown'siz yoki raqam bilan berishi mumkin.
+            # Shuning uchun faqat '## XULOSA' shakliga bog'lanib qolmaymiz.
+            conclusion_pattern = (
+                r"(?im)^\s*(?:#{1,6}\s*)?(?:\d+(?:[.\)]\d*)*[.)]?\s*)?"
+                r"(?:xulosa|yakuniy\s+xulosa|umumiy\s+xulosa|conclusion|concluding\s+remarks|заключение)"
+                r"\s*[:.!—-]?\s*$"
+            )
+            if not re.search(conclusion_pattern, text):
+                raise ValueError("Konspektda alohida Xulosa sarlavhasi topilmadi")
             return text
 
         summary_text = _run_gemini_generation(
@@ -5517,6 +5529,10 @@ def _add_referat_body_to_docx(document, content):
     for kind, value in body_blocks:
         if kind == "heading":
             level, text = value
+            heading_key = _referat_heading_key(text)
+            if heading_key in {"xulosa", "conclusion", "заключение", "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
+                # Xulosa va adabiyotlar bo'limlari bir-biridan ham ajratiladi.
+                document.add_page_break()
             document.add_heading(_markdown_heading_text(text), level=2 if level >= 3 else 1)
         elif kind == "bullet":
             paragraph = document.add_paragraph(style="List Bullet")
@@ -5684,6 +5700,9 @@ def _build_referat_pdf(title, content, author, university, faculty, group_name, 
     for kind, value in body_blocks:
         if kind == "heading":
             level, heading_text = value
+            heading_key = _referat_heading_key(heading_text)
+            if heading_key in {"xulosa", "conclusion", "заключение", "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
+                story.append(PageBreak())
             style = styles["ReferatH2"] if level >= 3 else styles["ReferatH1"]
             paragraph = Paragraph(_markdown_inline_to_reportlab(heading_text), style)
             paragraph._quiz_toc_level = 1 if level >= 3 else 0
