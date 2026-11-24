@@ -14892,7 +14892,35 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
         let referatGeneratedFiles = null;
         async function openReferatScreen(){switchScreen('referat');loadReferatStatus();}
         async function loadReferatStatus(){const remainingEl=document.getElementById('referat-remaining');const usageEl=document.getElementById('referat-usage-meta');const bonusEl=document.getElementById('referat-bonus-meta');try{const r=await fetch(`${BASE_URL}/api/referat/status?user_id=${userId}&_t=${Date.now()}`);const d=await r.json();if(!r.ok||d.status!=='ok')throw new Error(d.detail||'status');remainingEl.textContent=d.remaining===null?'∞':d.remaining;usageEl.textContent=(langPack[currentLang].referat_status_total||'').replace('{limit}',d.limit===-1?'∞':d.limit).replace('{used}',d.used);bonusEl.textContent=(langPack[currentLang].referat_bonus_count||'').replace('{count}',d.bonus);usageEl.style.color='';}catch(e){console.warn('Referat limitini yuklashda xatolik:',e);remainingEl.textContent='—';usageEl.textContent=currentLang==='ru'?'Не удалось загрузить лимит. Повторите попытку.':currentLang==='en'?'Could not load the quota. Please try again.':'Referat limitini yuklab bo‘lmadi. Qayta urinib ko‘ring.';usageEl.style.color='#fb7185';bonusEl.textContent='';}}
-        function showReferatResult(files,title){referatGeneratedFiles=files;const labels={uz:['PDF yuklab olish','Word (.DOCX) yuklab olish'],ru:['Скачать PDF','Скачать Word (.DOCX)'],en:['Download PDF','Download Word (.DOCX)']};const l=labels[currentLang]||labels.uz;document.getElementById('app-dialog-icon').innerText='📄';document.getElementById('app-dialog-msg').innerText=`${title||'Referat'}\n\nReferatingiz tayyor! Kerakli formatni tanlang.`;document.getElementById('app-dialog-footer').innerHTML=`<button class="app-dialog-btn secondary" onclick="downloadReferatFile('pdf')">${l[0]}</button><button class="app-dialog-btn primary" onclick="downloadReferatFile('docx')">${l[1]}</button><button class="app-dialog-btn secondary" onclick="document.getElementById('app-dialog').style.display='none'">OK</button>`;document.getElementById('app-dialog').style.display='flex';}
+        function showReferatResult(files,title){
+            referatGeneratedFiles=files||null;
+            const overlay=document.getElementById('referat-result-overlay');
+            const titleNode=document.getElementById('referat-result-title');
+            const subtitleNode=document.getElementById('referat-result-subtitle');
+            const copy={
+                uz:'Referatingiz tayyor! Kerakli formatni tanlab yuklab oling.',
+                ru:'Ваш реферат готов! Выберите формат и скачайте файл.',
+                en:'Your report is ready! Choose a format to download.'
+            };
+            const labels={
+                uz:{pdf:'PDF yuklab olish',docx:'Word (.DOCX) yuklab olish'},
+                ru:{pdf:'Скачать PDF',docx:'Скачать Word (.DOCX)'},
+                en:{pdf:'Download PDF',docx:'Download Word (.DOCX)'}
+            };
+            if(titleNode) titleNode.textContent=title||'Quiz AI';
+            if(subtitleNode) subtitleNode.textContent=copy[currentLang]||copy.uz;
+            const selected=labels[currentLang]||labels.uz;
+            document.querySelectorAll('[data-referat-result-label]').forEach(node=>{
+                const format=node.getAttribute('data-referat-result-label');
+                if(selected[format]) node.textContent=selected[format];
+            });
+            if(overlay){overlay.classList.add('active');overlay.setAttribute('aria-hidden','false');}
+        }
+        function closeReferatResult(){
+            const overlay=document.getElementById('referat-result-overlay');
+            if(overlay){overlay.classList.remove('active');overlay.setAttribute('aria-hidden','true');}
+            referatGeneratedFiles=null;
+        }
         function downloadReferatFile(fmt){const item=referatGeneratedFiles&&referatGeneratedFiles[fmt];if(!item||!item.url)return;const url=new URL(item.url,BASE_URL).href;const name=item.filename||`Quiz_AI_Referat.${fmt}`;if(tg&&typeof tg.downloadFile==='function'){tg.downloadFile({url,file_name:name},()=>{});return;}const a=document.createElement('a');a.href=url;a.download=name;a.rel='noopener';document.body.appendChild(a);a.click();a.remove();}
         async function generateReferat(){const topic=(document.getElementById('referat-topic-input').value||'').trim();const fileNode=document.getElementById('referat-source-file');const file=fileNode.files&&fileNode.files[0];const status=document.getElementById('referat-generation-status');const button=document.getElementById('referat-generate-button');if(!topic&&!file){status.textContent=langPack[currentLang].referat_need_input;status.style.color='#fb7185';return;}const form=new FormData();form.append('user_id',String(userId));form.append('topic',topic);const fields={student_name:'referat-student-input',university:'referat-university-input',faculty:'referat-faculty-input',group:'referat-group-input',subject:'referat-subject-input',reviewer:'referat-reviewer-input'};Object.entries(fields).forEach(([k,id])=>form.append(k,(document.getElementById(id).value||'').trim()));if(file)form.append('file',file);button.disabled=true;status.textContent=langPack[currentLang].referat_loading;status.style.color='';setAIGenerationLock(true,'referat');try{const r=await fetch(`${BASE_URL}/api/referat/generate`,{method:'POST',body:form});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Referat yaratilmadi');if(d.status!=='ok'||!d.files?.pdf?.url||!d.files?.docx?.url)throw new Error('Referat fayllari tayyor emas');document.getElementById('referat-topic-input').value='';fileNode.value='';document.getElementById('referat-source-file-name').textContent=langPack[currentLang].referat_no_file;status.textContent='';await loadReferatStatus();setAIGenerationLock(false,'referat');showReferatResult(d.files,d.title);}catch(e){status.textContent=e.message||langPack[currentLang].referat_error;status.style.color='#fb7185';await loadReferatStatus();setAIGenerationLock(false,'referat');}finally{button.disabled=false;}}
         const referatFileInput=document.getElementById('referat-source-file');if(referatFileInput)referatFileInput.addEventListener('change',()=>{document.getElementById('referat-source-file-name').textContent=referatFileInput.files?.[0]?(langPack[currentLang].referat_file_selected+referatFileInput.files[0].name):langPack[currentLang].referat_no_file;});
@@ -15085,6 +15113,16 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             };
             if (mode === 'slides') {
                 const copy = slideText[currentLang] || slideText.uz;
+                if (title) title.innerText = copy.title;
+                if (subtitle) subtitle.innerText = copy.subtitle;
+                if (note) note.innerText = copy.note;
+            } else if (mode === 'referat') {
+                const referatText = {
+                    uz: {title:'Referat yaratilmoqda...', subtitle:'Mavzu va o‘quv materiali tahlil qilinmoqda, referat tayyorlanmoqda...', note:'Iltimos kuting. Referat tayyor bo‘lguncha ilova boshqaruvlari vaqtincha bloklangan.'},
+                    ru: {title:'Создаётся реферат...', subtitle:'Анализируется тема и учебный материал, подготавливается реферат...', note:'Пожалуйста, подождите. До завершения создания реферата управление приложением временно заблокировано.'},
+                    en: {title:'Creating your report...', subtitle:'Your topic and study material are being analyzed, and the report is being prepared...', note:'Please wait. App controls are temporarily locked until your report is ready.'}
+                };
+                const copy = referatText[currentLang] || referatText.uz;
                 if (title) title.innerText = copy.title;
                 if (subtitle) subtitle.innerText = copy.subtitle;
                 if (note) note.innerText = copy.note;
@@ -16518,6 +16556,17 @@ window.onload = function() {
 </style>
 
 
+
+    <div id="referat-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="slides-result-card glass-panel">
+            <div class="slides-result-icon">📄</div>
+            <h2 id="referat-result-title">Quiz AI</h2>
+            <p id="referat-result-subtitle">Referatingiz tayyor! Kerakli formatni tanlab yuklab oling.</p>
+            <button type="button" class="slides-download-btn slides-download-pdf" onclick="downloadReferatFile('pdf')"><span>📕</span><span data-referat-result-label="pdf">PDF yuklab olish</span></button>
+            <button type="button" class="slides-download-btn slides-download-pptx" onclick="downloadReferatFile('docx')"><span>📘</span><span data-referat-result-label="docx">Word (.DOCX) yuklab olish</span></button>
+            <button type="button" class="slides-result-close" onclick="closeReferatResult()">✕</button>
+        </div>
+    </div>
 
     <div id="slides-result-overlay" class="slides-result-overlay" aria-hidden="true" role="dialog" aria-modal="true">
         <div class="slides-result-card glass-panel">
