@@ -256,15 +256,15 @@ logging.info(
 # paid key, or later to multiple independent projects/keys.
 #
 # Recommended Railway variables for production can be tuned without code changes:
-#   GEMINI_MODEL=gemini-3.6-flash
-#   GEMINI_FALLBACK_MODEL=gemini-2.5-flash
+#   GEMINI_MODEL=gemini-3.5-flash-lite
+#   GEMINI_FALLBACK_MODEL=gemini-3.6-flash
 #   AI_MAX_CONCURRENT=10
 #   AI_MAX_QUEUE=500
 #   AI_RETRY_PER_KEY=2
 #   AI_REQUEST_TIMEOUT=600
 #   AI_TOTAL_TIMEOUT=1800
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
-GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-3.5-flash-lite"
+GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", "10")))
 AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "500")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
@@ -436,7 +436,9 @@ REFERAT_MAX_FILE_MB = max(1, min(30, int(os.getenv("REFERAT_MAX_FILE_MB", "10"))
 REFERAT_MAX_PDF_PAGES = max(1, min(500, int(os.getenv("REFERAT_MAX_PDF_PAGES", "150"))))
 REFERAT_MAX_SOURCE_CHARS = max(1000, min(200000, int(os.getenv("REFERAT_MAX_SOURCE_CHARS", "80000"))))
 REFERAT_MAX_TOPIC_CHARS = max(20, min(5000, int(os.getenv("REFERAT_MAX_TOPIC_CHARS", "1000"))))
-REFERAT_AI_MODEL = os.getenv("REFERAT_AI_MODEL", GEMINI_FALLBACK_MODEL).strip() or GEMINI_FALLBACK_MODEL
+# Barcha AI xizmatlari yagona asosiy/zaxira model siyosatidan foydalanadi.
+# Eski REFERAT_AI_MODEL va SLIDE_AI_MODEL qiymatlari model tanlashda ishlatilmaydi.
+REFERAT_AI_MODEL = GEMINI_MODEL
 REFERAT_MAX_OUTPUT_TOKENS = max(2048, min(32000, int(os.getenv("REFERAT_MAX_OUTPUT_TOKENS", "16000"))))
 logging.info("Referat sozlamalari Railway'dan yuklandi | faol=%s | bepul=%s/%s kun | tariflar=%s | fayl_limit=%s MB | AI_model=%s", REFERAT_ENABLED, REFERAT_FREE_LIMIT, REFERAT_FREE_PERIOD_DAYS, REFERAT_TARIFF_LIMITS, REFERAT_MAX_FILE_MB, REFERAT_AI_MODEL)
 
@@ -4686,22 +4688,42 @@ def api_generate_referat(request: Request, user_id: int = Form(...), topic: str 
         raise HTTPException(status_code=500,detail="Referat limitini tekshirishda xatolik yuz berdi.")
     logging.info("Referat yaratish boshlandi | foydalanuvchi=%s | ish=%s | mavzu_bor=%s | manba_bor=%s | manba_hajmi=%s",user_id,job_id,bool(topic),bool(source_text),len(source_text))
     acquired=False
+    queue_acquired=False
     try:
+        # Referat ham testlar bilan bir xil umumiy navbat slotidan o'tadi.
+        with _ai_monitor_lock:
+            _ai_monitor_state["waiting_for_queue"] += 1
+        queue_acquired=ai_queue_slots.acquire(timeout=AI_TOTAL_TIMEOUT)
+        with _ai_monitor_lock:
+            _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
+            if queue_acquired:
+                _ai_monitor_state["accepted_requests"] += 1
+        if not queue_acquired:
+            raise RuntimeError("AI umumiy navbatida kutish vaqti tugadi")
+        _maybe_alert_ai_queue_load()
         acquired=gemini_semaphore.acquire(timeout=max(1,AI_REQUEST_TIMEOUT))
-        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        if not acquired: raise RuntimeError("AI parallel so'rov o'rnini kutish vaqti tugadi")
         start=_next_generation_key_start(len(GOOGLE_API_KEYS)); content=None; last_error=None
-        for offset in range(len(GOOGLE_API_KEYS)):
-            key_index=(start+offset)%len(GOOGLE_API_KEYS)
-            try:
-                client=genai.Client(api_key=GOOGLE_API_KEYS[key_index],http_options=genai_types.HttpOptions(timeout=AI_REQUEST_TIMEOUT*1000))
-                content=generate_referat_content(client=client,model=REFERAT_AI_MODEL,topic=topic,source_text=source_text,**fields,max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS)
+        model_chain = list(dict.fromkeys((GEMINI_MODEL, GEMINI_FALLBACK_MODEL)))
+        # Avval asosiy model, zarurat tug'ilgandagina zaxira model ishlatiladi.
+        for model_name in model_chain:
+            for offset in range(len(GOOGLE_API_KEYS)):
+                key_index=(start+offset)%len(GOOGLE_API_KEYS)
+                try:
+                    client=genai.Client(api_key=GOOGLE_API_KEYS[key_index],http_options=genai_types.HttpOptions(timeout=AI_REQUEST_TIMEOUT*1000))
+                    content=generate_referat_content(client=client,model=model_name,topic=topic,source_text=source_text,**fields,max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS)
+                    logging.info("Referat AI modeli muvaffaqiyatli ishladi | ish=%s | model=%s | kalit_tartib=%s",job_id,model_name,key_index+1)
+                    break
+                except ReferatError as exc:
+                    # JSON/tuzilma tekshiruvi tugadi; keyingi model bilan bir marta imkon beramiz.
+                    last_error=exc
+                    logging.warning("Referat javobi talabga mos kelmadi | ish=%s | model=%s | sabab=%s",job_id,model_name,_safe_ai_error_text(exc))
+                    break
+                except Exception as exc:
+                    last_error=exc
+                    logging.warning("Referat AI so'rovi bajarilmadi | ish=%s | model=%s | kalit_tartib=%s | sabab=%s",job_id,model_name,key_index+1,_safe_ai_error_text(exc))
+            if content is not None:
                 break
-            except ReferatError:
-                # JSON/tuzilma validatsiyasi generator ichida qayta urinib ko'rildi;
-                # bunday xatoda boshqa API kalitlarini behuda aylantirmaymiz.
-                raise
-            except Exception as exc:
-                last_error=exc; logging.warning("Referat AI urinish muvaffaqiyatsiz | foydalanuvchi=%s | ish=%s | kalit_tartib=%s | sabab=%s",user_id,job_id,key_index+1,_safe_ai_error_text(exc))
         if content is None: raise RuntimeError(_safe_ai_error_text(last_error or "AI javob bermadi"))
         meta=dict(fields)
         # PDF sahifalanishi mundarija uchun asosiy manba; Word'ga tayyor raqamlar beriladi.
@@ -4727,6 +4749,7 @@ def api_generate_referat(request: Request, user_id: int = Form(...), topic: str 
         raise HTTPException(status_code=502,detail="Referat yaratilmadi. Sarflangan limit yoki bonus balansga qaytarildi.")
     finally:
         if acquired: gemini_semaphore.release()
+        if queue_acquired: ai_queue_slots.release()
 
 
 @app.get("/api/referat/download/{token}/{file_format}")
@@ -4844,28 +4867,57 @@ def api_generate_slides(
     deadline = time.monotonic() + max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
     deck = None; last_error = None
     start_index = _next_generation_key_start(len(GOOGLE_API_KEYS))
+    queue_acquired = False
+    acquired = False
     try:
+        # Slaydlar ham Test va Referat bilan umumiy AI navbatidan foydalanadi.
+        with _ai_monitor_lock:
+            _ai_monitor_state["waiting_for_queue"] += 1
+        queue_acquired = ai_queue_slots.acquire(timeout=max(1, deadline-time.monotonic()))
+        with _ai_monitor_lock:
+            _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
+            if queue_acquired:
+                _ai_monitor_state["accepted_requests"] += 1
+        if not queue_acquired:
+            raise RuntimeError("AI umumiy navbatida kutish vaqti tugadi")
+        _maybe_alert_ai_queue_load()
         acquired = gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic()))
-        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        if not acquired:
+            if queue_acquired:
+                ai_queue_slots.release()
+                queue_acquired = False
+            raise RuntimeError("AI parallel so'rov o'rnini kutish vaqti tugadi")
         try:
             for offset in range(len(GOOGLE_API_KEYS)):
                 if time.monotonic() >= deadline: break
                 key_index = (start_index + offset) % len(GOOGLE_API_KEYS)
                 try:
                     client = genai.Client(api_key=GOOGLE_API_KEYS[key_index], http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000))))
-                    response = client.models.generate_content(
-                        model=os.getenv("SLIDE_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
-                        config=genai_types.GenerateContentConfig(response_mime_type="application/json", response_schema=SlideDeckSchema, temperature=.35, max_output_tokens=12000),
-                    )
-                    if not response or not response.text: raise RuntimeError("AI bo'sh javob qaytardi")
-                    deck = SlideDeckSchema.model_validate_json(response.text)
-                    if len(deck.slides) != slide_count: raise RuntimeError(f"Slaydlar soni mos emas: {len(deck.slides)}/{slide_count}")
-                    break
+                    for model_name in dict.fromkeys((GEMINI_MODEL, GEMINI_FALLBACK_MODEL)):
+                        try:
+                            response = client.models.generate_content(
+                                model=model_name, contents=prompt,
+                                config=genai_types.GenerateContentConfig(response_mime_type="application/json", response_schema=SlideDeckSchema, temperature=.35, max_output_tokens=12000),
+                            )
+                            if not response or not response.text: raise RuntimeError("AI bo'sh javob qaytardi")
+                            candidate_deck = SlideDeckSchema.model_validate_json(response.text)
+                            if len(candidate_deck.slides) != slide_count: raise RuntimeError(f"Slaydlar soni mos emas: {len(candidate_deck.slides)}/{slide_count}")
+                            deck = candidate_deck
+                            logging.info("Slaydlar AI orqali yaratildi | ish=%s | model=%s | kalit_tartib=%s",job_id,model_name,key_index+1)
+                            break
+                        except Exception as exc:
+                            last_error = exc
+                            logging.warning("Slayd AI urinish muvaffaqiyatsiz | ish=%s | model=%s | kalit_tartib=%s | sabab=%s",job_id,model_name,key_index+1,_safe_ai_error_text(exc))
+                    if deck is not None:
+                        break
                 except Exception as exc:
                     last_error = exc
-                    logging.warning("Slayd Gemini urinish muvaffaqiyatsiz | kalit_indeksi=%s | sabab=%s", key_index+1, _safe_ai_error_text(exc))
+                    logging.warning("Slayd Gemini mijozini tayyorlashda xato | ish=%s | kalit_tartib=%s | sabab=%s",job_id,key_index+1,_safe_ai_error_text(exc))
         finally:
-            gemini_semaphore.release()
+            if acquired:
+                gemini_semaphore.release()
+            if queue_acquired:
+                ai_queue_slots.release()
         if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
         deck = _ensure_slide_visuals(deck)
         allowed_slide_themes = ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature", "elegant")
