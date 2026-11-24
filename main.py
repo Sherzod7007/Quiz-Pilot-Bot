@@ -795,6 +795,22 @@ def init_db():
     cursor.execute("""CREATE TABLE IF NOT EXISTS referat_usage (
         user_id INTEGER NOT NULL, cycle_key TEXT NOT NULL, used_count INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, cycle_key))""")
+    # Eski SQLite bazalarida referat_usage jadvali avvaldan mavjud bo'lishi
+    # mumkin. CREATE TABLE IF NOT EXISTS bunday jadvalga yangi ustun qo'shmaydi.
+    # Shuning uchun sxemani tekshirib, yetishmayotgan ustunlarni xavfsiz qo'shamiz.
+    referat_usage_columns = {
+        row[1] for row in cursor.execute("PRAGMA table_info(referat_usage)").fetchall()
+    }
+    if "used_count" not in referat_usage_columns:
+        cursor.execute(
+            "ALTER TABLE referat_usage ADD COLUMN used_count INTEGER NOT NULL DEFAULT 0"
+        )
+        logging.info("Referat DB migratsiyasi: referat_usage.used_count ustuni qo'shildi")
+    if "updated_at" not in referat_usage_columns:
+        cursor.execute(
+            "ALTER TABLE referat_usage ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0"
+        )
+        logging.info("Referat DB migratsiyasi: referat_usage.updated_at ustuni qo'shildi")
     cursor.execute("""CREATE TABLE IF NOT EXISTS referat_bonus_wallets (
         user_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
         updated_at INTEGER NOT NULL DEFAULT 0)""")
@@ -4546,13 +4562,38 @@ def _referat_bonus_change(user_id: int, amount: int, admin_id: int, action: str)
     try:
         conn.execute("BEGIN IMMEDIATE")
         ref = f"referat-admin:{action}:{admin_id}:{user_id}:{uuid.uuid4().hex}"
-        delta = amount if action == "grant" else -amount
-        if action == "revoke":
-            row = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+        now = int(time.time())
+        if action == "grant":
+            conn.execute(
+                """INSERT INTO referat_bonus_wallets(user_id,balance,updated_at)
+                   VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE
+                   SET balance=balance+excluded.balance,updated_at=excluded.updated_at""",
+                (int(user_id), amount, now),
+            )
+            delta = amount
+        elif action == "revoke":
+            row = conn.execute(
+                "SELECT balance FROM referat_bonus_wallets WHERE user_id=?",
+                (int(user_id),),
+            ).fetchone()
             current = int(row[0] or 0) if row else 0
-            if current < amount: conn.rollback(); return False, f"Bekor qilish uchun bonus yetarli emas. Joriy bonus: {current} ta."
-        conn.execute("INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance,updated_at=excluded.updated_at", (int(user_id),delta,int(time.time())))
-        conn.execute("INSERT INTO referat_bonus_transactions(user_id,amount,transaction_type,reference,description,admin_id,created_at) VALUES(?,?,?,?,?,?,?)", (int(user_id),delta,action,ref,"Referat bonusi: administrator amali",int(admin_id),int(time.time())))
+            if current < amount:
+                conn.rollback()
+                return False, f"Bekor qilish uchun bonus yetarli emas. Joriy bonus: {current} ta."
+            updated = conn.execute(
+                """UPDATE referat_bonus_wallets
+                   SET balance=balance-?, updated_at=?
+                   WHERE user_id=? AND balance>=?""",
+                (amount, now, int(user_id), amount),
+            )
+            if updated.rowcount != 1:
+                conn.rollback()
+                return False, "Bonus balansi o'zgargan. Qayta urinib ko'ring."
+            delta = -amount
+        else:
+            conn.rollback()
+            return False, "Noma'lum bonus amali."
+        conn.execute("INSERT INTO referat_bonus_transactions(user_id,amount,transaction_type,reference,description,admin_id,created_at) VALUES(?,?,?,?,?,?,?)", (int(user_id),delta,action,ref,"Referat bonusi: administrator amali",int(admin_id),now))
         balance = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()[0]
         conn.commit(); logging.info("Referat admin bonusi | amal=%s | admin=%s | foydalanuvchi=%s | miqdor=%s | yangi_balans=%s", action,admin_id,user_id,amount,balance)
         return True, int(balance)
