@@ -795,22 +795,40 @@ def init_db():
     cursor.execute("""CREATE TABLE IF NOT EXISTS referat_usage (
         user_id INTEGER NOT NULL, cycle_key TEXT NOT NULL, used_count INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, cycle_key))""")
-    # Eski SQLite bazalarida referat_usage jadvali avvaldan mavjud bo'lishi
-    # mumkin. CREATE TABLE IF NOT EXISTS bunday jadvalga yangi ustun qo'shmaydi.
-    # Shuning uchun sxemani tekshirib, yetishmayotgan ustunlarni xavfsiz qo'shamiz.
+    # Eski SQLite bazalarida referat_usage jadvali boshqa sxemada bo'lishi mumkin.
+    # Eski sarflangan limitlarni yo'qotmasdan, jadvalni yangi composite PK bilan
+    # qayta tuzamiz. Legacy sarf alohida cycle_key='legacy' sifatida saqlanadi.
     referat_usage_columns = {
         row[1] for row in cursor.execute("PRAGMA table_info(referat_usage)").fetchall()
     }
-    if "used_count" not in referat_usage_columns:
+    referat_usage_pk = [
+        row[1] for row in sorted(
+            cursor.execute("PRAGMA table_info(referat_usage)").fetchall(),
+            key=lambda item: item[5] if item[5] else 999,
+        ) if row[5]
+    ]
+    if not {"user_id", "cycle_key", "used_count", "updated_at"}.issubset(referat_usage_columns) or referat_usage_pk != ["user_id", "cycle_key"]:
+        if "user_id" not in referat_usage_columns:
+            raise RuntimeError("referat_usage jadvalida user_id ustuni topilmadi")
+        legacy_count_expr = "COALESCE(used_count, 0)" if "used_count" in referat_usage_columns else "0"
+        legacy_updated_expr = "COALESCE(updated_at, 0)" if "updated_at" in referat_usage_columns else "0"
+        legacy_cycle_expr = "COALESCE(cycle_key, 'legacy')" if "cycle_key" in referat_usage_columns else "'legacy'"
+        cursor.execute("DROP TABLE IF EXISTS referat_usage_migration")
+        cursor.execute("""CREATE TABLE referat_usage_migration (
+            user_id INTEGER NOT NULL,
+            cycle_key TEXT NOT NULL,
+            used_count INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(user_id, cycle_key)
+        )""")
         cursor.execute(
-            "ALTER TABLE referat_usage ADD COLUMN used_count INTEGER NOT NULL DEFAULT 0"
+            f"""INSERT INTO referat_usage_migration(user_id, cycle_key, used_count, updated_at)
+                SELECT user_id, {legacy_cycle_expr}, SUM({legacy_count_expr}), MAX({legacy_updated_expr})
+                FROM referat_usage GROUP BY user_id, {legacy_cycle_expr}"""
         )
-        logging.info("Referat DB migratsiyasi: referat_usage.used_count ustuni qo'shildi")
-    if "updated_at" not in referat_usage_columns:
-        cursor.execute(
-            "ALTER TABLE referat_usage ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0"
-        )
-        logging.info("Referat DB migratsiyasi: referat_usage.updated_at ustuni qo'shildi")
+        cursor.execute("DROP TABLE referat_usage")
+        cursor.execute("ALTER TABLE referat_usage_migration RENAME TO referat_usage")
+        logging.info("Referat DB migratsiyasi: referat_usage eski sxemadan composite PK sxemasiga o'tkazildi; eski sarf saqlandi")
     cursor.execute("""CREATE TABLE IF NOT EXISTS referat_bonus_wallets (
         user_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
         updated_at INTEGER NOT NULL DEFAULT 0)""")
@@ -4506,11 +4524,23 @@ def _reserve_referat_job(user_id: int, job_id: str):
     conn = _connect_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT used_count FROM referat_usage WHERE user_id=? AND cycle_key=?", (int(user_id), cycle)).fetchone()
+        # 'legacy' — migratsiyadan oldingi sarflangan limit. Uni joriy davrga
+        # qo'shib hisoblaymiz, shunda eski foydalanuvchilarga limit qayta berilmaydi.
+        row = conn.execute(
+            "SELECT COALESCE(SUM(used_count),0) FROM referat_usage "
+            "WHERE user_id=? AND cycle_key IN (?, 'legacy')",
+            (int(user_id), cycle),
+        ).fetchone()
         used = int(row[0] or 0) if row else 0
         source = "tariff" if paid else "free"
         if limit == -1 or used < limit:
-            conn.execute("INSERT INTO referat_usage(user_id,cycle_key,used_count,updated_at) VALUES(?,?,1,?) ON CONFLICT(user_id,cycle_key) DO UPDATE SET used_count=used_count+1,updated_at=excluded.updated_at", (int(user_id), cycle, int(time.time())))
+            conn.execute(
+                """INSERT INTO referat_usage(user_id,cycle_key,used_count,updated_at)
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(user_id,cycle_key) DO UPDATE
+                   SET used_count=used_count+1,updated_at=excluded.updated_at""",
+                (int(user_id), cycle, 1, int(time.time())),
+            )
         else:
             bonus = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()
             if not bonus or int(bonus[0] or 0) <= 0:
@@ -4543,7 +4573,11 @@ def _finish_referat_job(job_id: str, success: bool, title: str = ""):
             if source == "bonus":
                 conn.execute("INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,1,?) ON CONFLICT(user_id) DO UPDATE SET balance=balance+1,updated_at=excluded.updated_at", (user_id,int(time.time())))
             else:
-                conn.execute("UPDATE referat_usage SET used_count=MAX(0,used_count-1),updated_at=? WHERE user_id=? AND cycle_key=?", (int(time.time()),user_id,cycle))
+                conn.execute(
+                    "UPDATE referat_usage SET used_count=MAX(0,used_count-1),updated_at=? "
+                    "WHERE user_id=? AND cycle_key=?",
+                    (int(time.time()), user_id, cycle),
+                )
         conn.execute("UPDATE referat_jobs SET status=?,title=?,completed_at=? WHERE job_id=?", ("completed" if success else "refunded",str(title)[:240],int(time.time()),job_id))
         conn.commit()
         logging.info("Referat ishi yakunlandi | foydalanuvchi=%s | ish=%s | holat=%s | limit_qaytarildi=%s", user_id, job_id, "muvaffaqiyatli" if success else "xatolik — limit qaytarildi", not success)
@@ -4615,7 +4649,11 @@ def api_referat_status(request: Request, user_id: int):
     cycle, limit, paid = _referat_cycle_and_limit(user_id)
     conn=_connect_db()
     try:
-        row=conn.execute("SELECT used_count FROM referat_usage WHERE user_id=? AND cycle_key=?",(int(user_id),cycle)).fetchone()
+        row=conn.execute(
+            "SELECT COALESCE(SUM(used_count),0) FROM referat_usage "
+            "WHERE user_id=? AND cycle_key IN (?, 'legacy')",
+            (int(user_id),cycle),
+        ).fetchone()
         bonus=conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?",(int(user_id),)).fetchone()
         used=int(row[0] or 0) if row else 0; bonus_count=int(bonus[0] or 0) if bonus else 0
         remaining=None if limit == -1 else max(0,limit-used)
