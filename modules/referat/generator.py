@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -65,9 +66,11 @@ Javobni faqat quyidagi JSON sxemasida qaytaring:
 MAZMUN VA TUZILMA TALABLARI:
 - Kirish, kamida 3 ta bob, har bir bobda kamida 2 ta kichik bo'lim, xulosa va foydalanilgan adabiyotlar bo'lsin.
 - Har bir bob mavzuning alohida jihatini ochsin; boblar va bo'limlar bir-birini takrorlamasin.
-- Har bir kichik bo'limni mazmunan keng yorit: ta'rif, izoh, sabab-oqibat, amaliy qo'llanish va mavzuga mos misollarni keltir. Har bir bo'lim odatda kamida 250-350 so'z bo'lsin; mazmunni sun'iy takror bilan cho'zma.
-- Kirishda dolzarblik, maqsad, vazifalar, obyekt va predmetni izchil yorit.
-- Xulosada boblarni ko'chirmasdan, asosiy natijalar va amaliy takliflarni jamla.
+- Har bir kichik bo'limni mazmunan keng yorit: ta'rif, ilmiy izoh, sabab-oqibat, amaliy qo'llanish, mavzuga mos misollar va zarur bo'lsa taqqoslashlarni keltir. Har bir bo'lim 250-350 so'z atrofida bo'lsin.
+- Asosiy matn (Kirish, boblar va Xulosa) jami kamida 1800-2200 so'z bo'lsin. Manba matni bunga yetmasa, mavjud faktlarni chuqurroq sharhla, ammo ma'lumot yoki misolni to'qima.
+- Kirishda dolzarblik, maqsad, vazifalar, obyekt va predmetni alohida, to'liq va izchil yorit; kirish kamida 250 so'z bo'lsin.
+- Xulosada asosiy natijalar, boblararo bog'liqlik va amaliy takliflarni jamla; xulosa kamida 200 so'z bo'lsin.
+- Bob sarlavhalarini raqamsiz yoz: masalan, 'O'simliklar fiziologiyasidagi roli'. Bob raqamini hujjat tuzuvchi avtomatik qo'shadi.
 - Tilni mavzu va manbaga mos tanla. O'zbekcha mavzu bo'lsa o'zbekcha yoz.
 - JSON kalitlari to'liq bo'lsin; chapters ichidagi har bir bo'limda heading va mazmunli body bo'lishi shart.
 - Markdown, izoh, kod bloki yoki JSON tashqarisida matn qaytarma.
@@ -104,8 +107,8 @@ def _validate_referat(data: Any) -> list[str]:
             errors.append(f"{key} kaliti yo'q.")
     if not isinstance(data.get("title"), str) or len(data.get("title", "").strip()) < 4:
         errors.append("title matni bo'sh yoki juda qisqa.")
-    if not isinstance(data.get("introduction"), str) or len(data.get("introduction", "").strip()) < 250:
-        errors.append("Kirish kamida 250 belgidan iborat bo'lishi kerak.")
+    if not isinstance(data.get("introduction"), str) or len(re.findall(r"\b[\w'-]+\b", data.get("introduction", ""), flags=re.UNICODE)) < 200:
+        errors.append("Kirish kamida 200 so'z bo'lishi kerak; tavsiya etilgan hajm 250 so'z.")
     chapters = data.get("chapters")
     if not isinstance(chapters, list) or len(chapters) < 3:
         errors.append("Kamida 3 ta bob bo'lishi shart.")
@@ -124,10 +127,25 @@ def _validate_referat(data: Any) -> list[str]:
                     continue
                 if not isinstance(section.get("heading"), str) or not section["heading"].strip():
                     errors.append(f"{ci}-bob, {si}-bo'lim sarlavhasi yo'q.")
-                if not isinstance(section.get("body"), str) or len(section.get("body", "").strip()) < 500:
-                    errors.append(f"{ci}-bob, {si}-bo'lim matni yetarlicha batafsil emas (kamida 500 belgi).")
-    if not isinstance(data.get("conclusion"), str) or len(data.get("conclusion", "").strip()) < 200:
-        errors.append("Xulosa kamida 200 belgidan iborat bo'lishi kerak.")
+                if not isinstance(section.get("body"), str) or len(re.findall(r"\b[\w'-]+\b", section.get("body", ""), flags=re.UNICODE)) < 180:
+                    errors.append(f"{ci}-bob, {si}-bo'lim matni qisqa (kamida 180 so'z; maqsad 250-350 so'z).")
+    if not isinstance(data.get("conclusion"), str) or len(re.findall(r"\b[\w'-]+\b", data.get("conclusion", ""), flags=re.UNICODE)) < 150:
+        errors.append("Xulosa kamida 150 so'zdan iborat bo'lishi kerak.")
+    all_main_text = " ".join([
+        str(data.get("introduction") or ""),
+        " ".join(
+            str(section.get("body") or "")
+            for chapter in (chapters if isinstance(chapters, list) else [])
+            if isinstance(chapter, dict)
+            for section in (chapter.get("sections") or [])
+            if isinstance(section, dict)
+        ),
+        str(data.get("conclusion") or ""),
+    ])
+    total_words = len(re.findall(r"\b[\w'-]+\b", all_main_text, flags=re.UNICODE))
+    if total_words < 1800:
+        errors.append(f"Referat hajmi qisqa: {total_words} so'z. Kamida 1800 so'z talab qilinadi.")
+
     refs = data.get("references")
     if not isinstance(refs, list) or not refs or any(not isinstance(x, str) or not x.strip() for x in refs):
         errors.append("Foydalanilgan adabiyotlar ro'yxati bo'sh yoki noto'g'ri.")
