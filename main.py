@@ -4490,7 +4490,7 @@ def _build_slide_pdf(deck, theme="modern"):
 # REFERAT MODULI — alohida limit, bonus, generator va yuklab olish oqimi
 # =====================================================================
 from modules.referat.generator import ReferatError, extract_source_text, generate_referat_content
-from modules.referat.document_builder import build_referat_docx, build_referat_pdf
+from modules.referat.document_builder import build_referat_docx, build_referat_pdf, extract_referat_toc_pages
 
 _REFERAT_DOWNLOAD_FILES = {}
 _REFERAT_DOWNLOAD_LOCK = threading.Lock()
@@ -4704,8 +4704,10 @@ def api_generate_referat(request: Request, user_id: int = Form(...), topic: str 
                 last_error=exc; logging.warning("Referat AI urinish muvaffaqiyatsiz | foydalanuvchi=%s | ish=%s | kalit_tartib=%s | sabab=%s",user_id,job_id,key_index+1,_safe_ai_error_text(exc))
         if content is None: raise RuntimeError(_safe_ai_error_text(last_error or "AI javob bermadi"))
         meta=dict(fields)
-        docx_bytes=build_referat_docx(content,meta,quiz_ai_branding)
+        # PDF sahifalanishi mundarija uchun asosiy manba; Word'ga tayyor raqamlar beriladi.
         pdf_bytes=build_referat_pdf(content,meta,quiz_ai_branding)
+        toc_pages=extract_referat_toc_pages(pdf_bytes,content)
+        docx_bytes=build_referat_docx(content,meta,quiz_ai_branding,toc_pages=toc_pages)
         safe_title=re.sub(r"[^A-Za-z0-9_-]+","_",content.get("title","referat")).strip("_")[:60] or "quiz_ai_referat"
         token=secrets.token_urlsafe(32)
         with _REFERAT_DOWNLOAD_LOCK:
