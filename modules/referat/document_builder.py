@@ -8,8 +8,8 @@ import re
 from xml.sax.saxutils import escape
 
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, WD_TAB_LEADER
+from docx.shared import Cm, Pt, RGBColor, Inches
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
@@ -22,6 +22,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, PageBreak, KeepTogether,
 )
 from reportlab.platypus.tableofcontents import TableOfContents
+from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ GOLD = "C9A227"
 
 
 def _clean(value):
-    return re.sub(r"\\s+", " ", str(value or "")).strip()
+    return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
 def _add_page_border(section):
@@ -76,83 +77,246 @@ def _add_page_border(section):
         paragraph._p.append(parse_xml(shape_xml))
 
 
-def _add_toc_field(paragraph):
-    """Word ochilganda mundarija sahifa raqamlarini yangilash uchun TOC maydoni."""
-    run = paragraph.add_run()
-    begin = OxmlElement("w:fldChar")
-    begin.set(qn("w:fldCharType"), "begin")
-    instr = OxmlElement("w:instrText")
-    instr.set(qn("xml:space"), "preserve")
-    instr.text = ' TOC \\\\o "1-2" \\\\h \\\\z \\\\u '
-    separate = OxmlElement("w:fldChar")
-    separate.set(qn("w:fldCharType"), "separate")
-    text = OxmlElement("w:t")
-    text.text = "Mundarijani Word'da yangilash uchun maydon ustiga o'ng tugma bosing."
-    end = OxmlElement("w:fldChar")
-    end.set(qn("w:fldCharType"), "end")
-    for item in (begin, instr, separate, text, end):
-        run._r.append(item)
+
+def _normalize_heading(value: str) -> str:
+    """Sarlavhani PDF matnidan izlash uchun harflar/raqamlarga keltiradi."""
+    return re.sub(r"[^0-9a-zа-яёўғқҳ]", "", str(value or "").casefold())
 
 
-def _set_update_fields(doc):
-    settings = doc.settings._element
-    update = settings.find(qn("w:updateFields"))
-    if update is None:
-        update = OxmlElement("w:updateFields")
-        settings.append(update)
-    update.set(qn("w:val"), "true")
+def _chapter_title(index: int, raw_title: str) -> str:
+    """AI sarlavhasidagi mavjud bob raqamini olib, yagona raqam qo'shadi."""
+    title = _clean(raw_title)
+    title = re.sub(r"^\s*(?:(?:\d+\s*[-.)]\s*BOB\.?\s*)+)", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"^\s*BOB\s*\d+\s*[-.)]?\s*", "", title, flags=re.IGNORECASE)
+    return f"{index}-BOB. {title.upper()}"
 
 
-def build_referat_docx(data: dict, meta: dict | None = None, qr_module=None) -> bytes:
+def extract_referat_toc_pages(pdf_bytes: bytes, data: dict) -> dict:
+    """Yaratilgan PDF sahifalaridan mundarija uchun haqiqiy sahifa raqamlarini oladi."""
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        page_texts = [(page.extract_text() or "") for page in reader.pages]
+        normalized_pages = [_normalize_heading(text) for text in page_texts]
+
+        entries = [("KIRISH", "KIRISH")]
+        for index, chapter in enumerate(data.get("chapters", []), 1):
+            raw_heading = _clean(chapter.get("heading"))
+            chapter_label = _chapter_title(index, raw_heading)
+            entries.append((chapter_label, chapter_label))
+            for section in chapter.get("sections", []):
+                section_heading = _clean(section.get("heading"))
+                entries.append((section_heading, section_heading))
+        entries.append(("XULOSA", "XULOSA"))
+        entries.append(("FOYDALANILGAN ADABIYOTLAR", "FOYDALANILGAN ADABIYOTLAR"))
+
+        result = {}
+        cursor = min(2, max(0, len(normalized_pages) - 1))
+        for display, search_text in entries:
+            needle = _normalize_heading(search_text)
+            found = None
+            if needle:
+                for page_index in range(cursor, len(normalized_pages)):
+                    if needle in normalized_pages[page_index]:
+                        found = page_index + 1
+                        cursor = page_index
+                        break
+            result[display] = found if found is not None else "—"
+        return result
+    except Exception:
+        logger.exception("PDF sahifalaridan referat mundarija raqamlarini olishda xatolik")
+        return {}
+
+
+def _add_static_toc_entry(doc, label: str, page_number, *, level: int = 0):
+    """Word mundarijasiga tashqi yoki yangilanadigan maydonsiz tayyor satr qo'shadi."""
+    p = doc.add_paragraph()
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.left_indent = Cm(0.65 if level else 0)
+    p.paragraph_format.space_before = Pt(2 if level == 0 else 0)
+    p.paragraph_format.space_after = Pt(2)
+    p.paragraph_format.line_spacing = 1.0
+    p.paragraph_format.tab_stops.add_tab_stop(
+        Inches(6.25), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS
+    )
+    run = p.add_run(label)
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(12 if level == 0 else 11)
+    if level == 0:
+        run.bold = True
+    page_run = p.add_run("\t" + str(page_number or "—"))
+    page_run.font.name = "Times New Roman"
+    page_run.font.size = Pt(12)
+    return p
+
+
+def _add_fixed_qr_to_docx(doc, qr_module):
+    """PDF bilan bir xil PNG QR kodini Word oxirgi sahifasiga aniq koordinatada joylaydi."""
+    if not qr_module:
+        return False
+    try:
+        config = qr_module.get_branding_config("REFERAT")
+        png = qr_module._make_qr_png(config)
+        if not png:
+            return False
+
+        size_pt = float(config.get("size", 84))
+        margin_pt = 22.0
+        page_width_pt = float(A4[0])
+        page_height_pt = float(A4[1])
+        position = str(config.get("position", "bottom_right")).lower()
+
+        if position == "top_left":
+            x_pt, y_pt = margin_pt, margin_pt
+        elif position == "top_right":
+            x_pt, y_pt = page_width_pt - margin_pt - size_pt, margin_pt
+        elif position == "bottom_left":
+            x_pt, y_pt = margin_pt, page_height_pt - margin_pt - size_pt
+        elif position == "center":
+            x_pt = (page_width_pt - size_pt) / 2
+            y_pt = (page_height_pt - size_pt) / 2
+        else:  # bottom_right va document_end
+            x_pt = page_width_pt - margin_pt - size_pt
+            y_pt = page_height_pt - margin_pt - size_pt
+
+        # Rasm oxirgi matn paragrafi bilan bog'lanadi, lekin sahifaga nisbatan
+        # mutlaq koordinatada turadi; shu bois matn oqimini surmaydi.
+        paragraph = doc.paragraphs[-1] if doc.paragraphs else doc.add_paragraph()
+        run = paragraph.add_run()
+        picture = run.add_picture(io.BytesIO(png), width=Pt(size_pt))
+        inline = picture._inline
+
+        anchor = OxmlElement("wp:anchor")
+        for key, value in {
+            "distT": "0", "distB": "0", "distL": "0", "distR": "0",
+            "simplePos": "0", "relativeHeight": "251658240",
+            "behindDoc": "0", "locked": "0", "layoutInCell": "1",
+            "allowOverlap": "1",
+        }.items():
+            anchor.set(key, value)
+
+        simple = OxmlElement("wp:simplePos")
+        simple.set("x", "0")
+        simple.set("y", "0")
+
+        pos_h = OxmlElement("wp:positionH")
+        pos_h.set("relativeFrom", "page")
+        offset_h = OxmlElement("wp:posOffset")
+        offset_h.text = str(int(x_pt * 12700))
+        pos_h.append(offset_h)
+
+        pos_v = OxmlElement("wp:positionV")
+        pos_v.set("relativeFrom", "page")
+        offset_v = OxmlElement("wp:posOffset")
+        offset_v.text = str(int(y_pt * 12700))
+        pos_v.append(offset_v)
+
+        extent = inline.find(qn("wp:extent"))
+        doc_pr = inline.find(qn("wp:docPr"))
+        frame_pr = inline.find(qn("wp:cNvGraphicFramePr"))
+        graphic = inline.find(qn("a:graphic"))
+
+        effect = OxmlElement("wp:effectExtent")
+        for side in ("l", "t", "r", "b"):
+            effect.set(side, "0")
+        wrap = OxmlElement("wp:wrapNone")
+
+        for child in (simple, pos_h, pos_v, extent, effect, wrap, doc_pr, frame_pr, graphic):
+            if child is not None:
+                anchor.append(child)
+
+        inline.getparent().replace(inline, anchor)
+        return True
+    except Exception:
+        logger.exception("Referat DOCX fayliga QR kodni PDF bilan bir xil joylashtirishda xatolik")
+        return False
+
+
+
+def build_referat_docx(data: dict, meta: dict | None = None, qr_module=None,
+                       toc_pages: dict | None = None) -> bytes:
+    """PDF uslubiga mos DOCX; mundarija tayyor matn bo'lib, Word maydonlarini ishlatmaydi."""
     meta = meta or {}
+    toc_pages = toc_pages or {}
     doc = Document()
     section = doc.sections[0]
+    section.page_width = Cm(21)
+    section.page_height = Cm(29.7)
     section.top_margin = Cm(2.2)
     section.bottom_margin = Cm(2)
     section.left_margin = Cm(3)
-    section.right_margin = Cm(1.5)
+    section.right_margin = Cm(1.8)
     _add_page_border(section)
-    _set_update_fields(doc)
 
     normal = doc.styles["Normal"]
     normal.font.name = "Times New Roman"
-    normal.font.size = Pt(14)
+    normal.font.size = Pt(12)
     normal.font.color.rgb = RGBColor(0, 0, 0)
     normal.paragraph_format.line_spacing = 1.5
     normal.paragraph_format.first_line_indent = Cm(1.25)
     normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    for style_name in ("Heading 1", "Heading 2"):
-        style = doc.styles[style_name]
-        style.font.name = "Times New Roman"
-        style.font.color.rgb = RGBColor(0, 0, 0)
+    normal.paragraph_format.space_after = Pt(8)
 
-    # 1-sahifa: titul varag'i.
-    for _ in range(2):
-        doc.add_paragraph()
+    h1 = doc.styles["Heading 1"]
+    h1.font.name = "Times New Roman"
+    h1.font.size = Pt(14)
+    h1.font.bold = True
+    h1.font.color.rgb = RGBColor(0, 0, 0)
+    h1.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    h1.paragraph_format.first_line_indent = Cm(0)
+    h1.paragraph_format.line_spacing = Pt(19)
+    h1.paragraph_format.space_before = Pt(8)
+    h1.paragraph_format.space_after = Pt(12)
+    h1.paragraph_format.keep_with_next = True
+
+    h2 = doc.styles["Heading 2"]
+    h2.font.name = "Times New Roman"
+    h2.font.size = Pt(13)
+    h2.font.bold = True
+    h2.font.color.rgb = RGBColor(0, 0, 0)
+    h2.paragraph_format.first_line_indent = Cm(0)
+    h2.paragraph_format.line_spacing = Pt(18)
+    h2.paragraph_format.space_before = Pt(10)
+    h2.paragraph_format.space_after = Pt(6)
+    h2.paragraph_format.keep_with_next = False
+
+    # 1-sahifa: PDF bilan bir xil mazmundagi titul.
+    p = doc.add_paragraph()
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.line_spacing = Pt(57)
+    p.paragraph_format.space_after = Pt(0)
+
     for key in ("university", "faculty"):
         value = _clean(meta.get(key))
         if value:
-            p = doc.add_paragraph(style="Heading 2")
+            p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.first_line_indent = Cm(0)
+            p.paragraph_format.space_after = Pt(12)
             run = p.add_run(value.upper())
             run.bold = True
-    for _ in range(3):
-        doc.add_paragraph()
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(14)
+
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.first_line_indent = Cm(0)
-    r = p.add_run("REFERAT")
-    r.bold = True
-    r.font.size = Pt(20)
+    p.paragraph_format.line_spacing = Pt(65)
+    p.paragraph_format.space_after = Pt(0)
+
+    for label in ("REFERAT", _clean(data.get("title"))):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.first_line_indent = Cm(0)
+        p.paragraph_format.space_after = Pt(8)
+        run = p.add_run(label)
+        run.bold = True
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(18)
+
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.first_line_indent = Cm(0)
-    r = p.add_run(_clean(data.get("title")))
-    r.bold = True
-    r.font.size = Pt(16)
-    for _ in range(3):
-        doc.add_paragraph()
+    p.paragraph_format.line_spacing = Pt(62)
+    p.paragraph_format.space_after = Pt(0)
+
     for label, key in (("Bajardi:", "student_name"), ("Fakultet:", "faculty"),
                        ("Guruh:", "group"), ("Fan:", "subject"), ("Tekshirdi:", "reviewer")):
         value = _clean(meta.get(key))
@@ -160,60 +324,70 @@ def build_referat_docx(data: dict, meta: dict | None = None, qr_module=None) -> 
             p = doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             p.paragraph_format.first_line_indent = Cm(0)
+            p.paragraph_format.space_after = Pt(4)
             p.add_run(f"{label} {value}")
+
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.first_line_indent = Cm(0)
-    p.add_run("2026")
+    p.paragraph_format.space_before = Pt(34)
+    year_run = p.add_run("2026")
+    year_run.font.name = "Times New Roman"
+    year_run.font.size = Pt(14)
+    year_run.bold = True
 
-    # 2-sahifa: Word maydonli avtomatik mundarija.
+    # 2-sahifa: statik mundarija. TOC/FIELD/updateFields ishlatilmaydi.
     doc.add_page_break()
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.paragraph_format.first_line_indent = Cm(0)
-    r = p.add_run("MUNDARIJA")
-    r.bold = True
-    r.font.size = Pt(16)
-    p = doc.add_paragraph()
-    p.paragraph_format.first_line_indent = Cm(0)
-    _add_toc_field(p)
+    p.paragraph_format.space_after = Pt(18)
+    run = p.add_run("MUNDARIJA")
+    run.bold = True
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(16)
 
-    # Mundarijada ko'rinadigan bo'limlar Heading uslublari bilan belgilangan.
-    doc.add_page_break()
+    _add_static_toc_entry(doc, "KIRISH", toc_pages.get("KIRISH", 3))
+    for index, chapter in enumerate(data.get("chapters", []), 1):
+        chapter_label = _chapter_title(index, chapter.get("heading"))
+        _add_static_toc_entry(doc, chapter_label, toc_pages.get(chapter_label, "—"))
+        for sub in chapter.get("sections", []):
+            subheading = _clean(sub.get("heading"))
+            _add_static_toc_entry(doc, subheading, toc_pages.get(subheading, "—"), level=1)
+    _add_static_toc_entry(doc, "XULOSA", toc_pages.get("XULOSA", "—"))
+    _add_static_toc_entry(
+        doc, "FOYDALANILGAN ADABIYOTLAR",
+        toc_pages.get("FOYDALANILGAN ADABIYOTLAR", "—")
+    )
+
+    # 3-sahifadan boshlab asosiy matn.
     p = doc.add_paragraph("KIRISH", style="Heading 1")
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.page_break_before = True
+    p.paragraph_format.keep_with_next = True
     doc.add_paragraph(_clean(data.get("introduction")))
 
     for index, chapter in enumerate(data.get("chapters", []), 1):
-        doc.add_page_break()
-        p = doc.add_paragraph(f"{index}-BOB. {_clean(chapter.get('heading')).upper()}", style="Heading 1")
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.paragraph_format.first_line_indent = Cm(0)
+        p = doc.add_paragraph(_chapter_title(index, chapter.get("heading")), style="Heading 1")
+        p.paragraph_format.page_break_before = True
+        p.paragraph_format.keep_with_next = True
         for sub in chapter.get("sections", []):
             p = doc.add_paragraph(_clean(sub.get("heading")), style="Heading 2")
-            p.paragraph_format.first_line_indent = Cm(0)
+            p.paragraph_format.keep_with_next = True
             doc.add_paragraph(_clean(sub.get("body")))
 
-    doc.add_page_break()
     p = doc.add_paragraph("XULOSA", style="Heading 1")
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.page_break_before = True
     doc.add_paragraph(_clean(data.get("conclusion")))
 
-    doc.add_page_break()
     p = doc.add_paragraph("FOYDALANILGAN ADABIYOTLAR", style="Heading 1")
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.page_break_before = True
     for index, item in enumerate(data.get("references", []), 1):
         p = doc.add_paragraph(f"{index}. {_clean(item)}")
         p.paragraph_format.first_line_indent = Cm(0)
 
     if qr_module:
-        try:
-            qr_module.add_qr_to_docx(doc, feature="REFERAT")
-        except Exception:
-            logger.exception("Referat DOCX fayliga QR kod joylashda xatolik")
+        _add_fixed_qr_to_docx(doc, qr_module)
+
     output = io.BytesIO()
     doc.save(output)
     return output.getvalue()
@@ -293,7 +467,7 @@ def build_referat_pdf(data: dict, meta: dict | None = None, qr_module=None) -> b
     story += [PageBreak(), indexed("KIRISH", 0, heading),
               Paragraph(escape(_clean(data.get("introduction"))), body)]
     for index, chapter in enumerate(data.get("chapters", []), 1):
-        story += [PageBreak(), indexed(f"{index}-BOB. {_clean(chapter.get('heading')).upper()}", 0, heading)]
+        story += [PageBreak(), indexed(_chapter_title(index, chapter.get("heading")), 0, heading)]
         for sub in chapter.get("sections", []):
             story.append(indexed(_clean(sub.get("heading")), 1, subheading))
             story.append(Paragraph(escape(_clean(sub.get("body"))), body))
