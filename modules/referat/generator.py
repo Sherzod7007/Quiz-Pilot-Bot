@@ -75,14 +75,14 @@ TALABLAR:
 
 FOYDALANUVCHI MA'LUMOTLARI:
 Mavzu: {topic or 'Yuklangan manba asosida'}
-Talaba: {student_name or 'Ko‘rsatilmagan'}
-Universitet: {university or 'Ko‘rsatilmagan'}
-Fakultet: {faculty or 'Ko‘rsatilmagan'}
-Guruh: {group or 'Ko‘rsatilmagan'}
-Fan: {subject or 'Ko‘rsatilmagan'}
-Tekshiruvchi: {reviewer or 'Ko‘rsatilmagan'}
+Talaba: {student_name or 'Koâ€˜rsatilmagan'}
+Universitet: {university or 'Koâ€˜rsatilmagan'}
+Fakultet: {faculty or 'Koâ€˜rsatilmagan'}
+Guruh: {group or 'Koâ€˜rsatilmagan'}
+Fan: {subject or 'Koâ€˜rsatilmagan'}
+Tekshiruvchi: {reviewer or 'Koâ€˜rsatilmagan'}
 
-MANBA BOR: {'HA' if has_source else 'YO‘Q'}
+MANBA BOR: {'HA' if has_source else 'YOâ€˜Q'}
 MANBA MATNI:
 {source_text if has_source else 'Foydalanuvchi mavzusi asosida umumiy akademik bilimlardan foydalaning. Tekshirilmagan fakt yoki soxta manbalarni kiritmang.'}
 """
