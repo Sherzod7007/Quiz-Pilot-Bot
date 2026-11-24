@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -30,8 +31,7 @@ def extract_source_text(raw: bytes, filename: str, max_pages: int = 150,
             reader = PdfReader(io.BytesIO(raw))
             if len(reader.pages) > max_pages:
                 raise ReferatError(f"PDF sahifalari soni {max_pages} ta limitdan oshdi.")
-            chunks = [(page.extract_text() or "") for page in reader.pages]
-            text = "\n\n".join(chunks)
+            text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
         else:
             doc = Document(io.BytesIO(raw))
             chunks = [p.text for p in doc.paragraphs if p.text.strip()]
@@ -54,24 +54,30 @@ def extract_source_text(raw: bytes, filename: str, max_pages: int = 150,
 
 def build_referat_prompt(*, topic: str, source_text: str, student_name: str,
                          university: str, faculty: str, group: str, subject: str,
-                         reviewer: str) -> str:
-    """Manba va titul ma'lumotlariga mos, o'zbekcha akademik prompt."""
+                         reviewer: str, validation_feedback: str = "") -> str:
+    """Mavzuga mos, batafsil va manbalarni to'qimaslikka yo'naltirilgan prompt."""
     has_source = bool(source_text.strip())
     return f"""Siz oliy ta'lim uchun akademik referat yozuvchi mutaxassissiz.
 Foydalanuvchiga topshirishga yaroqli, izchil, ilmiy-uslubiy referat tayyorlang.
-Javobni faqat quyidagi JSON tuzilmasida qaytaring:
+Javobni faqat quyidagi JSON sxemasida qaytaring:
 {{"title":"...","language":"uz|ru|en","abstract":"...","keywords":["..."],"introduction":"...","chapters":[{{"heading":"...","sections":[{{"heading":"...","body":"..."}}]}}],"conclusion":"...","references":["..."]}}
 
-TALABLAR:
-- Matn tilini mavzu va manba tiliga moslang; foydalanuvchi mavzuni o'zbekcha bergan bo'lsa o'zbekcha yozing.
-- Akademik, ravon, mazmunli va takrorlarsiz yozing. Kirish, kamida 3 ta mazmunli bob, xulosa va foydalanilgan adabiyotlar bo'lsin.
-- Kirishda mavzuning dolzarbligi, maqsad, vazifalar va o'rganish obyekti qisqacha yoritilsin.
-- Har bir bobda kamida 2 ta kichik bo'lim bo'lsin. Bo'limlar mazmunan yetarli darajada batafsil bo'lsin.
-- Xulosada boblarni takrorlamasdan asosiy natijalar va amaliy takliflarni jamlang.
-- Manbada yo'q aniq statistik raqamlar, tajriba natijalari, qonun nomlari yoki bibliografik ma'lumotlarni to'qimang.
-- Manba berilgan bo'lsa, faktlar va mazmunni avvalo shu manbaga tayangan holda yozing. Manbada yo'q ma'lumotni manbadan olingandek ko'rsatmang.
-- Adabiyotlar ro'yxatida manbada aniq ko'rsatilgan bibliografik ma'lumotlarni saqlang. Yetarli ma'lumot bo'lmasa, mavjud manbani umumiy nomi bilan belgilang; soxta muallif/nashr/yil yaratmang.
-- Javobda Markdown yoki kod bloklari ishlatmang; JSON qiymatlari oddiy matn bo'lsin.
+MAZMUN VA TUZILMA TALABLARI:
+- Kirish, kamida 3 ta bob, har bir bobda kamida 2 ta kichik bo'lim, xulosa va foydalanilgan adabiyotlar bo'lsin.
+- Har bir bob mavzuning alohida jihatini ochsin; boblar va bo'limlar bir-birini takrorlamasin.
+- Har bir kichik bo'limni mazmunan keng yorit: ta'rif, izoh, sabab-oqibat, amaliy qo'llanish va mavzuga mos misollarni keltir. Har bir bo'lim odatda kamida 250-350 so'z bo'lsin; mazmunni sun'iy takror bilan cho'zma.
+- Kirishda dolzarblik, maqsad, vazifalar, obyekt va predmetni izchil yorit.
+- Xulosada boblarni ko'chirmasdan, asosiy natijalar va amaliy takliflarni jamla.
+- Tilni mavzu va manbaga mos tanla. O'zbekcha mavzu bo'lsa o'zbekcha yoz.
+- JSON kalitlari to'liq bo'lsin; chapters ichidagi har bir bo'limda heading va mazmunli body bo'lishi shart.
+- Markdown, izoh, kod bloki yoki JSON tashqarisida matn qaytarma.
+
+MANBALAR VA ADABIYOTLAR HALOLligi:
+- Manba berilgan bo'lsa, faktlarni avvalo shu manbaga tayantir; manbada yo'q ma'lumotni undan olingandek ko'rsatma.
+- Faqat bibliografik ma'lumoti ishonchli ma'lum bo'lgan asarlarni references ro'yxatiga kirit. Muallif, nom, nashriyot, yil, DOI yoki URLni taxmin qilib to'qima.
+- Manba matnida bibliografiya bo'lsa, undagi yozuvlarni saqla. To'liq bo'lmagan yozuvni bor ma'lumot doirasida ber.
+- Mavzu bo'yicha ishonchli manbani aniq identifikatsiya qila olmasang, soxta bibliografiya yaratish o'rniga references ichida "Foydalanuvchi taqdim etgan mavzu bo'yicha umumiy bilimlar; aniq bibliografik manbalar qo'shimcha tekshiruvni talab qiladi" deb yoz.
+- Statistik raqamlar, qonunlar, tajriba natijalari va iqtiboslarni manbasiz uydirma.
 
 FOYDALANUVCHI MA'LUMOTLARI:
 Mavzu: {topic or 'Yuklangan manba asosida'}
@@ -81,53 +87,113 @@ Fakultet: {faculty or 'Ko‘rsatilmagan'}
 Guruh: {group or 'Ko‘rsatilmagan'}
 Fan: {subject or 'Ko‘rsatilmagan'}
 Tekshiruvchi: {reviewer or 'Ko‘rsatilmagan'}
-
 MANBA BOR: {'HA' if has_source else 'YO‘Q'}
 MANBA MATNI:
 {source_text if has_source else 'Foydalanuvchi mavzusi asosida umumiy akademik bilimlardan foydalaning. Tekshirilmagan fakt yoki soxta manbalarni kiritmang.'}
+QAYTA TUZATISH TALABI:
+{validation_feedback or 'Birinchi urinish: barcha talablarni to‘liq bajaring.'}
 """
+
+
+def _validate_referat(data: Any) -> list[str]:
+    errors = []
+    if not isinstance(data, dict):
+        return ["Javob JSON obyekt emas."]
+    for key in ("title", "introduction", "chapters", "conclusion", "references"):
+        if key not in data:
+            errors.append(f"{key} kaliti yo'q.")
+    if not isinstance(data.get("title"), str) or len(data.get("title", "").strip()) < 4:
+        errors.append("title matni bo'sh yoki juda qisqa.")
+    if not isinstance(data.get("introduction"), str) or len(data.get("introduction", "").strip()) < 250:
+        errors.append("Kirish kamida 250 belgidan iborat bo'lishi kerak.")
+    chapters = data.get("chapters")
+    if not isinstance(chapters, list) or len(chapters) < 3:
+        errors.append("Kamida 3 ta bob bo'lishi shart.")
+    else:
+        for ci, chapter in enumerate(chapters, 1):
+            if not isinstance(chapter, dict) or not isinstance(chapter.get("heading"), str) or not chapter["heading"].strip():
+                errors.append(f"{ci}-bob sarlavhasi noto'g'ri.")
+                continue
+            sections = chapter.get("sections")
+            if not isinstance(sections, list) or len(sections) < 2:
+                errors.append(f"{ci}-bobda kamida 2 ta kichik bo'lim bo'lishi kerak.")
+                continue
+            for si, section in enumerate(sections, 1):
+                if not isinstance(section, dict):
+                    errors.append(f"{ci}-bob, {si}-bo'lim tuzilmasi noto'g'ri.")
+                    continue
+                if not isinstance(section.get("heading"), str) or not section["heading"].strip():
+                    errors.append(f"{ci}-bob, {si}-bo'lim sarlavhasi yo'q.")
+                if not isinstance(section.get("body"), str) or len(section.get("body", "").strip()) < 500:
+                    errors.append(f"{ci}-bob, {si}-bo'lim matni yetarlicha batafsil emas (kamida 500 belgi).")
+    if not isinstance(data.get("conclusion"), str) or len(data.get("conclusion", "").strip()) < 200:
+        errors.append("Xulosa kamida 200 belgidan iborat bo'lishi kerak.")
+    refs = data.get("references")
+    if not isinstance(refs, list) or not refs or any(not isinstance(x, str) or not x.strip() for x in refs):
+        errors.append("Foydalanilgan adabiyotlar ro'yxati bo'sh yoki noto'g'ri.")
+    if "abstract" in data and not isinstance(data["abstract"], str):
+        errors.append("abstract matn bo'lishi kerak.")
+    if "keywords" in data and not isinstance(data["keywords"], list):
+        errors.append("keywords ro'yxat bo'lishi kerak.")
+    return errors
 
 
 def generate_referat_content(*, client: Any, model: str, topic: str,
                              source_text: str = "", student_name: str = "",
                              university: str = "", faculty: str = "", group: str = "",
                              subject: str = "", reviewer: str = "",
-                             max_output_tokens: int = 16000) -> dict:
-    """Gemini JSON javobini oladi va asosiy bo'limlarni tekshiradi."""
+                             max_output_tokens: int = 16000,
+                             max_attempts: int = 3) -> dict:
+    """Gemini javobini sxema va mazmun bo'yicha tekshiradi, xato bo'lsa qayta yaratadi."""
     if not topic.strip() and not source_text.strip():
         raise ReferatError("Referat yaratish uchun mavzu kiriting yoki PDF/DOCX yuklang.")
-    prompt = build_referat_prompt(
-        topic=topic.strip(), source_text=source_text,
-        student_name=student_name, university=university, faculty=faculty,
-        group=group, subject=subject, reviewer=reviewer,
-    )
     from google.genai import types
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.35,
-            max_output_tokens=max_output_tokens,
-        ),
+
+    feedback = ""
+    last_errors = []
+    attempts = max(1, min(int(max_attempts), 3))
+    for attempt in range(1, attempts + 1):
+        prompt = build_referat_prompt(
+            topic=topic.strip(), source_text=source_text,
+            student_name=student_name, university=university, faculty=faculty,
+            group=group, subject=subject, reviewer=reviewer,
+            validation_feedback=feedback,
+        )
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.3,
+                    max_output_tokens=max_output_tokens,
+                ),
+            )
+            if not response or not response.text:
+                raise ValueError("AI bo'sh javob qaytardi.")
+            raw = response.text.strip()
+            if raw.startswith("```"):
+                raw = raw.strip("`")
+                if raw.lower().startswith("json"):
+                    raw = raw[4:].strip()
+            data = json.loads(raw)
+            errors = _validate_referat(data)
+            if not errors:
+                data["title"] = data["title"].strip()[:240]
+                data["language"] = data.get("language") if data.get("language") in {"uz", "ru", "en"} else "uz"
+                data["abstract"] = str(data.get("abstract") or "").strip()
+                data["keywords"] = [str(x).strip() for x in data.get("keywords", []) if str(x).strip()]
+                data["references"] = [x.strip() for x in data["references"]]
+                logger.info("Referat AI javobi tekshiruvdan o'tdi | urinish=%s | boblar=%s", attempt, len(data["chapters"]))
+                return data
+            last_errors = errors
+            feedback = "Oldingi javob quyidagi tekshiruvlardan o'tmadi. To'liq qayta yozib, barchasini tuzating:\n- " + "\n- ".join(errors)
+            logger.warning("Referat tuzilmasi tekshiruvdan o'tmadi | urinish=%s | xatolar=%s", attempt, len(errors))
+        except Exception as exc:
+            last_errors = [str(exc)[:300]]
+            feedback = "Oldingi javob yaroqli JSON bo'lmadi. Faqat to'g'ri JSON obyekt qaytaring va barcha talablarni bajaring."
+            logger.warning("Referat AI javobini qayta ishlashda xatolik | urinish=%s | sabab=%s", attempt, type(exc).__name__)
+    raise ReferatError(
+        "AI referatni talab qilingan tuzilma va hajmda tayyorlay olmadi. "
+        "Iltimos, qayta urinib ko'ring. " + " ".join(last_errors[:3])
     )
-    if not response or not response.text:
-        raise ReferatError("AI bo'sh javob qaytardi. Iltimos, qayta urinib ko'ring.")
-    import json
-    try:
-        data = json.loads(response.text)
-    except Exception as exc:
-        logger.warning("Referat AI javobi JSON formatida emas")
-        raise ReferatError("AI javobini hujjatga aylantirib bo'lmadi. Qayta urinib ko'ring.") from exc
-    required = ("title", "introduction", "chapters", "conclusion", "references")
-    missing = [key for key in required if key not in data]
-    if missing or not isinstance(data.get("chapters"), list) or len(data["chapters"]) < 2:
-        raise ReferatError("AI referatning barcha zarur bo'limlarini tayyorlay olmadi. Qayta urinib ko'ring.")
-    for chapter in data["chapters"]:
-        if not isinstance(chapter, dict) or not chapter.get("heading") or not chapter.get("sections"):
-            raise ReferatError("Referat boblari tuzilmasi to'liq emas. Qayta urinib ko'ring.")
-    data["title"] = str(data["title"]).strip()[:240]
-    data["language"] = data.get("language") if data.get("language") in {"uz", "ru", "en"} else "uz"
-    data["keywords"] = data.get("keywords") if isinstance(data.get("keywords"), list) else []
-    data["references"] = data.get("references") if isinstance(data.get("references"), list) else []
-    return data
