@@ -4696,6 +4696,10 @@ def api_generate_referat(request: Request, user_id: int = Form(...), topic: str 
                 client=genai.Client(api_key=GOOGLE_API_KEYS[key_index],http_options=genai_types.HttpOptions(timeout=AI_REQUEST_TIMEOUT*1000))
                 content=generate_referat_content(client=client,model=REFERAT_AI_MODEL,topic=topic,source_text=source_text,**fields,max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS)
                 break
+            except ReferatError:
+                # JSON/tuzilma validatsiyasi generator ichida qayta urinib ko'rildi;
+                # bunday xatoda boshqa API kalitlarini behuda aylantirmaymiz.
+                raise
             except Exception as exc:
                 last_error=exc; logging.warning("Referat AI urinish muvaffaqiyatsiz | foydalanuvchi=%s | ish=%s | kalit_tartib=%s | sabab=%s",user_id,job_id,key_index+1,_safe_ai_error_text(exc))
         if content is None: raise RuntimeError(_safe_ai_error_text(last_error or "AI javob bermadi"))
