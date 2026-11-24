@@ -263,14 +263,12 @@ logging.info(
 #   AI_RETRY_PER_KEY=2
 #   AI_REQUEST_TIMEOUT=600
 #   AI_TOTAL_TIMEOUT=1800
-#   AI_QUEUE_WAIT_TIMEOUT=120
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
 GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 AI_MAX_CONCURRENT = max(1, int(os.getenv("AI_MAX_CONCURRENT", "10")))
 AI_MAX_QUEUE = max(AI_MAX_CONCURRENT, int(os.getenv("AI_MAX_QUEUE", "500")))
 AI_REQUEST_TIMEOUT = max(60, int(os.getenv("AI_REQUEST_TIMEOUT", "600")))
 AI_TOTAL_TIMEOUT = max(AI_REQUEST_TIMEOUT, int(os.getenv("AI_TOTAL_TIMEOUT", "1800")))
-AI_QUEUE_WAIT_TIMEOUT = max(5, min(600, int(os.getenv("AI_QUEUE_WAIT_TIMEOUT", "120"))))
 AI_RETRY_PER_KEY = max(1, min(3, int(os.getenv("AI_RETRY_PER_KEY", "2"))))
 
 # Katta testlar uchun chiqish tokenlari limitini Railway Variables orqali boshqarish.
@@ -322,26 +320,12 @@ _ai_monitor_state = {
     "key_attempts": {},
     "key_success": {},
     "key_failures": {},
-    "feature_requests": {},
-    "feature_success": {},
-    "feature_failures": {},
     "last_errors": [],
 }
 logging.info(
     "AI boshqaruvchisi ishga tushdi | asosiy_model=%s | zaxira_model=%s | bir_vaqtdagi_so'rovlar=%s | navbat_limit=%s | izohlar_yaratiladi=%s | bitta_so'rov_vaqti_limit=%ss | umumiy_vaqt_limit=%ss",
     GEMINI_MODEL, GEMINI_FALLBACK_MODEL, AI_MAX_CONCURRENT, AI_MAX_QUEUE,
     GEMINI_INCLUDE_EXPLANATIONS, AI_REQUEST_TIMEOUT, AI_TOTAL_TIMEOUT
-)
-logging.info(
-    "AI navbatini kutish chegarasi | maksimal_kutish=%s soniya",
-    AI_QUEUE_WAIT_TIMEOUT,
-)
-logging.info(
-    "AI generatorlari yagona boshqaruvchiga ulangan | test=%s/%s | slayd=%s/%s | referat=%s/%s | konspekt=%s/%s",
-    GEMINI_MODEL, GEMINI_FALLBACK_MODEL,
-    os.getenv("SLIDE_AI_MODEL", GEMINI_MODEL), os.getenv("SLIDE_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
-    os.getenv("REFERAT_AI_MODEL", GEMINI_MODEL), os.getenv("REFERAT_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
-    os.getenv("SUMMARY_AI_MODEL", GEMINI_MODEL), os.getenv("SUMMARY_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
 )
 logging.info(
     "IZOH SOZLAMASI | Gemini izoh yaratishi: %s",
@@ -434,51 +418,31 @@ SLIDE_TARIFF_CREDITS = {
     "monthly": _env_positive_int("SLIDE_TARIFF_CREDITS_MONTHLY", 0, minimum=0),
     "teachers": _env_positive_int("SLIDE_TARIFF_CREDITS_TEACHERS", 0, minimum=0),
 }
+# Referat limitlari — barcha qiymatlar Railway Variables orqali boshqariladi.
+REFERAT_ENABLED = os.getenv("REFERAT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+try:
+    _referat_free_raw = int(os.getenv("FREE_REFERAT_LIMIT", "1").strip())
+    REFERAT_FREE_LIMIT = _referat_free_raw if (_referat_free_raw == -1 or _referat_free_raw >= 1) else 1
+except (TypeError, ValueError):
+    REFERAT_FREE_LIMIT = 1
+REFERAT_FREE_PERIOD_DAYS = _env_positive_int("FREE_REFERAT_PERIOD_DAYS", 30)
+REFERAT_TARIFF_LIMITS = {
+    "daily": _env_positive_int("DAILY_REFERAT_LIMIT", 1, minimum=0),
+    "weekly": _env_positive_int("WEEKLY_REFERAT_LIMIT", 2, minimum=0),
+    "monthly": _env_positive_int("MONTHLY_REFERAT_LIMIT", 5, minimum=0),
+    "teachers": _env_positive_int("TEACHER_REFERAT_LIMIT", 7, minimum=0),
+}
+REFERAT_MAX_FILE_MB = max(1, min(30, int(os.getenv("REFERAT_MAX_FILE_MB", "10"))))
+REFERAT_MAX_PDF_PAGES = max(1, min(500, int(os.getenv("REFERAT_MAX_PDF_PAGES", "150"))))
+REFERAT_MAX_SOURCE_CHARS = max(1000, min(200000, int(os.getenv("REFERAT_MAX_SOURCE_CHARS", "80000"))))
+REFERAT_MAX_TOPIC_CHARS = max(20, min(5000, int(os.getenv("REFERAT_MAX_TOPIC_CHARS", "1000"))))
+REFERAT_AI_MODEL = os.getenv("REFERAT_AI_MODEL", GEMINI_FALLBACK_MODEL).strip() or GEMINI_FALLBACK_MODEL
+REFERAT_MAX_OUTPUT_TOKENS = max(2048, min(32000, int(os.getenv("REFERAT_MAX_OUTPUT_TOKENS", "16000"))))
+logging.info("Referat sozlamalari Railway'dan yuklandi | faol=%s | bepul=%s/%s kun | tariflar=%s | fayl_limit=%s MB | AI_model=%s", REFERAT_ENABLED, REFERAT_FREE_LIMIT, REFERAT_FREE_PERIOD_DAYS, REFERAT_TARIFF_LIMITS, REFERAT_MAX_FILE_MB, REFERAT_AI_MODEL)
+
 logging.info("Taqdimot tarif kreditlari Railway'dan yuklandi | kunlik=%s | haftalik=%s | oylik=%s | o'qituvchilar=%s",
              SLIDE_TARIFF_CREDITS["daily"], SLIDE_TARIFF_CREDITS["weekly"],
              SLIDE_TARIFF_CREDITS["monthly"], SLIDE_TARIFF_CREDITS["teachers"])
-
-# Konspekt limitlari: tarif muddati davomida umumiy son; 0 = o'chirilgan, -1 = cheksiz.
-def _env_summary_limit(name, default=0):
-    try:
-        value = int(os.getenv(name, str(default)).strip())
-        return value if value >= -1 else default
-    except (TypeError, ValueError, AttributeError):
-        logging.warning("Konspekt limiti noto'g'ri; standart qiymat ishlatiladi | o'zgaruvchi=%s", name)
-        return default
-
-SUMMARY_ENABLED = os.getenv("SUMMARY_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
-SUMMARY_FREE_LIMIT = _env_summary_limit("SUMMARY_FREE_LIMIT", 0)
-SUMMARY_TARIFF_LIMITS = {
-    "daily": _env_summary_limit("SUMMARY_DAILY_LIMIT", 0),
-    "weekly": _env_summary_limit("SUMMARY_WEEKLY_LIMIT", 0),
-    "monthly": _env_summary_limit("SUMMARY_MONTHLY_LIMIT", 0),
-    "teachers": _env_summary_limit("SUMMARY_TEACHER_LIMIT", 0),
-}
-SUMMARY_MAX_FILE_MB = max(1, min(30, _env_positive_int("SUMMARY_MAX_FILE_MB", 10)))
-SUMMARY_MAX_SOURCE_CHARS = max(1000, min(200000, _env_positive_int("SUMMARY_MAX_SOURCE_CHARS", 80000)))
-SUMMARY_MAX_TOPIC_CHARS = max(20, min(5000, _env_positive_int("SUMMARY_MAX_TOPIC_CHARS", 1500)))
-logging.info("Konspekt limitlari Railway'dan yuklandi | free=%s | daily=%s | weekly=%s | monthly=%s | teachers=%s",
-             SUMMARY_FREE_LIMIT, SUMMARY_TARIFF_LIMITS["daily"], SUMMARY_TARIFF_LIMITS["weekly"],
-             SUMMARY_TARIFF_LIMITS["monthly"], SUMMARY_TARIFF_LIMITS["teachers"])
-
-# Referat yaratish limitlari konspekt tizimidan mustaqil boshqariladi.
-# 0 = o'chirilgan, -1 = cheksiz; barcha qiymatlar Railway Variables'dan olinadi.
-REFERAT_ENABLED = os.getenv("REFERAT_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
-REFERAT_FREE_LIMIT = _env_summary_limit("REFERAT_FREE_LIMIT", 1)
-REFERAT_TARIFF_LIMITS = {
-    "daily": _env_summary_limit("REFERAT_DAILY_LIMIT", 1),
-    "weekly": _env_summary_limit("REFERAT_WEEKLY_LIMIT", 2),
-    "monthly": _env_summary_limit("REFERAT_MONTHLY_LIMIT", 5),
-    "teachers": _env_summary_limit("REFERAT_TEACHER_LIMIT", 7),
-}
-REFERAT_MAX_FILE_MB = max(1, min(30, _env_positive_int("REFERAT_MAX_FILE_MB", SUMMARY_MAX_FILE_MB)))
-REFERAT_MAX_SOURCE_CHARS = max(1000, min(200000, _env_positive_int("REFERAT_MAX_SOURCE_CHARS", SUMMARY_MAX_SOURCE_CHARS)))
-REFERAT_MAX_TOPIC_CHARS = max(20, min(5000, _env_positive_int("REFERAT_MAX_TOPIC_CHARS", 1500)))
-REFERAT_MAX_OUTPUT_TOKENS = max(6000, min(30000, _env_positive_int("REFERAT_MAX_OUTPUT_TOKENS", 24000)))
-logging.info("Referat limitlari Railway'dan yuklandi | enabled=%s | free=%s | daily=%s | weekly=%s | monthly=%s | teachers=%s",
-             REFERAT_ENABLED, REFERAT_FREE_LIMIT, REFERAT_TARIFF_LIMITS["daily"],
-             REFERAT_TARIFF_LIMITS["weekly"], REFERAT_TARIFF_LIMITS["monthly"], REFERAT_TARIFF_LIMITS["teachers"])
 
 # Bepul limitlar: musbat son = limit, -1 = cheksiz. 0 va boshqa manfiy qiymatlar yaroqsiz.
 def _env_free_limit(name, default=3):
@@ -551,9 +515,9 @@ MESSAGES = {
     "uz": {
         "welcome": (
             "👋 *Salom, {name}!*\n"
-            "🎓 *Quiz AI* — Sunʼiy intellekt yordamida test, slayd, konspekt va referat yaratuvchi ilova.\n\n"
+            "🎓 *Quiz AI* — Sunʼiy intellekt yordamida test va slaydlar yaratuvchi ilova.\n\n"
             "✨ *Ilova imkoniyatlari:*\n"
-            "🤖 SI yordamida matn, PDF yoki DOCX dan test, slayd, konspekt va referatlar yaratish.\n"
+            "🤖 SI yordamida matn, PDF yoki DOCX dan test va slaydlar yaratish.\n"
             "📚 Testlarni Kutubxona bo'limida saqlash va ishlash.\n"
             "🌐 Ommaviy testlardan foydalanish.\n"
             "🗂 Flash Kartochkalar orqali takrorlash.\n"
@@ -562,7 +526,7 @@ MESSAGES = {
             "📊 Natijalarni qulay ko'rish va tahlil qilish.\n"
             "🔊 Ovoz va vibratsiya sozlamalari.\n"
             "🌍 O'zbek, Русский va English tillari.\n"
-            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}, Konspekt — {summary_limit}, Referat — {referat_limit}.\n"
+            "🆓 *Bepul (har 30 kunda):* AI test — {quiz_limit}, ommaviy test — {public_limit}, Flash Kartochka — {flashcard_limit}, Referat — {referat_limit}.\n"
             "👑 *Premium:* limitlarsiz foydalanish imkoniyati.\n\n"
             "📌 *Eslatma:* Premium bo'limida «Tariflarni faollashtirish» tugmasi bosilganda yangi oyna ochiladi. Shu oynadagi «Chekni yuborish» tugmasini bosing — bu sizni botga qaytaradi. Soʻng toʻlov chekini rasm yoki skrinshot shaklida yuboring.\n\n"
             "💬 *Bizning rasmiy guruhimiz:* [Quiz AI Rasmiy Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -601,9 +565,9 @@ MESSAGES = {
     "ru": {
         "welcome": (
             "👋 *Привет, {name}!*\n"
-            "🎓 *Quiz AI* — Приложение для создания тестов, слайдов, конспектов и рефератов с помощью ИИ.\n\n"
+            "🎓 *Quiz AI* — Приложение, которое создает тесты и слайды с использованием искусственного интеллекта.\n\n"
             "✨ *Возможности приложения:*\n"
-            "🤖 Создавайте тесты, слайды, конспекты и рефераты из текста, PDF или DOCX с помощью ИИ.\n"
+            "🤖 Создавайте тесты и слайды из текста, PDF или DOCX с помощью ИИ.\n"
             "📚 Сохранение и прохождение тестов в разделе «Библиотека».\n"
             "🌐 Публичные тесты.\n"
             "🗂 Флеш-карточки для повторения материала.\n"
@@ -612,7 +576,7 @@ MESSAGES = {
             "📊 Удобный просмотр и анализ результатов.\n"
             "🔊 Настройки звука и вибрации.\n"
             "🌍 Узбекский, русский и английский языки.\n"
-            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}, конспекты — {summary_limit}, рефераты — {referat_limit}.\n"
+            "🆓 *Бесплатно (каждые 30 дней):* AI-тесты — {quiz_limit}, публичные тесты — {public_limit}, флеш-карточки — {flashcard_limit}, рефераты — {referat_limit}.\n"
             "👑 *Premium:* использование без лимитов.\n\n"
             "📌 *Примечание:* В разделе Премиум при нажатии на кнопку «Активировать тарифы» откроется новое окно. Нажмите в этом окне кнопку «Отправить чек» — это вернёт вас в бот. Затем отправьте чек об оплате в виде фото или скриншота.\n\n"
             "💬 *Наша официальная группа:* [Quiz AI Официальный Чат](https://t.me/Quiz_AI_Chat)\n\n"
@@ -650,9 +614,9 @@ MESSAGES = {
     "en": {
         "welcome": (
             "👋 *Hello, {name}!*\n"
-            "🎓 *Quiz AI* — An app for creating quizzes, slides, study notes and reports with AI.\n\n"
+            "🎓 *Quiz AI* — An app that creates tests and slides using artificial intelligence.\n\n"
             "✨ *App features:*\n"
-            "🤖 Create quizzes, slides, study notes and reports from text, PDF or DOCX using AI.\n"
+            "🤖 Create tests and slides from text, PDF or DOCX using AI.\n"
             "📚 Save and take quizzes in the Library.\n"
             "🌐 Public quizzes.\n"
             "🗂 Flashcards for revision.\n"
@@ -661,7 +625,7 @@ MESSAGES = {
             "📊 Easy results viewing and analysis.\n"
             "🔊 Sound and vibration settings.\n"
             "🌍 Uzbek, Russian and English languages.\n"
-            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}, notes — {summary_limit}, reports — {referat_limit}.\n"
+            "🆓 *Free (every 30 days):* AI quizzes — {quiz_limit}, public quizzes — {public_limit}, flashcards — {flashcard_limit}, reports — {referat_limit}.\n"
             "👑 *Premium:* unlimited usage.\n\n"
             "📌 *Note:* In the Premium section, when you click on the «Activate tariffs» button, a new window opens. Click the «Send receipt» button in this window — this will return you to the bot. Then send the payment receipt in the form of a photo or screenshot.\n\n"
             "💬 *Our official group:* [Quiz AI Official Chat](https://t.me/Quiz_AI_Chat)\n\n"
@@ -761,30 +725,6 @@ def init_db():
         paid_limit_notice_until INTEGER DEFAULT 0,
         premium_source TEXT DEFAULT 'paid')""")
 
-    cursor.execute("""CREATE TABLE IF NOT EXISTS summary_usage (
-        user_id INTEGER PRIMARY KEY,
-        period_key TEXT NOT NULL DEFAULT '',
-        used INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL DEFAULT 0)""")
-
-    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_usage (
-        user_id INTEGER PRIMARY KEY,
-        period_key TEXT NOT NULL DEFAULT '',
-        used INTEGER NOT NULL DEFAULT 0,
-        updated_at INTEGER NOT NULL DEFAULT 0)""")
-
-    # Admin konspekt bonuslari tarif va bepul limitdan mustaqil saqlanadi.
-    cursor.execute("""CREATE TABLE IF NOT EXISTS summary_bonus_wallets (
-        user_id INTEGER PRIMARY KEY,
-        balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
-        updated_at INTEGER NOT NULL DEFAULT 0)""")
-
-    # Admin referat bonuslari tarif va bepul limitdan mustaqil saqlanadi.
-    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_bonus_wallets (
-        user_id INTEGER PRIMARY KEY,
-        balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
-        updated_at INTEGER NOT NULL DEFAULT 0)""")
-
     cursor.execute("PRAGMA table_info(users);")
     columns = [col[1] for col in cursor.fetchall()]
 
@@ -851,6 +791,22 @@ def init_db():
     cursor.execute("UPDATE users SET premium_until = 0 WHERE premium_until IS NULL;")
     cursor.execute("UPDATE users SET plan_key = '' WHERE plan_key IS NULL;")
 
+    # Referat limitlari, bonuslar va ishlar tarixi — mavjud users/billing jadvallaridan alohida.
+    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_usage (
+        user_id INTEGER NOT NULL, cycle_key TEXT NOT NULL, used_count INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, cycle_key))""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_bonus_wallets (
+        user_id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0 CHECK(balance >= 0),
+        updated_at INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_bonus_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL, reference TEXT NOT NULL UNIQUE, description TEXT DEFAULT '',
+        admin_id INTEGER DEFAULT 0, created_at INTEGER NOT NULL)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS referat_jobs (
+        job_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, cycle_key TEXT NOT NULL,
+        quota_source TEXT NOT NULL, status TEXT NOT NULL, title TEXT DEFAULT '',
+        created_at INTEGER NOT NULL, completed_at INTEGER DEFAULT 0)""")
+
     cursor.execute("""CREATE TABLE IF NOT EXISTS flashcards (
         id TEXT PRIMARY KEY,
         user_id INTEGER,
@@ -880,25 +836,16 @@ def init_db():
         created_at INTEGER NOT NULL)""")
     # Kredit manbalarini ajratish: eski umumiy balans xarid qilingan kredit sifatida saqlanadi.
     wallet_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_wallets)").fetchall()}
-    _admin_bonus_column_added = "admin_bonus_balance" not in wallet_columns
-    for column in ("tariff_balance", "purchased_balance", "admin_bonus_balance"):
+    for column in ("tariff_balance", "purchased_balance"):
         if column not in wallet_columns:
             cursor.execute(f"ALTER TABLE credit_wallets ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
     cursor.execute("UPDATE credit_wallets SET purchased_balance=balance WHERE purchased_balance=0 AND tariff_balance=0 AND balance>0")
     transaction_columns = {row[1] for row in cursor.execute("PRAGMA table_info(credit_transactions)").fetchall()}
-    for column in ("tariff_amount", "purchased_amount", "admin_bonus_amount"):
+    for column in ("tariff_amount", "purchased_amount"):
         if column not in transaction_columns:
             cursor.execute(f"ALTER TABLE credit_transactions ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
     # Tarixiy yozuvlar eski balansdan kelgani uchun ularning manbasi xarid qilingan kredit deb belgilanadi.
     cursor.execute("UPDATE credit_transactions SET purchased_amount=amount WHERE purchased_amount=0 AND tariff_amount=0 AND amount>0")
-    if _admin_bonus_column_added:
-        # Eski admin bonus qoldig'ini ehtiyotkor tiklaymiz: oldingi xarajatlar avval bonusdan yechilgan deb olinadi.
-        legacy_admin_bonus = cursor.execute("SELECT user_id, SUM(amount) FROM credit_transactions WHERE transaction_type='admin_bonus' AND amount>0 GROUP BY user_id").fetchall()
-        for _bonus_user_id, _bonus_granted in legacy_admin_bonus:
-            _wallet = cursor.execute("SELECT purchased_balance FROM credit_wallets WHERE user_id=?", (_bonus_user_id,)).fetchone()
-            _spent = cursor.execute("SELECT COALESCE(SUM(-purchased_amount),0) FROM credit_transactions WHERE user_id=? AND transaction_type='spend'", (_bonus_user_id,)).fetchone()
-            _legacy_remaining = min(max(0, int(_wallet[0] or 0)) if _wallet else 0, max(0, int(_bonus_granted or 0) - int(_spent[0] or 0)))
-            cursor.execute("UPDATE credit_wallets SET admin_bonus_balance=MAX(admin_bonus_balance, ?) WHERE user_id=?", (_legacy_remaining, _bonus_user_id))
 
     cursor.execute("""CREATE TABLE IF NOT EXISTS teacher_sessions (
         id TEXT PRIMARY KEY,
@@ -1314,33 +1261,14 @@ async def telegram_webapp_auth_middleware(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Slayd yuklash havolasi yaroqsiz yoki muddati tugagan."})
         return await call_next(request)
 
-    # Referat fayllari ham faqat qisqa muddatli, tasodifiy yuklash tokeni bilan ochiladi.
+    # Referat fayli qisqa muddatli tasodifiy token bilan himoyalangan; Android downloader initData yubormaydi.
     if path.startswith("/api/referat/download/") and request.method == "GET":
-        parts = path.rstrip("/").split("/")
-        download_token = parts[-2] if len(parts) >= 2 else ""
+        token = path.rstrip("/").split("/")[-2]
         with _REFERAT_DOWNLOAD_LOCK:
-            ticket = _REFERAT_DOWNLOAD_FILES.get(download_token)
-            ticket_valid = bool(ticket and ticket.get("expires_at", 0) >= time.time())
-            if ticket_valid:
-                ticket["uses"] = ticket.get("uses", 0) + 1
-                ticket_valid = ticket["uses"] <= 10
-        if not ticket_valid:
-            return JSONResponse(status_code=401, content={"detail": "Referat yuklash havolasi yaroqsiz yoki muddati tugagan."})
-        return await call_next(request)
-
-    # Konspekt fayllari Telegram Android downloader uchun qisqa muddatli token bilan yuklanadi.
-    # Token tasodifiy, muddati va foydalanish soni cheklangan.
-    if path.startswith("/api/summary/download/") and request.method == "GET":
-        parts = path.rstrip("/").split("/")
-        download_token = parts[-2] if len(parts) >= 2 else ""
-        with _SUMMARY_DOWNLOAD_LOCK:
-            summary_ticket = _SUMMARY_DOWNLOAD_FILES.get(download_token)
-            ticket_valid = bool(summary_ticket and summary_ticket.get("expires_at", 0) >= time.time())
-            if ticket_valid:
-                summary_ticket["uses"] = summary_ticket.get("uses", 0) + 1
-                ticket_valid = summary_ticket["uses"] <= 10
-        if not ticket_valid:
-            return JSONResponse(status_code=401, content={"detail": "Konspekt yuklash havolasi yaroqsiz yoki muddati tugagan."})
+            ticket = _REFERAT_DOWNLOAD_FILES.get(token)
+            valid = bool(ticket and ticket.get("expires_at", 0) >= time.time())
+        if not valid:
+            return JSONResponse(status_code=401, content={"detail":"Referat yuklash havolasi yaroqsiz yoki muddati tugagan."})
         return await call_next(request)
 
     # Teacher yuklash chiptasi faqat o'zining aniq URL yo'lida va qisqa muddat ishlaydi.
@@ -1701,7 +1629,6 @@ def process_expired_free_limits():
                 quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, lang),
                 public_limit=format_free_limit(FREE_PUBLIC_LIMIT, lang),
                 flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, lang),
-                referat_limit=format_free_limit(REFERAT_FREE_LIMIT, lang),
             )
             bot.send_message(user_id, text, parse_mode="Markdown")
         except Exception as e:
@@ -1887,10 +1814,10 @@ def trigger_credit_payment_flow(user_id, package_id):
 def get_credit_wallet(user_id):
     conn = _connect_db()
     try:
-        row = conn.execute("SELECT balance, tariff_balance, purchased_balance, admin_bonus_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+        row = conn.execute("SELECT balance, tariff_balance, purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
         if not row:
-            return {"balance": 0, "tariff_balance": 0, "purchased_balance": 0, "admin_bonus_balance": 0}
-        return {"balance": int(row[0] or 0), "tariff_balance": int(row[1] or 0), "purchased_balance": int(row[2] or 0), "admin_bonus_balance": int(row[3] or 0)}
+            return {"balance": 0, "tariff_balance": 0, "purchased_balance": 0}
+        return {"balance": int(row[0] or 0), "tariff_balance": int(row[1] or 0), "purchased_balance": int(row[2] or 0)}
     finally:
         conn.close()
 
@@ -1908,17 +1835,16 @@ def spend_slide_credits(user_id, amount, reference, description="Slayd yaratish"
             conn.execute("BEGIN IMMEDIATE")
             now = int(time.time())
             conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
-            row = conn.execute("SELECT balance,tariff_balance,purchased_balance,admin_bonus_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+            row = conn.execute("SELECT balance,tariff_balance,purchased_balance FROM credit_wallets WHERE user_id=?", (int(user_id),)).fetchone()
             if int(row[0] or 0) < amount:
                 conn.rollback()
                 return False, "insufficient_credits"
             tariff_spent = min(int(row[1] or 0), amount)
             purchased_spent = amount - tariff_spent
-            admin_bonus_spent = min(int(row[3] or 0), purchased_spent)
-            conn.execute("UPDATE credit_wallets SET balance=balance-?, tariff_balance=tariff_balance-?, purchased_balance=purchased_balance-?, admin_bonus_balance=admin_bonus_balance-?, updated_at=? WHERE user_id=?",
-                         (amount, tariff_spent, purchased_spent, admin_bonus_spent, now, int(user_id)))
-            conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) VALUES (?,?, 'spend', ?, ?, ?, ?, ?, ?)",
-                         (int(user_id), -amount, str(reference), str(description)[:200], now, -tariff_spent, -purchased_spent, -admin_bonus_spent))
+            conn.execute("UPDATE credit_wallets SET balance=balance-?, tariff_balance=tariff_balance-?, purchased_balance=purchased_balance-?, updated_at=? WHERE user_id=?",
+                         (amount, tariff_spent, purchased_spent, now, int(user_id)))
+            conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'spend', ?, ?, ?, ?, ?)",
+                         (int(user_id), -amount, str(reference), str(description)[:200], now, -tariff_spent, -purchased_spent))
             conn.commit()
             return True, get_credit_balance(user_id)
         except sqlite3.IntegrityError:
@@ -1935,15 +1861,15 @@ def refund_slide_credits(user_id, amount, spend_reference, refund_reference, des
     conn = _connect_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        spent = conn.execute("SELECT tariff_amount,purchased_amount,admin_bonus_amount FROM credit_transactions WHERE user_id=? AND reference=? AND transaction_type='spend'", (int(user_id), str(spend_reference))).fetchone()
+        spent = conn.execute("SELECT tariff_amount,purchased_amount FROM credit_transactions WHERE user_id=? AND reference=? AND transaction_type='spend'", (int(user_id), str(spend_reference))).fetchone()
         if not spent:
             conn.rollback(); logging.error("Kredit qaytarilmadi: sarf yozuvi topilmadi | foydalanuvchi=%s", user_id); return False
-        tariff_refund = max(0, -int(spent[0] or 0)); purchased_refund = max(0, -int(spent[1] or 0)); admin_bonus_refund = max(0, -int(spent[2] or 0))
+        tariff_refund = max(0, -int(spent[0] or 0)); purchased_refund = max(0, -int(spent[1] or 0))
         total = tariff_refund + purchased_refund
         if total != int(amount):
             conn.rollback(); logging.error("Kredit qaytarilmadi: qaytariladigan miqdor mos emas | foydalanuvchi=%s", user_id); return False
-        conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, purchased_balance=purchased_balance+?, admin_bonus_balance=admin_bonus_balance+?, updated_at=? WHERE user_id=?", (total, tariff_refund, purchased_refund, admin_bonus_refund, int(time.time()), int(user_id)))
-        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) VALUES (?,?, 'refund', ?, ?, ?, ?, ?, ?)", (int(user_id), total, str(refund_reference), str(description)[:200], int(time.time()), tariff_refund, purchased_refund, admin_bonus_refund))
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, tariff_balance=tariff_balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (total, tariff_refund, purchased_refund, int(time.time()), int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?, 'refund', ?, ?, ?, ?, ?)", (int(user_id), total, str(refund_reference), str(description)[:200], int(time.time()), tariff_refund, purchased_refund))
         conn.commit(); return True
     except sqlite3.IntegrityError:
         conn.rollback(); return False
@@ -1987,9 +1913,7 @@ def get_credit_history(user_id, limit=20):
     conn = _connect_db()
     try:
         rows = conn.execute(
-            "SELECT amount,transaction_type,reference,"
-            "CASE WHEN transaction_type='admin_bonus' THEN 'Admin bonusi' ELSE description END AS description,"
-            "created_at,tariff_amount,purchased_amount "
+            "SELECT amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount "
             "FROM credit_transactions WHERE user_id=? ORDER BY id DESC LIMIT ?",
             (int(user_id), max(1, min(int(limit), 100)))
         ).fetchall()
@@ -2053,7 +1977,7 @@ def send_welcome(message):
     add_user_to_db(user_id)
     user_lang = get_user_lang(user_id)
 
-    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang), summary_limit=format_free_limit(SUMMARY_FREE_LIMIT, user_lang), referat_limit=format_free_limit(REFERAT_FREE_LIMIT, user_lang))
+    welcome_text = MESSAGES[user_lang]["welcome"].format(name=message.from_user.first_name, quiz_limit=format_free_limit(FREE_QUIZ_LIMIT, user_lang), public_limit=format_free_limit(FREE_PUBLIC_LIMIT, user_lang), flashcard_limit=format_free_limit(FREE_FLASHCARD_LIMIT, user_lang), referat_limit=format_free_limit(REFERAT_FREE_LIMIT, user_lang))
 
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     # Admin uchun yordam tugmasi faqat uning shaxsiy chatida ko'rsatiladi.
@@ -3089,7 +3013,7 @@ def admin_bonus_credits_command(message):
     add_user_to_db(target_id)
     admin_id = int(message.from_user.id)
     reference = f"admin-credit:{admin_id}:{target_id}:{uuid.uuid4().hex}"
-    description = "Admin bonusi"
+    description = f"Admin bonusi; admin_id={admin_id}"
     if not add_slide_credits(target_id, amount, reference, description, transaction_type="admin_bonus"):
         bot.send_message(message.chat.id, "❌ Kredit qo‘shilmadi. Baza yoki tranzaksiya xatosini tekshiring.")
         return
@@ -3104,268 +3028,6 @@ def admin_bonus_credits_command(message):
         bot.send_message(target_id, texts.get(lang, texts["uz"]))
     except Exception:
         logging.exception("Admin kredit bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
-
-
-@bot.message_handler(commands=["bonus_summary"])
-def admin_bonus_summary_command(message):
-    """Faqat Admin Bot ichida administrator konspekt bonusini beradi."""
-    if not _admin_only(message):
-        return
-    parts = (message.text or "").split(maxsplit=2)
-    if len(parts) != 3:
-        bot.send_message(message.chat.id, "Format: /bonus_summary USER_ID MIQDOR\nMisol: /bonus_summary 123456789 5")
-        return
-    try:
-        target_id, amount = int(parts[1]), int(parts[2])
-        if target_id <= 0 or amount <= 0 or amount > 1000000:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ USER_ID musbat son, bonus miqdori esa 1–1 000 000 oralig‘ida bo‘lishi kerak.")
-        return
-
-    add_user_to_db(target_id)
-    conn = _connect_db(timeout=30)
-    try:
-        conn.execute(
-            "INSERT INTO summary_bonus_wallets(user_id,balance,updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance,updated_at=excluded.updated_at",
-            (target_id, amount, int(time.time()))
-        )
-        conn.commit()
-        row = conn.execute("SELECT balance FROM summary_bonus_wallets WHERE user_id=?", (target_id,)).fetchone()
-        balance = int(row[0] or 0) if row else amount
-    except Exception:
-        conn.rollback()
-        logging.exception("Admin konspekt bonusi berishda xato | target_id=%s", target_id)
-        bot.send_message(message.chat.id, "❌ Konspekt bonusi qo‘shilmadi. Baza xatosini tekshiring.")
-        return
-    finally:
-        conn.close()
-
-    admin_id = int(message.from_user.id)
-    bot.send_message(
-        message.chat.id,
-        f"📚 Konspekt bonusi berildi.\n👤 User: {target_id}\n➕ Qo‘shildi: {amount} ta\n🎁 Jami bonus qoldig‘i: {balance} ta\n🛡 Admin: {admin_id}"
-    )
-    try:
-        lang = get_user_lang(target_id)
-        texts = {
-            "uz": f"🎁 Sizga administrator tomonidan {amount} ta qo‘shimcha konspekt bonusi berildi!\n📚 Bonuslar tarif limitingizdan alohida hisoblanadi.",
-            "ru": f"🎁 Администратор начислил вам {amount} дополнительных конспектов!\n📚 Бонусы учитываются отдельно от лимита тарифа.",
-            "en": f"🎁 The administrator granted you {amount} additional summary bonuses!\n📚 Bonuses are counted separately from your plan limit.",
-        }
-        bot.send_message(target_id, texts.get(lang, texts["uz"]))
-    except Exception:
-        logging.exception("Konspekt bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
-
-
-@bot.message_handler(commands=["bonus_referat"])
-def admin_bonus_referat_command(message):
-    """Faqat administrator foydalanuvchiga referat bonusini beradi."""
-    if not _admin_only(message):
-        return
-    parts = (message.text or "").split(maxsplit=2)
-    if len(parts) != 3:
-        bot.send_message(message.chat.id, "Format: /bonus_referat USER_ID MIQDOR\nMisol: /bonus_referat 123456789 5")
-        return
-    try:
-        target_id, amount = int(parts[1]), int(parts[2])
-        if target_id <= 0 or amount <= 0 or amount > 1000000:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ USER_ID musbat son, bonus miqdori esa 1–1 000 000 oralig‘ida bo‘lishi kerak.")
-        return
-
-    add_user_to_db(target_id)
-    conn = _connect_db(timeout=30)
-    try:
-        conn.execute(
-            "INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,?,?) "
-            "ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance,updated_at=excluded.updated_at",
-            (target_id, amount, int(time.time()))
-        )
-        conn.commit()
-        row = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (target_id,)).fetchone()
-        balance = int(row[0] or 0) if row else amount
-    except Exception:
-        conn.rollback()
-        logging.exception("Admin referat bonusi berishda xato | target_id=%s", target_id)
-        bot.send_message(message.chat.id, "❌ Referat bonusi qo‘shilmadi. Baza xatosini tekshiring.")
-        return
-    finally:
-        conn.close()
-
-    admin_id = int(message.from_user.id)
-    bot.send_message(
-        message.chat.id,
-        f"📄 Referat bonusi berildi.\n👤 User: {target_id}\n➕ Qo‘shildi: {amount} ta\n🎁 Jami bonus qoldig‘i: {balance} ta\n🛡 Admin: {admin_id}"
-    )
-    try:
-        lang = get_user_lang(target_id)
-        texts = {
-            "uz": f"🎁 Sizga administrator tomonidan {amount} ta qo‘shimcha referat bonusi berildi!\n📄 Bonuslar tarif limitingizdan alohida hisoblanadi.",
-            "ru": f"🎁 Администратор начислил вам {amount} дополнительных рефератов!\n📄 Бонусы учитываются отдельно от лимита тарифа.",
-            "en": f"🎁 The administrator granted you {amount} additional report bonuses!\n📄 Bonuses are counted separately from your plan limit.",
-        }
-        bot.send_message(target_id, texts.get(lang, texts["uz"]))
-    except Exception:
-        logging.exception("Referat bonusi haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
-
-
-@bot.message_handler(commands=["bonus_referat_revoke"])
-def admin_bonus_referat_revoke_command(message):
-    """Foydalanuvchining qolgan referat bonuslarini faqat admin bekor qiladi."""
-    if not _admin_only(message):
-        return
-    parts = (message.text or "").split()
-    if len(parts) != 2:
-        bot.send_message(message.chat.id, "Format: /bonus_referat_revoke USER_ID\nMisol: /bonus_referat_revoke 123456789")
-        return
-    try:
-        target_id = int(parts[1])
-        if target_id <= 0:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ USER_ID musbat son bo‘lishi kerak.")
-        return
-
-    conn = _connect_db(timeout=30)
-    try:
-        row = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (target_id,)).fetchone()
-        balance = int(row[0] or 0) if row else 0
-        if balance <= 0:
-            bot.send_message(message.chat.id, "ℹ️ Bu foydalanuvchida bekor qilinadigan referat bonusi yo‘q.")
-            return
-        conn.execute(
-            "UPDATE referat_bonus_wallets SET balance=0,updated_at=? WHERE user_id=?",
-            (int(time.time()), target_id)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        logging.exception("Admin referat bonusini bekor qilishda xato | target_id=%s", target_id)
-        bot.send_message(message.chat.id, "❌ Referat bonusini bekor qilib bo‘lmadi.")
-        return
-    finally:
-        conn.close()
-
-    bot.send_message(
-        message.chat.id,
-        f"🗑 Referat bonusi bekor qilindi.\n👤 User: {target_id}\n➖ Bekor qilindi: {balance} ta"
-    )
-    try:
-        lang = get_user_lang(target_id)
-        texts = {
-            "uz": f"ℹ️ Administrator hisobingizdagi {balance} ta ishlatilmagan referat bonusini bekor qildi.",
-            "ru": f"ℹ️ Администратор отменил {balance} неиспользованных бонусов на рефераты.",
-            "en": f"ℹ️ The administrator revoked your {balance} unused report bonuses.",
-        }
-        bot.send_message(target_id, texts.get(lang, texts["uz"]))
-    except Exception:
-        logging.exception("Referat bonusi bekor qilingani haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
-
-
-@bot.message_handler(commands=["bonus_credits_revoke"])
-def admin_bonus_credits_revoke_command(message):
-    """Bekor qilishda faqat ishlatilmay qolgan admin bergan Slayd kreditlarini yechadi."""
-    if not _admin_only(message):
-        return
-    parts = (message.text or "").split()
-    if len(parts) != 2:
-        bot.send_message(message.chat.id, "Format: /bonus_credits_revoke USER_ID\nMisol: /bonus_credits_revoke 123456789")
-        return
-    try:
-        target_id = int(parts[1])
-        if target_id <= 0:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ USER_ID musbat son bo‘lishi kerak.")
-        return
-
-    conn = _connect_db(timeout=30)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT balance, purchased_balance, admin_bonus_balance FROM credit_wallets WHERE user_id=?",
-            (target_id,)
-        ).fetchone()
-        bonus_balance = int(row[2] or 0) if row else 0
-        if bonus_balance <= 0:
-            conn.rollback()
-            bot.send_message(message.chat.id, "ℹ️ Bu foydalanuvchida bekor qilinadigan Slayd kredit bonusi yo‘q.")
-            return
-        now = int(time.time())
-        conn.execute(
-            "UPDATE credit_wallets SET balance=MAX(0,balance-?), "
-            "purchased_balance=MAX(0,purchased_balance-?), admin_bonus_balance=0, updated_at=? WHERE user_id=?",
-            (bonus_balance, bonus_balance, now, target_id)
-        )
-        reference = f"admin-credit-revoke:{target_id}:{uuid.uuid4().hex}"
-        conn.execute(
-            "INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) "
-            "VALUES (?,?,'admin_bonus_revoke',?,?,?,0,?,?)",
-            (target_id, -bonus_balance, reference, "Admin tomonidan qolgan Slayd kredit bonusi bekor qilindi", now, -bonus_balance, -bonus_balance)
-        )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        logging.exception("Admin Slayd kredit bonusini bekor qilishda xato | target_id=%s", target_id)
-        bot.send_message(message.chat.id, "❌ Slayd kredit bonusini bekor qilib bo‘lmadi.")
-        return
-    finally:
-        conn.close()
-
-    bot.send_message(
-        message.chat.id,
-        f"🗑 Slayd kredit bonusi bekor qilindi.\n👤 User: {target_id}\n➖ Bekor qilindi: {bonus_balance} ta"
-    )
-    try:
-        lang = get_user_lang(target_id)
-        texts = {
-            "uz": f"ℹ️ Administrator hisobingizdagi {bonus_balance} ta ishlatilmagan Slayd kredit bonusini bekor qildi.\n💎 Sotib olingan va tarif kreditlaringiz saqlab qolindi.",
-            "ru": f"ℹ️ Администратор отменил {bonus_balance} неиспользованных бонусных кредитов для слайдов.\n💎 Купленные и тарифные кредиты сохранены.",
-            "en": f"ℹ️ The administrator revoked {bonus_balance} unused slide bonus credits.\n💎 Purchased and plan credits were kept.",
-        }
-        bot.send_message(target_id, texts.get(lang, texts["uz"]))
-    except Exception:
-        logging.exception("Slayd kredit bonusi bekor qilingani haqida foydalanuvchiga xabar yuborilmadi: %s", target_id)
-
-
-@bot.message_handler(commands=["bonus_summary_revoke"])
-def admin_bonus_summary_revoke_command(message):
-    """Foydalanuvchining qolgan konspekt bonuslarini faqat admin bekor qiladi."""
-    if not _admin_only(message):
-        return
-    parts = (message.text or "").split()
-    if len(parts) != 2:
-        bot.send_message(message.chat.id, "Format: /bonus_summary_revoke USER_ID\nMisol: /bonus_summary_revoke 123456789")
-        return
-    try:
-        target_id = int(parts[1])
-        if target_id <= 0:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ USER_ID musbat son bo‘lishi kerak.")
-        return
-
-    conn = _connect_db(timeout=30)
-    try:
-        row = conn.execute("SELECT balance FROM summary_bonus_wallets WHERE user_id=?", (target_id,)).fetchone()
-        balance = int(row[0] or 0) if row else 0
-        if balance <= 0:
-            bot.send_message(message.chat.id, "ℹ️ Bu foydalanuvchida bekor qilinadigan konspekt bonusi yo‘q.")
-            return
-        conn.execute("UPDATE summary_bonus_wallets SET balance=0,updated_at=? WHERE user_id=?", (int(time.time()), target_id))
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        logging.exception("Admin konspekt bonusini bekor qilishda xato | target_id=%s", target_id)
-        bot.send_message(message.chat.id, "❌ Konspekt bonusini bekor qilib bo‘lmadi.")
-        return
-    finally:
-        conn.close()
-
-    bot.send_message(message.chat.id, f"🗑 Konspekt bonusi bekor qilindi.\n👤 User: {target_id}\n➖ Bekor qilindi: {balance} ta")
 
 
 @bot.message_handler(commands=["bonus_revoke"])
@@ -3393,6 +3055,39 @@ def admin_bonus_revoke_command(message):
     finally:
         conn.close()
     bot.send_message(message.chat.id, f"✅ Admin Bonus bekor qilindi: {target_id}")
+
+
+@bot.message_handler(commands=["referat_bonus"])
+def admin_referat_bonus_command(message):
+    if not _admin_only(message): return
+    parts=(message.text or "").split()
+    if len(parts)!=3:
+        bot.send_message(message.chat.id,"Format: /referat_bonus USER_ID MIQDOR\nMisol: /referat_bonus 123456789 3")
+        return
+    try: target_id,amount=int(parts[1]),int(parts[2])
+    except ValueError:
+        bot.send_message(message.chat.id,"❌ USER_ID va MIQDOR butun son bo‘lishi kerak."); return
+    ok,result=_referat_bonus_change(target_id,amount,int(message.from_user.id),"grant")
+    if not ok: bot.send_message(message.chat.id,"❌ Referat bonusi berilmadi: "+str(result)); return
+    bot.send_message(message.chat.id,f"✅ Referat bonusi berildi.\n👤 Foydalanuvchi: {target_id}\n➕ Bonus: {amount} ta\n💳 Yangi bonus balansi: {result} ta")
+    try: bot.send_message(target_id,f"🎁 Sizga administrator tomonidan {amount} ta Referat bonusi berildi!\n📄 Bonus balansingiz: {result} ta.")
+    except Exception: logging.exception("Referat bonusi haqida foydalanuvchiga xabar yuborilmadi | user=%s",target_id)
+
+
+@bot.message_handler(commands=["referat_bonus_revoke"])
+def admin_referat_bonus_revoke_command(message):
+    if not _admin_only(message): return
+    parts=(message.text or "").split()
+    if len(parts)!=3:
+        bot.send_message(message.chat.id,"Format: /referat_bonus_revoke USER_ID MIQDOR\nMisol: /referat_bonus_revoke 123456789 1"); return
+    try: target_id,amount=int(parts[1]),int(parts[2])
+    except ValueError:
+        bot.send_message(message.chat.id,"❌ USER_ID va MIQDOR butun son bo‘lishi kerak."); return
+    ok,result=_referat_bonus_change(target_id,amount,int(message.from_user.id),"revoke")
+    if not ok: bot.send_message(message.chat.id,"❌ Referat bonusi bekor qilinmadi: "+str(result)); return
+    bot.send_message(message.chat.id,f"✅ Referat bonusi bekor qilindi.\n👤 Foydalanuvchi: {target_id}\n➖ Bekor qilindi: {amount} ta\n💳 Qolgan bonus: {result} ta")
+    try: bot.send_message(target_id,f"ℹ️ Administrator {amount} ta Referat bonusini bekor qildi.\n📄 Qolgan bonus: {result} ta.")
+    except Exception: logging.exception("Referat bonusini bekor qilish haqida xabar yuborilmadi | user=%s",target_id)
 
 
 @bot.message_handler(commands=["payment_ai_status"])
@@ -3705,7 +3400,6 @@ def get_tariff_config():
                 "duration_unit": item["duration_unit"],
                 "names": item["names"],
                 "slide_credits": SLIDE_TARIFF_CREDITS.get(key, 0),
-                "summary_limit": SUMMARY_TARIFF_LIMITS.get(key, 0),
                 "referat_limit": REFERAT_TARIFF_LIMITS.get(key, 0),
             }
             for key, item in TARIFFS.items()
@@ -3715,14 +3409,12 @@ def get_tariff_config():
             "quiz": None if FREE_QUIZ_LIMIT == -1 else FREE_QUIZ_LIMIT,
             "public": None if FREE_PUBLIC_LIMIT == -1 else FREE_PUBLIC_LIMIT,
             "flashcard": None if FREE_FLASHCARD_LIMIT == -1 else FREE_FLASHCARD_LIMIT,
-            "summary": None if SUMMARY_FREE_LIMIT == -1 else SUMMARY_FREE_LIMIT,
             "referat": None if REFERAT_FREE_LIMIT == -1 else REFERAT_FREE_LIMIT,
         },
         "free_limits_display": {
             "quiz": {lang: format_free_limit(FREE_QUIZ_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "public": {lang: format_free_limit(FREE_PUBLIC_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "flashcard": {lang: format_free_limit(FREE_FLASHCARD_LIMIT, lang) for lang in ("uz", "ru", "en")},
-            "summary": {lang: format_free_limit(SUMMARY_FREE_LIMIT, lang) for lang in ("uz", "ru", "en")},
             "referat": {lang: format_free_limit(REFERAT_FREE_LIMIT, lang) for lang in ("uz", "ru", "en")},
         },
     }
@@ -3796,11 +3488,8 @@ def add_slide_credits(user_id, amount, reference, description="Kredit qaytarildi
         conn.execute("BEGIN IMMEDIATE")
         now = int(time.time())
         conn.execute("INSERT INTO credit_wallets (user_id,balance,tariff_balance,purchased_balance,updated_at) VALUES (?,0,0,0,?) ON CONFLICT(user_id) DO NOTHING", (int(user_id), now))
-        if str(transaction_type) == "admin_bonus":
-            conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, admin_bonus_balance=admin_bonus_balance+?, updated_at=? WHERE user_id=?", (amount, amount, amount, now, int(user_id)))
-        else:
-            conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
-        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount,admin_bonus_amount) VALUES (?,?,?,?,?,?,0,?,?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], now, amount, amount if str(transaction_type) == "admin_bonus" else 0))
+        conn.execute("UPDATE credit_wallets SET balance=balance+?, purchased_balance=purchased_balance+?, updated_at=? WHERE user_id=?", (amount, amount, now, int(user_id)))
+        conn.execute("INSERT INTO credit_transactions (user_id,amount,transaction_type,reference,description,created_at,tariff_amount,purchased_amount) VALUES (?,?,?,?,?,?,0,?)", (int(user_id), amount, str(transaction_type)[:32], str(reference), str(description)[:200], now, amount))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -4763,1214 +4452,207 @@ def _build_slide_pdf(deck, theme="modern"):
     return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="SLIDES")
 
 
-# --- AI KONSPEKT YARATISH: mustaqil tarif limiti, kredit ishlatilmaydi ---
-_SUMMARY_DOWNLOAD_FILES = {}
-_SUMMARY_DOWNLOAD_LOCK = threading.Lock()
-_SUMMARY_DOWNLOAD_TTL = 30 * 60
+# =====================================================================
+# REFERAT MODULI — alohida limit, bonus, generator va yuklab olish oqimi
+# =====================================================================
+from modules.referat.generator import ReferatError, extract_source_text, generate_referat_content
+from modules.referat.document_builder import build_referat_docx, build_referat_pdf
 
 _REFERAT_DOWNLOAD_FILES = {}
 _REFERAT_DOWNLOAD_LOCK = threading.Lock()
 _REFERAT_DOWNLOAD_TTL = 30 * 60
 
 
-def _summary_user_quota(user_id):
-    """Faol tarif yoki 30 kunlik bepul davr uchun konspekt limitini aniqlaydi."""
-    add_user_to_db(int(user_id))
+def _referat_cycle_and_limit(user_id: int):
     conn = _connect_db()
     try:
         row = conn.execute("SELECT created_at,status,plan_key,premium_until FROM users WHERE user_id=?", (int(user_id),)).fetchone()
         if not row:
-            return {"period_key": "free:0", "limit": SUMMARY_FREE_LIMIT, "plan": "free"}
+            raise HTTPException(status_code=404, detail="Foydalanuvchi bazadan topilmadi.")
         created_at, status, plan_key, premium_until = row
         now = int(time.time())
         if is_active_paid_status(status or "", premium_until or 0):
             key = get_plan_key(status or "", plan_key or "")
-            period_key = f"paid:{key}:{int(premium_until or 0)}"
-            return {"period_key": period_key, "limit": SUMMARY_TARIFF_LIMITS.get(key, 0), "plan": key or "paid"}
-        cycle_start = int(created_at or now)
-        if now - cycle_start >= 30 * 86400:
-            cycle_start = now
-            conn.execute("UPDATE users SET created_at=? WHERE user_id=? AND (premium_until IS NULL OR premium_until<?)", (cycle_start, int(user_id), now))
-            conn.commit()
-        return {"period_key": f"free:{cycle_start}", "limit": SUMMARY_FREE_LIMIT, "plan": "free"}
+            limit = int(REFERAT_TARIFF_LIMITS.get(key, 0))
+            cycle = f"premium:{key}:{int(premium_until or 0)}"
+            return cycle, limit, True
+        period = max(1, REFERAT_FREE_PERIOD_DAYS) * 86400
+        anchor = int(created_at or now)
+        cycle_no = max(0, (now - anchor) // period)
+        cycle_start = anchor + cycle_no * period
+        return f"free:{cycle_start}", int(REFERAT_FREE_LIMIT), False
     finally:
         conn.close()
 
 
-def _summary_usage_snapshot(user_id):
-    quota = _summary_user_quota(user_id)
-    conn = _connect_db()
-    try:
-        row = conn.execute("SELECT period_key,used FROM summary_usage WHERE user_id=?", (int(user_id),)).fetchone()
-        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
-        bonus_row = conn.execute("SELECT balance FROM summary_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()
-        bonus_remaining = int(bonus_row[0] or 0) if bonus_row else 0
-        limit = int(quota["limit"])
-        unlimited = limit == -1
-        regular_remaining = None if unlimited else max(0, limit - used)
-        remaining = None if unlimited else regular_remaining + bonus_remaining
-        return {"status": "ok", "enabled": SUMMARY_ENABLED, "plan": quota["plan"], "used": used,
-                "limit": None if unlimited else limit, "remaining": remaining,
-                "regular_remaining": regular_remaining, "bonus_remaining": bonus_remaining,
-                "unlimited": unlimited,
-                "allowed": SUMMARY_ENABLED and (unlimited or regular_remaining > 0 or bonus_remaining > 0)}
-    finally:
-        conn.close()
-
-
-def _reserve_summary_quota(user_id, reference):
-    """Avval tarif/bepul limitni, u tugasa Admin bonusini atomik band qiladi."""
-    quota = _summary_user_quota(user_id)
-    limit = int(quota["limit"])
-    if not SUMMARY_ENABLED:
-        return False, "disabled"
+def _reserve_referat_job(user_id: int, job_id: str):
+    cycle, limit, paid = _referat_cycle_and_limit(user_id)
     conn = _connect_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT period_key,used FROM summary_usage WHERE user_id=?", (int(user_id),)).fetchone()
-        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
-
+        row = conn.execute("SELECT used_count FROM referat_usage WHERE user_id=? AND cycle_key=?", (int(user_id), cycle)).fetchone()
+        used = int(row[0] or 0) if row else 0
+        source = "tariff" if paid else "free"
         if limit == -1 or used < limit:
-            conn.execute(
-                "INSERT INTO summary_usage(user_id,period_key,used,updated_at) VALUES(?,?,?,?) "
-                "ON CONFLICT(user_id) DO UPDATE SET period_key=excluded.period_key,used=excluded.used,updated_at=excluded.updated_at",
-                (int(user_id), quota["period_key"], used + 1, int(time.time()))
-            )
-            conn.commit()
-            return True, quota["period_key"]
-
-        bonus_row = conn.execute("SELECT balance FROM summary_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()
-        bonus_balance = int(bonus_row[0] or 0) if bonus_row else 0
-        if bonus_balance <= 0:
-            conn.rollback()
-            return False, "limit"
-
-        cursor = conn.execute(
-            "UPDATE summary_bonus_wallets SET balance=balance-1,updated_at=? WHERE user_id=? AND balance>0",
-            (int(time.time()), int(user_id))
-        )
-        if cursor.rowcount != 1:
-            conn.rollback()
-            return False, "limit"
+            conn.execute("INSERT INTO referat_usage(user_id,cycle_key,used_count,updated_at) VALUES(?,?,1,?) ON CONFLICT(user_id,cycle_key) DO UPDATE SET used_count=used_count+1,updated_at=excluded.updated_at", (int(user_id), cycle, int(time.time())))
+        else:
+            bonus = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+            if not bonus or int(bonus[0] or 0) <= 0:
+                conn.rollback()
+                return False, {"reason":"limit_reached", "limit":limit, "used":used, "bonus":int(bonus[0] or 0) if bonus else 0}
+            conn.execute("UPDATE referat_bonus_wallets SET balance=balance-1,updated_at=? WHERE user_id=? AND balance>0", (int(time.time()), int(user_id)))
+            if conn.total_changes < 1:
+                conn.rollback(); return False, {"reason":"limit_reached", "limit":limit, "used":used, "bonus":0}
+            source = "bonus"
+        conn.execute("INSERT INTO referat_jobs(job_id,user_id,cycle_key,quota_source,status,created_at) VALUES(?,?,?,?, 'reserved',?)", (job_id,int(user_id),cycle,source,int(time.time())))
         conn.commit()
-        return True, "bonus:" + str(reference)
+        logging.info("Referat limiti band qilindi | foydalanuvchi=%s | ish=%s | manba=%s | davr=%s | ishlatilgan=%s/%s", user_id, job_id, source, cycle, used + (1 if source != 'bonus' else 0), limit)
+        return True, {"reason":"ok", "source":source, "cycle":cycle, "limit":limit}
     except Exception:
-        conn.rollback()
-        logging.exception("Konspekt limitini band qilishda xato | user_id=%s", user_id)
-        return False, "database"
+        conn.rollback(); logging.exception("Referat limitini band qilishda xatolik | foydalanuvchi=%s | ish=%s", user_id, job_id)
+        return False, {"reason":"database_error"}
     finally:
         conn.close()
 
 
-def _refund_summary_quota(user_id, period_key):
+def _finish_referat_job(job_id: str, success: bool, title: str = ""):
     conn = _connect_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        if str(period_key).startswith("bonus:"):
-            conn.execute(
-                "INSERT INTO summary_bonus_wallets(user_id,balance,updated_at) VALUES(?,1,?) "
-                "ON CONFLICT(user_id) DO UPDATE SET balance=balance+1,updated_at=excluded.updated_at",
-                (int(user_id), int(time.time()))
-            )
-        else:
-            conn.execute(
-                "UPDATE summary_usage SET used=MAX(0,used-1),updated_at=? WHERE user_id=? AND period_key=?",
-                (int(time.time()), int(user_id), str(period_key))
-            )
+        row = conn.execute("SELECT user_id,cycle_key,quota_source,status FROM referat_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if not row or row[3] != "reserved":
+            conn.rollback(); return False
+        user_id, cycle, source, _ = row
+        if not success:
+            if source == "bonus":
+                conn.execute("INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,1,?) ON CONFLICT(user_id) DO UPDATE SET balance=balance+1,updated_at=excluded.updated_at", (user_id,int(time.time())))
+            else:
+                conn.execute("UPDATE referat_usage SET used_count=MAX(0,used_count-1),updated_at=? WHERE user_id=? AND cycle_key=?", (int(time.time()),user_id,cycle))
+        conn.execute("UPDATE referat_jobs SET status=?,title=?,completed_at=? WHERE job_id=?", ("completed" if success else "refunded",str(title)[:240],int(time.time()),job_id))
         conn.commit()
+        logging.info("Referat ishi yakunlandi | foydalanuvchi=%s | ish=%s | holat=%s | limit_qaytarildi=%s", user_id, job_id, "muvaffaqiyatli" if success else "xatolik — limit qaytarildi", not success)
+        return True
     except Exception:
-        conn.rollback()
-        logging.exception("Konspekt limitini qaytarishda xato | user_id=%s", user_id)
+        conn.rollback(); logging.exception("Referat ishini yakunlashda xatolik | ish=%s", job_id); return False
     finally:
         conn.close()
 
 
-
-
-def _clean_academic_markdown(content, remove_cover=False):
-    """AI matnini Word/PDF eksportidan oldin xavfsiz tozalaydi."""
-    text = str(content or "").replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</?(?:div|span|p)[^>]*>", "", text, flags=re.IGNORECASE)
-    lines = text.split("\n")
-
-    # Bibliografiya ostidagi modelning texnik izohi hujjatga kiritilmaydi.
-    bibliography_seen = False
-    filtered_lines = []
-    for raw_line in lines:
-        plain_line = re.sub(r"^[#*\s]+", "", raw_line).strip().lower()
-        if re.search(r"foydalanilgan\s+adabiyotlar|references|bibliography", plain_line):
-            bibliography_seen = True
-            filtered_lines.append(raw_line)
-            continue
-        if bibliography_seen and (
-            plain_line.startswith("(izoh") or plain_line.startswith("izoh:") or
-            "manba matni kiritilmagani" in plain_line or
-            "bibliografik manbalarni uydirish" in plain_line or
-            "ro'yxati shakllantirilmadi" in plain_line
-        ):
-            continue
-        filtered_lines.append(raw_line)
-    lines = filtered_lines
-
-    # AI ba'zan hujjat ichida kod blokining chegaralarini chiqaradi.
-    cleaned = []
-    in_fence = False
-    for raw in lines:
-        line = raw.rstrip()
-        if re.match(r"^\s*```", line):
-            in_fence = not in_fence
-            cleaned.append("```")
-            continue
-        if re.match(r"^\s*---+\s*$", line) or re.match(r"^\s*\*\*\*+\s*$", line):
-            continue
-        cleaned.append(line)
-
-    # AI yaratgan takroriy titul sahifasini faqat boshida titul belgilari bo'lsa olib tashlaymiz.
-    if remove_cover:
-        head = "\n".join(cleaned[:30]).lower()
-        cover_markers = ("universitet", "fakultet", "bajardi", "tekshirdi", "guruh:", "akademik referat")
-        if any(marker in head for marker in cover_markers):
-            start = None
-            for i, raw in enumerate(cleaned[:60]):
-                plain = re.sub(r"^[#\s]+", "", raw).strip().lower()
-                if (plain in {"mundarija", "reja", "kirish"} or
-                    re.match(r"^(?:\d+(?:\.\d+)*[.)]?\s+)", plain)):
-                    start = i
-                    break
-            if start is not None:
-                cleaned = cleaned[start:]
-            else:
-                # Birinchi mazmunli bo'lim topilmasa, titulga o'xshash dastlabki blokni olib tashlaymiz.
-                while cleaned and (
-                    not cleaned[0].strip() or
-                    any(x in cleaned[0].lower() for x in cover_markers) or
-                    re.match(r"^\s*#*\s*(?:referat|sarlavha)\s*$", cleaned[0], re.I)
-                ):
-                    cleaned.pop(0)
-
-    # Qatorlar orasidagi ortiqcha bo'sh joylarni me'yorlashtiramiz.
-    result = []
-    blank = False
-    for line in cleaned:
-        if not line.strip():
-            if result and not blank:
-                result.append("")
-            blank = True
-        else:
-            result.append(line.strip())
-            blank = False
-    return "\n".join(result).strip()
-
-
-def _register_academic_pdf_fonts():
-    """Referat va Konspekt PDF uchun o'zbek/kirill Unicode shriftlarini ulaydi."""
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    font_dir = Path(__file__).resolve().parent / "fonts"
-    candidates = [
-        (font_dir / "DejaVuSans.ttf", "QuizAIAcademic"),
-        (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"), "QuizAIAcademic"),
-    ]
-    bold_candidates = [
-        (font_dir / "DejaVuSans-Bold.ttf", "QuizAIAcademic-Bold"),
-        (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"), "QuizAIAcademic-Bold"),
-    ]
-    for path, name in candidates + bold_candidates:
-        if name not in pdfmetrics.getRegisteredFontNames() and path.is_file():
-            try:
-                pdfmetrics.registerFont(TTFont(name, str(path)))
-            except Exception as exc:
-                logging.warning("Akademik PDF shriftini ulab bo'lmadi | %s", exc)
-    regular = "QuizAIAcademic" if "QuizAIAcademic" in pdfmetrics.getRegisteredFontNames() else "Helvetica"
-    bold = "QuizAIAcademic-Bold" if "QuizAIAcademic-Bold" in pdfmetrics.getRegisteredFontNames() else regular
-    return regular, bold
-
-
-def _set_docx_page_border(section):
-    """Word titul varag'iga ikki qavatli, nafis sahifa ramkasini qo'yadi."""
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    sect_pr = section._sectPr
-    old = sect_pr.find(qn("w:pgBorders"))
-    if old is not None:
-        sect_pr.remove(old)
-    borders = OxmlElement("w:pgBorders")
-    borders.set(qn("w:offsetFrom"), "page")
-    borders.set(qn("w:display"), "firstPage")
-    for edge in ("top", "left", "bottom", "right"):
-        outer = OxmlElement(f"w:{edge}")
-        outer.set(qn("w:val"), "single")
-        outer.set(qn("w:sz"), "18")
-        outer.set(qn("w:space"), "22")
-        outer.set(qn("w:color"), "183153")
-        borders.append(outer)
-    sect_pr.append(borders)
-
-
-def _draw_referat_pdf_cover_frame(canvas, doc):
-    """PDF titul sahifasida to'q ko'k va oltin rangli ikki qavat ramka."""
-    if getattr(doc, "page", 1) != 1:
-        return
-    from reportlab.lib.colors import HexColor
-    page_w, page_h = doc.pagesize
-    canvas.saveState()
-    # Word titul ramkasiga mos bitta to'q-ko'k chiziq.
-    canvas.setStrokeColor(HexColor("#183153"))
-    canvas.setLineWidth(2.25)
-    canvas.rect(22, 22, page_w - 44, page_h - 44, stroke=1, fill=0)
-    canvas.restoreState()
-
-
-def _iter_academic_blocks(content):
-    """Markdown satrlarini sarlavha, matn, ro'yxat va kod bloklariga ajratadi."""
-    lines = _clean_academic_markdown(content, remove_cover=False).splitlines()
-    in_code = False
-    code_lines = []
-    for raw in lines:
-        line = raw.strip()
-        if line.startswith("```"):
-            if in_code and code_lines:
-                yield ("code", "\n".join(code_lines))
-                code_lines = []
-            in_code = not in_code
-            continue
-        if in_code:
-            code_lines.append(raw.rstrip())
-            continue
-        if not line:
-            continue
-        if re.match(r"^#{1,6}\s+", line):
-            level = len(line) - len(line.lstrip("#"))
-            yield ("heading", (min(level, 3), line[level:].strip()))
-        elif re.match(r"^(?:KIRISH|INTRODUCTION|XULOSA|CONCLUSION|FOYDALANILGAN\s+ADABIYOTLAR|REFERENCES|BIBLIOGRAPHY)(?:\s*[:—–]\s*.*)?$", line, re.I):
-            yield ("heading", (1, line))
-        elif re.match(r"^\d+\.\d+(?:\.\d+)?\s+.{5,120}$", line) and len(line.split()) <= 18:
-            yield ("heading", (3, line))
-        elif re.match(r"^\d+\.\s+.{5,120}$", line) and len(line.split()) <= 18 and not line.endswith((".", "!", "?")):
-            yield ("heading", (1, line))
-        elif re.match(r"^[-*•]\s+", line):
-            yield ("bullet", re.sub(r"^[-*•]\s+", "", line))
-        elif re.match(r"^\d+[.)]\s+", line):
-            yield ("number", re.sub(r"^\d+[.)]\s+", "", line))
-        else:
-            yield ("text", line)
-    if code_lines:
-        yield ("code", "\n".join(code_lines))
-
-
-
-def _add_markdown_inline_runs(paragraph, text):
-    """Markdown inline belgilarini Word run formatiga aylantiradi."""
-    value = str(text or "")
-    pattern = re.compile(r'(\*\*.+?\*\*|__.+?__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)')
-    cursor = 0
-    for match in pattern.finditer(value):
-        if match.start() > cursor:
-            paragraph.add_run(value[cursor:match.start()])
-        token = match.group(0)
-        if token.startswith(("**", "__")):
-            run = paragraph.add_run(token[2:-2])
-            run.bold = True
-        elif token.startswith("`"):
-            run = paragraph.add_run(token[1:-1])
-            run.font.name = "Consolas"
-        else:
-            run = paragraph.add_run(token[1:-1])
-            run.italic = True
-        cursor = match.end()
-    if cursor < len(value):
-        paragraph.add_run(value[cursor:])
-
-
-def _markdown_inline_to_reportlab(value):
-    """Markdown inline formatini kesishmaydigan, xavfsiz ReportLab XML'iga aylantiradi."""
-    from xml.sax.saxutils import escape
-    text = str(value or "")
-    token_pattern = re.compile(
-        r'(\*\*[^*\n]+?\*\*|__[^_\n]+?__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)'
-    )
-    output, cursor = [], 0
-    for match in token_pattern.finditer(text):
-        output.append(escape(text[cursor:match.start()]))
-        token = match.group(0)
-        if token.startswith(("**", "__")):
-            output.append("<b>" + escape(token[2:-2]) + "</b>")
-        elif token.startswith("`"):
-            output.append('<font name="Courier">' + escape(token[1:-1]) + "</font>")
-        else:
-            output.append("<i>" + escape(token[1:-1]) + "</i>")
-        cursor = match.end()
-    output.append(escape(text[cursor:]))
-    return "".join(output)
-
-
-def _markdown_heading_text(value):
-    return re.sub(r'^(?:\*\*|__)?(.*?)(?:\*\*|__)?$', r'\1', str(value or "")).strip()
-
-
-def _build_summary_docx(title, content):
-    document = Document()
-    section = document.sections[0]
-    section.top_margin = docx.shared.Cm(2.0)
-    section.bottom_margin = docx.shared.Cm(2.0)
-    heading = document.add_heading(title[:180], 0)
-    heading.alignment = 1
-    for kind, value in _iter_academic_blocks(content):
-        if kind == "heading":
-            level, text = value
-            document.add_heading(_markdown_heading_text(text), level=2 if level >= 3 else 1)
-        elif kind == "bullet":
-            paragraph = document.add_paragraph(style="List Bullet")
-            _add_markdown_inline_runs(paragraph, value)
-        elif kind == "number":
-            paragraph = document.add_paragraph(style="List Number")
-            _add_markdown_inline_runs(paragraph, value)
-        elif kind == "code":
-            paragraph = document.add_paragraph()
-            run = paragraph.add_run(value)
-            run.font.name = "Consolas"
-            run.font.size = docx.shared.Pt(9)
-        else:
-            paragraph = document.add_paragraph()
-            _add_markdown_inline_runs(paragraph, value)
-    quiz_ai_branding.add_qr_to_docx(document, feature="SUMMARY", page_break=False)
-    output = BytesIO()
-    document.save(output)
-    return output.getvalue()
-
-
-def _build_summary_pdf(title, content):
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted
-    from xml.sax.saxutils import escape
-    output = BytesIO()
-    regular, bold = _register_academic_pdf_fonts()
-    # Pastki 4 sm QR uchun bo'sh zona: QR matnni yopmaydi va alohida sahifa talab qilmaydi.
-    doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm,
-                            topMargin=1.8*cm, bottomMargin=4.0*cm)
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="SummaryTitle", parent=styles["Title"], fontName=bold,
-                              alignment=TA_CENTER, fontSize=18, leading=23, spaceAfter=14))
-    styles.add(ParagraphStyle(name="SummaryH1", parent=styles["Heading1"], fontName=bold,
-                              fontSize=15, leading=19, spaceBefore=12, spaceAfter=7))
-    styles.add(ParagraphStyle(name="SummaryH2", parent=styles["Heading2"], fontName=bold,
-                              fontSize=12, leading=16, spaceBefore=9, spaceAfter=5))
-    styles.add(ParagraphStyle(name="SummaryBody", parent=styles["BodyText"], fontName=regular,
-                              fontSize=10.5, leading=15, spaceAfter=5))
-    styles.add(ParagraphStyle(name="SummaryCode", parent=styles["Code"], fontName=regular,
-                              fontSize=8, leading=10, leftIndent=12))
-    story = [Paragraph(escape(title[:180]), styles["SummaryTitle"]), Spacer(1, 12)]
-    for kind, value in _iter_academic_blocks(content):
-        if kind == "heading":
-            level, text = value
-            story.append(Paragraph(_markdown_inline_to_reportlab(text),
-                                   styles["SummaryH2"] if level >= 3 else styles["SummaryH1"]))
-        elif kind == "bullet":
-            story.append(Paragraph("&#8226;&nbsp; " + _markdown_inline_to_reportlab(value), styles["SummaryBody"]))
-        elif kind == "number":
-            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["SummaryBody"]))
-        elif kind == "code":
-            story.append(Preformatted(escape(value), styles["SummaryCode"]))
-        else:
-            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["SummaryBody"]))
-    doc.build(story)
-    return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="SUMMARY")
-
-
-@app.get("/api/summary/usage")
-def api_summary_usage(request: Request, user_id: int):
-    if getattr(request.state, "telegram_user_id", None) != int(user_id):
-        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
-    if user_id <= 0: raise HTTPException(status_code=400, detail="Noto'g'ri foydalanuvchi ID")
-    return _summary_usage_snapshot(user_id)
-
-
-@app.get("/api/summary/config")
-def api_summary_config():
-    return {"status": "ok", "enabled": SUMMARY_ENABLED, "free_limit": SUMMARY_FREE_LIMIT,
-            "tariff_limits": SUMMARY_TARIFF_LIMITS}
-
-
-@app.get("/api/summary/download/{token}/{file_format}")
-def api_download_summary_file(token: str, file_format: str):
-    if file_format not in ("docx", "pdf"): raise HTTPException(status_code=404, detail="Fayl topilmadi")
-    now = time.time()
-    with _SUMMARY_DOWNLOAD_LOCK:
-        for key in [k for k,v in _SUMMARY_DOWNLOAD_FILES.items() if v["expires_at"] <= now]: _SUMMARY_DOWNLOAD_FILES.pop(key, None)
-        item = _SUMMARY_DOWNLOAD_FILES.get(token, {}).get(file_format)
-    if not item: raise HTTPException(status_code=404, detail="Fayl muddati tugagan yoki topilmadi")
-    return Response(content=item["data"], media_type=item["mime"], headers={"Content-Disposition": f'attachment; filename="{item["filename"].replace(chr(34), "")}"', "Cache-Control":"no-store"})
-
-
-@app.post("/api/summary/generate")
-def api_generate_summary(request: Request, user_id: int = Form(...), topic: str = Form(""), style: str = Form("standard"), purpose: str = Form("notebook"), file: Optional[UploadFile] = File(None)):
-    if getattr(request.state, "telegram_user_id", None) != int(user_id): raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
-    if not SUMMARY_ENABLED: raise HTTPException(status_code=503, detail="Konspekt yaratish xizmati hozircha o'chirilgan")
-    if not GOOGLE_API_KEYS: raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
-    topic = (topic or "").strip()[:SUMMARY_MAX_TOPIC_CHARS]
-    source_text = ""
-    if file is not None:
-        raw = file.file.read()
-        if len(raw) > SUMMARY_MAX_FILE_MB * 1024 * 1024: raise HTTPException(status_code=413, detail=f"Fayl hajmi {SUMMARY_MAX_FILE_MB} MB limitdan oshdi")
-        try: source_text = _extract_slide_source(raw, Path(file.filename or "").name)
-        except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
-        except Exception:
-            logging.exception("Konspekt manba faylini o'qishda xato")
-            raise HTTPException(status_code=400, detail="PDF/DOCX faylni o'qib bo'lmadi")
-    source_text = source_text[:SUMMARY_MAX_SOURCE_CHARS]
-    if not topic and not source_text.strip(): raise HTTPException(status_code=400, detail="Mavzu kiriting yoki PDF/DOCX fayl yuklang")
-    reserved, period_or_reason = _reserve_summary_quota(user_id, uuid.uuid4().hex)
-    if not reserved:
-        if period_or_reason == "limit": raise HTTPException(status_code=402, detail="Konspekt limiti tugagan. Tarifni faollashtiring.")
-        if period_or_reason == "disabled": raise HTTPException(status_code=503, detail="Konspekt yaratish o'chirilgan")
-        raise HTTPException(status_code=409, detail="Konspekt limitini tekshirib bo'lmadi")
-    period_key = period_or_reason
-    prompt_styles = {
-        "standard": "O'rtacha hajmli, aniq va tartibli konspekt",
-        "detailed": "Kengaytirilgan, batafsil konspekt; tushunchalar, izohlar va misollar bilan",
-        "exam": "Imtihonga tayyorlanish uchun muhim ta'riflar, formulalar, qonunlar va asosiy fikrlarni to'liq tushuntiruvchi konspekt"
-    }
-    style_text = prompt_styles.get(style, prompt_styles["standard"])
-    purpose_text = (
-        "Daftarga ko'chirish qulay bo'lsin, lekin mazmunni haddan tashqari qisqartirmang; asosiy tushuncha, ta'rif, formula va bog'lanishlarni qoldirmang."
-        if purpose == "notebook" else
-        "Word/PDF uchun to'liq, batafsil bo'limlar, izohlar, misollar va zarur joylarda formulalar bilan yozing."
-    )
-    word_target = (
-        "Konspektni odatda 1200-1400 so'z atrofida yozing; mavzu yoki manba mazmuni qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
-        if style == "standard" else
-        "Konspektni odatda 1600-2200 so'z atrofida yozing; manba qisqa bo'lsa, takror va sun'iy gaplar bilan hajmni to'ldirmang."
-    )
-    source_mode_instruction = (
-        "Quyidagi MANBA MATNI asosiy va ustuvor manbadir. Undagi muhim bo'lim, ta'rif, qonun, formula va xulosalarni to'liq yorit. "
-        "Manbada yo'q aniq fakt, sana, formula yoki iqtibosni qo'shma.\\n"
-        f"MANBA MATNI:\\n{source_text}"
-        if source_text.strip() else
-        "Foydalanuvchi fayl yuklamagan. Bu xato emas: MAVZU bo'yicha o'z bilimlaring asosida mustaqil, to'liq akademik konspekt yarat. "
-        "Hech qachon 'MANBA berilmagan', 'matn yuboring' yoki texnik rad javobini yozma. "
-        "Ishonchsiz statistik raqam, sana, formula yoki soxta iqtibos kiritma."
-    )
-    prompt = ("Siz tajribali o'qituvchi va akademik konspekt tuzuvchisiz. "
-              "Maqsad — tayyor, mazmunli va o'rganishga qulay konspekt berish. Bir-ikki jumlalik javob yoki faqat reja yozish taqiqlanadi. "
-              "Har bir asosiy tushunchani nima ekanligi, qanday ishlashi, tarkibiy qismlari va amaliy ahamiyati bilan tushuntir. "
-              "Bir xil fikrni takrorlama, lekin mazmunni haddan tashqari siqma. Zarur joyda sodda misol va bosqichma-bosqich tushuntirish ber. "
-              "O'zbekcha mavzu bo'lsa o'zbekcha, ruscha bo'lsa ruscha, inglizcha bo'lsa inglizcha yoz. Markdown sarlavhalari (#, ##, ###), qalin ajratish va punktlardan foydalan. "
-              f"Uslub: {style_text}. {purpose_text} {word_target} "
-              "Javob oxirida alohida Markdown sarlavhasi aynan '## XULOSA' bo'lsin. "
-              "XULOSA 1-2 mazmunli paragrafdan iborat bo'lsin; undan keyin '## O'ZINI TEKSHIRISH SAVOLLARI' sarlavhasi ostida 5 ta savol yozilsin. "
-              "Xulosa sarlavhasini savollar bilan birlashtirmang va sarlavhani tashlab ketmang.\\n"
-              f"MAVZU: {topic or 'Yuklangan manba asosida'}\\n{source_mode_instruction}")
-    try:
-        summary_timeout = max(60, min(600, int(os.getenv("SUMMARY_GENERATION_TIMEOUT", "240"))))
-        def _validate_summary_response(response):
-            text = _require_gemini_text(response)
-            words = len(re.findall(r"\b[\w'-]+\b", text, flags=re.UNICODE))
-            if not source_text.strip():
-                # 1 600 so'zlik eski qat'iy chegara 1 100-1 300 so'zli sifatli
-                # javoblarni ham rad etardi. Standart minimumni pasaytiramiz.
-                minimum_words = max(700, min(1400, int(os.getenv("SUMMARY_MIN_WORDS", "1000"))))
-                if words < minimum_words:
-                    raise ValueError(f"Konspekt juda qisqa: {words} so'z; kamida {minimum_words} so'z kerak")
-            else:
-                source_word_count = len(re.findall(r"\b[\w'-]+\b", source_text, flags=re.UNICODE))
-                # Qisqa manbadan sun'iy ravishda uzun matn talab qilmaymiz.
-                # Uzun manbalarda esa kamida 300 so'zlik mazmunli konspekt saqlanadi.
-                minimum_source_words = min(300, max(80, int(source_word_count * 0.5)))
-                if words < minimum_source_words:
-                    raise ValueError(
-                        f"Manbaga asoslangan konspekt juda qisqa: {words} so'z; "
-                        f"manba hajmiga mos minimum {minimum_source_words} so'z"
-                    )
-            # Model sarlavhani Markdown'siz yoki raqam bilan berishi mumkin.
-            # Shuning uchun faqat '## XULOSA' shakliga bog'lanib qolmaymiz.
-            conclusion_pattern = (
-                r"(?im)^\s*(?:#{1,6}\s*)?(?:\d+(?:[.\)]\d*)*[.)]?\s*)?"
-                r"(?:xulosa|yakuniy\s+xulosa|umumiy\s+xulosa|conclusion|concluding\s+remarks|заключение)"
-                r"\s*[:.!—-]?\s*$"
-            )
-            if not re.search(conclusion_pattern, text):
-                raise ValueError("Konspektda alohida Xulosa sarlavhasi topilmadi")
-            return text
-
-        summary_text = _run_gemini_generation(
-            feature_name="Konspekt",
-            prompt=prompt,
-            generation_config=genai_types.GenerateContentConfig(
-                temperature=0.25,
-                max_output_tokens=max(6000, min(30000, int(os.getenv("SUMMARY_MAX_OUTPUT_TOKENS", "20000")))),
-            ),
-            primary_model=os.getenv("SUMMARY_AI_MODEL", GEMINI_MODEL),
-            fallback_model=os.getenv("SUMMARY_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
-            total_timeout=summary_timeout,
-            response_validator=_validate_summary_response,
-            quality_retry_prompt_builder=lambda previous_text, validation_error: (
-                prompt
-                + "\n\nSIFATNI YAXSHILASH UCHUN BIR MARTALIK QAYTA ISHLASH: "
-                + "Quyidagi avvalgi javobni boshidan takrorlamasdan, mazmunini kengaytirib va tuzilishini tuzatib, "
-                + "to'liq yakuniy konspekt sifatida qayta yoz. Odatdagi mavzularda 1200-1400 so'zga intil, "
-                + "lekin manba qisqa bo'lsa sun'iy ma'lumot, takror yoki uydirma qo'shma. "
-                + "Alohida ## XULOSA sarlavhasi va undan keyin 5 ta o'zini tekshirish savoli bo'lishi shart. "
-                + f"Avvalgi tekshiruv izohi: {validation_error}\nAVVALGI JAVOB:\n{previous_text}"
-            ),
-        )
-        title = topic or (Path(file.filename).stem if file and file.filename else "O'quv konspekti")
-        safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_summary"
-        docx_bytes = _build_summary_docx(title, summary_text)
-        pdf_bytes = _build_summary_pdf(title, summary_text)
-        token = secrets.token_urlsafe(32); now = time.time()
-        with _SUMMARY_DOWNLOAD_LOCK:
-            for key in [k for k,v in _SUMMARY_DOWNLOAD_FILES.items() if v["expires_at"] <= now]: _SUMMARY_DOWNLOAD_FILES.pop(key, None)
-            _SUMMARY_DOWNLOAD_FILES[token] = {"expires_at":now+_SUMMARY_DOWNLOAD_TTL, "uses":0,
-                "docx":{"filename":safe_title+".docx","mime":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","data":docx_bytes},
-                "pdf":{"filename":safe_title+".pdf","mime":"application/pdf","data":pdf_bytes}}
-        return JSONResponse({"status":"ok","title":title,"download":{
-            "docx":{"url":f"/api/summary/download/{token}/docx","filename":safe_title+".docx"},
-            "pdf":{"url":f"/api/summary/download/{token}/pdf","filename":safe_title+".pdf"}
-        },"usage":_summary_usage_snapshot(user_id)})
-    except HTTPException:
-        _refund_summary_quota(user_id, period_key); raise
-    except Exception as exc:
-        _refund_summary_quota(user_id, period_key)
-        logging.exception("Konspekt yaratishda xato | user_id=%s | sabab=%s", user_id, _safe_ai_error_text(exc))
-        raise HTTPException(status_code=502, detail="Konspekt yaratilmadi. Limit hisobingizga qaytarildi.")
-
-
-
-# --- AI REFERAT YARATISH: mustaqil limit, konspekt limitidan alohida ---
-def _referat_user_quota(user_id):
+def _referat_bonus_change(user_id: int, amount: int, admin_id: int, action: str):
+    amount = int(amount)
+    if amount < 1 or amount > 1000: return False, "Miqdor 1 dan 1000 gacha bo‘lishi kerak."
     add_user_to_db(int(user_id))
     conn = _connect_db()
     try:
-        row = conn.execute(
-            "SELECT created_at,status,plan_key,premium_until FROM users WHERE user_id=?",
-            (int(user_id),)
-        ).fetchone()
-        if not row:
-            return {"period_key": "free:0", "limit": REFERAT_FREE_LIMIT, "plan": "free"}
-        created_at, status, plan_key, premium_until = row
-        now = int(time.time())
-        if is_active_paid_status(status or "", premium_until or 0):
-            key = get_plan_key(status or "", plan_key or "")
-            return {
-                "period_key": f"paid:{key}:{int(premium_until or 0)}",
-                "limit": REFERAT_TARIFF_LIMITS.get(key, 0),
-                "plan": key or "paid",
-            }
-        cycle_start = int(created_at or now)
-        if now - cycle_start >= 30 * 86400:
-            cycle_start = now
-            conn.execute(
-                "UPDATE users SET created_at=? WHERE user_id=? AND (premium_until IS NULL OR premium_until<?)",
-                (cycle_start, int(user_id), now)
-            )
-            conn.commit()
-        return {"period_key": f"free:{cycle_start}", "limit": REFERAT_FREE_LIMIT, "plan": "free"}
-    finally:
-        conn.close()
-
-
-def _referat_usage_snapshot(user_id):
-    quota = _referat_user_quota(user_id)
-    conn = _connect_db()
-    try:
-        row = conn.execute("SELECT period_key,used FROM referat_usage WHERE user_id=?", (int(user_id),)).fetchone()
-        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
-        bonus_row = conn.execute(
-            "SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)
-        ).fetchone()
-        bonus_remaining = int(bonus_row[0] or 0) if bonus_row else 0
-        limit = int(quota["limit"])
-        unlimited = limit == -1
-        regular_remaining = None if unlimited else max(0, limit - used)
-        remaining = None if unlimited else regular_remaining + bonus_remaining
-        return {
-            "status": "ok", "enabled": REFERAT_ENABLED, "plan": quota["plan"],
-            "used": used, "limit": None if unlimited else limit,
-            "remaining": remaining, "regular_remaining": regular_remaining,
-            "bonus_remaining": bonus_remaining, "unlimited": unlimited,
-            "allowed": REFERAT_ENABLED and (unlimited or regular_remaining > 0 or bonus_remaining > 0),
-        }
-    finally:
-        conn.close()
-
-
-def _reserve_referat_quota(user_id):
-    quota = _referat_user_quota(user_id)
-    limit = int(quota["limit"])
-    if not REFERAT_ENABLED:
-        return False, "disabled"
-    conn = _connect_db()
-    try:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT period_key,used FROM referat_usage WHERE user_id=?", (int(user_id),)).fetchone()
-        used = int(row[1] or 0) if row and row[0] == quota["period_key"] else 0
-        if limit != -1 and used >= limit:
-            bonus_row = conn.execute(
-                "SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)
-            ).fetchone()
-            bonus_balance = int(bonus_row[0] or 0) if bonus_row else 0
-            if bonus_balance <= 0:
-                conn.rollback()
-                return False, "limit"
-            cursor = conn.execute(
-                "UPDATE referat_bonus_wallets SET balance=balance-1,updated_at=? "
-                "WHERE user_id=? AND balance>0",
-                (int(time.time()), int(user_id))
-            )
-            if cursor.rowcount != 1:
-                conn.rollback()
-                return False, "limit"
-            conn.commit()
-            return True, "bonus"
-        conn.execute(
-            "INSERT INTO referat_usage(user_id,period_key,used,updated_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(user_id) DO UPDATE SET period_key=excluded.period_key,used=excluded.used,updated_at=excluded.updated_at",
-            (int(user_id), quota["period_key"], used + 1, int(time.time()))
-        )
-        conn.commit()
-        return True, quota["period_key"]
+        ref = f"referat-admin:{action}:{admin_id}:{user_id}:{uuid.uuid4().hex}"
+        delta = amount if action == "grant" else -amount
+        if action == "revoke":
+            row = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()
+            current = int(row[0] or 0) if row else 0
+            if current < amount: conn.rollback(); return False, f"Bekor qilish uchun bonus yetarli emas. Joriy bonus: {current} ta."
+        conn.execute("INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=balance+excluded.balance,updated_at=excluded.updated_at", (int(user_id),delta,int(time.time())))
+        conn.execute("INSERT INTO referat_bonus_transactions(user_id,amount,transaction_type,reference,description,admin_id,created_at) VALUES(?,?,?,?,?,?,?)", (int(user_id),delta,action,ref,"Referat bonusi: administrator amali",int(admin_id),int(time.time())))
+        balance = conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?", (int(user_id),)).fetchone()[0]
+        conn.commit(); logging.info("Referat admin bonusi | amal=%s | admin=%s | foydalanuvchi=%s | miqdor=%s | yangi_balans=%s", action,admin_id,user_id,amount,balance)
+        return True, int(balance)
     except Exception:
-        conn.rollback()
-        logging.exception("Referat limitini band qilishda xato | user_id=%s", user_id)
-        return False, "database"
-    finally:
-        conn.close()
-
-
-def _refund_referat_quota(user_id, period_key):
-    conn = _connect_db()
-    try:
-        if str(period_key) == "bonus":
-            conn.execute(
-                "INSERT INTO referat_bonus_wallets(user_id,balance,updated_at) VALUES(?,1,?) "
-                "ON CONFLICT(user_id) DO UPDATE SET balance=balance+1,updated_at=excluded.updated_at",
-                (int(user_id), int(time.time()))
-            )
-        else:
-            conn.execute(
-                "UPDATE referat_usage SET used=MAX(0,used-1),updated_at=? WHERE user_id=? AND period_key=?",
-                (int(time.time()), int(user_id), str(period_key))
-            )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        logging.exception("Referat limitini qaytarishda xato | user_id=%s", user_id)
-    finally:
-        conn.close()
-
-
-def _referat_heading_key(text):
-    """Sarlavhani Mundarija va majburiy bo'lim tekshiruvi uchun normallashtiradi."""
-    value = re.sub(r"^#+\s*", "", str(text or "")).strip().strip("*_ ")
-    value = re.sub(r"^\d+(?:\.\d+)*[.)]?\s*", "", value)
-    return re.sub(r"[^a-zа-яё0-9]+", "", value.lower())
-
-
-def _prepare_referat_sections(content):
-    """AI Mundarijasini olib tashlab, sarlavhalar asosida hujjat tarkibini tayyorlaydi."""
-    blocks = list(_iter_academic_blocks(_clean_academic_markdown(content, remove_cover=True)))
-    body, toc_entries = [], []
-    skip_toc = False
-    required = {"kirish": False, "xulosa": False, "bibliography": False}
-    excluded = {
-        "kirish", "introduction", "xulosa", "conclusion", "заключение",
-        "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"
-    }
-    for kind, value in blocks:
-        if kind == "heading":
-            level, heading_text = value
-            key = _referat_heading_key(heading_text)
-            heading_prefix = _referat_heading_key(re.split(r"[:—–]", heading_text, maxsplit=1)[0])
-            if key in {"mundarija", "reja", "contents", "tableofcontents"}:
-                skip_toc = True
-                continue
-            if skip_toc:
-                if key in {"kirish", "introduction"}:
-                    skip_toc = False
-                else:
-                    continue
-            if key in {"kirish", "introduction"} or heading_prefix in {"kirish", "introduction"}:
-                required["kirish"] = True
-                heading_text, level = "KIRISH", 1
-            elif key in {"xulosa", "conclusion", "заключение"} or heading_prefix in {"xulosa", "conclusion", "заключение"}:
-                required["xulosa"] = True
-                heading_text, level = "XULOSA", 1
-            elif key in {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"} or heading_prefix in {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
-                required["bibliography"] = True
-                heading_text, level = "FOYDALANILGAN ADABIYOTLAR", 1
-            body.append(("heading", (level, heading_text)))
-            # Statik Word mundarijasida KIRISH, XULOSA va adabiyotlar ham ko'rsatiladi.
-            # PDF mundarijasi ham barcha asosiy bo'limlarni o'z ichiga oladi.
-            toc_entries.append((0 if level <= 2 else 1, heading_text))
-        else:
-            if not skip_toc:
-                body.append((kind, value))
-
-    missing = [name for name, present in required.items() if not present]
-    if missing:
-        raise ValueError("Referatning majburiy bo'limlari yetishmaydi: " + ", ".join(missing))
-    main_titles = [name for level, name in toc_entries if level == 0]
-    if len(main_titles) < 3:
-        raise ValueError("Referatda kamida 3 ta asosiy bob bo'lishi kerak")
-    return body, toc_entries[:20]
-
-
-def _add_docx_static_toc(document, toc_entries):
-    """Word maydonlarisiz, ochilganda tasdiq talab qilmaydigan statik Mundarija."""
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt, RGBColor
-
-    for level, title in toc_entries:
-        paragraph = document.add_paragraph()
-        paragraph.paragraph_format.left_indent = Pt(18 if level else 0)
-        paragraph.paragraph_format.space_after = Pt(5)
-        paragraph.paragraph_format.keep_together = True
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        run = paragraph.add_run(str(title))
-        run.font.name = "Arial"
-        run.font.size = Pt(11 if level else 12)
-        run.bold = not bool(level)
-        run.font.color.rgb = RGBColor(0, 0, 0)
-
-
-def _add_referat_body_to_docx(document, content):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    body_blocks, toc_entries = _prepare_referat_sections(content)
-
-    # Ikkinchi sahifa: alohida Mundarija.
-    toc_heading = document.add_heading("MUNDARIJA", level=1)
-    toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    for run in toc_heading.runs:
-        run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
-    _add_docx_static_toc(document, toc_entries)
-    document.add_page_break()
-
-    for kind, value in body_blocks:
-        if kind == "heading":
-            level, text = value
-            heading_key = _referat_heading_key(text)
-            if heading_key in {"xulosa", "conclusion", "заключение", "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
-                # Xulosa va adabiyotlar bo'limlari bir-biridan ham ajratiladi.
-                document.add_page_break()
-            document.add_heading(_markdown_heading_text(text), level=2 if level >= 3 else 1)
-        elif kind == "bullet":
-            paragraph = document.add_paragraph(style="List Bullet")
-            _add_markdown_inline_runs(paragraph, value)
-        elif kind == "number":
-            paragraph = document.add_paragraph(style="List Number")
-            _add_markdown_inline_runs(paragraph, value)
-        elif kind == "code":
-            paragraph = document.add_paragraph()
-            run = paragraph.add_run(value)
-            run.font.name = "Consolas"
-            run.font.size = docx.shared.Pt(9)
-        else:
-            paragraph = document.add_paragraph()
-            _add_markdown_inline_runs(paragraph, value)
-
-
-def _build_referat_docx(title, content, author, university, faculty, group_name, teacher, subject):
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.section import WD_SECTION
-    from docx.shared import Cm, Pt, RGBColor
-
-    document = Document()
-    cover = document.sections[0]
-    cover.top_margin = Cm(2.2)
-    cover.bottom_margin = Cm(2.2)
-    cover.left_margin = Cm(2.5)
-    cover.right_margin = Cm(2.5)
-    _set_docx_page_border(cover)
-
-    # Titul sahifasi: ixcham, markazlangan va ramka ichida.
-    p = document.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(18)
-    run = p.add_run((university or "TA'LIM MUASSASASI").upper())
-    run.bold = True
-    run.font.name = "Arial"
-    run.font.size = Pt(15)
-    run.font.color.rgb = RGBColor(24, 49, 83)
-
-    if faculty:
-        p = document.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(faculty)
-        run.font.name = "Arial"
-        run.font.size = Pt(12)
-
-    for _ in range(3):
-        document.add_paragraph()
-
-    p = document.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(18)
-    run = p.add_run("REFERAT")
-    run.bold = True
-    run.font.name = "Arial"
-    run.font.size = Pt(24)
-    run.font.color.rgb = RGBColor(24, 49, 83)
-
-    p = document.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(14)
-    p.paragraph_format.space_after = Pt(24)
-    run = p.add_run(title[:220])
-    run.bold = True
-    run.font.name = "Arial"
-    run.font.size = Pt(17)
-
-    for label, value in (
-        ("Fan:", subject), ("Bajardi:", author), ("Guruh:", group_name), ("Tekshirdi:", teacher)
-    ):
-        if value:
-            p = document.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            p.paragraph_format.space_after = Pt(7)
-            run = p.add_run(f"{label} {value}")
-            run.font.name = "Arial"
-            run.font.size = Pt(12)
-
-    for _ in range(2):
-        document.add_paragraph()
-    p = document.add_paragraph(str(datetime.now().year))
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_before = Pt(18)
-
-    # Keyingi sahifalar ramkasiz qoladi; titul ramkasi faqat birinchi sahifada.
-    body_section = document.add_section(WD_SECTION.NEW_PAGE)
-    body_section.top_margin = Cm(2.0)
-    body_section.bottom_margin = Cm(2.0)
-    body_section.left_margin = Cm(3.0)
-    body_section.right_margin = Cm(1.5)
-    # Word sahifa ramkasini yangi sectionga meros qilib o'tkazib yubormasligi uchun
-    # Mundarija va asosiy matn sectionidan pgBorders tugunini aniq olib tashlaymiz.
-    from docx.oxml.ns import qn
-    body_pg_borders = body_section._sectPr.find(qn("w:pgBorders"))
-    if body_pg_borders is not None:
-        body_section._sectPr.remove(body_pg_borders)
-    _add_referat_body_to_docx(document, content)
-    # Referat QR'i yangi sahifa ochmaydi va caption yozuvini qo'shmaydi.
-    quiz_ai_branding.add_qr_to_docx(document, feature="REFERAT", page_break=False)
-    output = BytesIO()
-    document.save(output)
-    return output.getvalue()
-
-
-def _build_referat_pdf(title, content, author, university, faculty, group_name, teacher, subject):
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
-    from reportlab.lib.units import cm
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, PageBreak, Preformatted,
-    )
-    from reportlab.platypus.tableofcontents import TableOfContents
-    from xml.sax.saxutils import escape
-
-    output = BytesIO()
-    regular, bold = _register_academic_pdf_fonts()
-    # Pastki 4 sm QR uchun bo'sh zona ajratiladi.
-    doc = SimpleDocTemplate(
-        output, pagesize=A4, rightMargin=2.5*cm, leftMargin=2.5*cm,
-        topMargin=2.2*cm, bottomMargin=4.0*cm,
-        onFirstPage=_draw_referat_pdf_cover_frame,
-    )
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="ReferatTitle", parent=styles["Title"], fontName=bold,
-                              alignment=TA_CENTER, fontSize=21, leading=27, spaceAfter=18))
-    styles.add(ParagraphStyle(name="ReferatInstitution", parent=styles["Normal"], fontName=bold,
-                              alignment=TA_CENTER, fontSize=13, leading=18))
-    styles.add(ParagraphStyle(name="ReferatMeta", parent=styles["Normal"], fontName=regular,
-                              alignment=TA_RIGHT, fontSize=11, leading=17))
-    styles.add(ParagraphStyle(name="ReferatH1", parent=styles["Heading1"], fontName=bold,
-                              fontSize=15, leading=19, spaceBefore=12, spaceAfter=7, keepWithNext=True))
-    styles.add(ParagraphStyle(name="ReferatH2", parent=styles["Heading2"], fontName=bold,
-                              fontSize=12, leading=16, spaceBefore=9, spaceAfter=5, keepWithNext=True))
-    styles.add(ParagraphStyle(name="ReferatBody", parent=styles["BodyText"], fontName=regular,
-                              fontSize=10.5, leading=15, spaceAfter=5))
-    styles.add(ParagraphStyle(name="ReferatCode", parent=styles["Code"], fontName=regular,
-                              fontSize=8, leading=10, leftIndent=12))
-    styles.add(ParagraphStyle(name="TOCHeading", parent=styles["Heading1"], fontName=bold,
-                              alignment=TA_CENTER, fontSize=16, leading=20, spaceAfter=16))
-    styles.add(ParagraphStyle(name="TOCLevel0", fontName=regular, fontSize=9.5,
-                              leading=13, leftIndent=0, spaceAfter=3))
-    styles.add(ParagraphStyle(name="TOCLevel1", fontName=regular, fontSize=8.8,
-                              leading=11, leftIndent=18, spaceAfter=2))
-
-    story = [Spacer(1, cm), Paragraph(escape((university or "TA'LIM MUASSASASI").upper()),
-                                      styles["ReferatInstitution"])]
-    if faculty:
-        story.append(Paragraph(escape(faculty), styles["ReferatInstitution"]))
-    story.extend([Spacer(1, 4*cm), Paragraph("REFERAT", styles["ReferatTitle"]),
-                  Paragraph(escape(title[:220]), styles["ReferatTitle"]), Spacer(1, 3*cm)])
-    for label, value in (("Fan:", subject), ("Bajardi:", author), ("Guruh:", group_name), ("Tekshirdi:", teacher)):
-        if value:
-            story.append(Paragraph(f"{label} {escape(value)}", styles["ReferatMeta"]))
-    story.extend([Spacer(1, 3*cm), Paragraph(str(datetime.now().year), styles["ReferatInstitution"]),
-                  PageBreak()])
-
-    body_blocks, toc_entries = _prepare_referat_sections(content)
-    story.extend([Paragraph("MUNDARIJA", styles["TOCHeading"]), TableOfContents(), PageBreak()])
-    toc = story[-2]
-    toc.levelStyles = [styles["TOCLevel0"], styles["TOCLevel1"]]
-
-    for kind, value in body_blocks:
-        if kind == "heading":
-            level, heading_text = value
-            heading_key = _referat_heading_key(heading_text)
-            if heading_key in {"xulosa", "conclusion", "заключение", "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"}:
-                story.append(PageBreak())
-            style = styles["ReferatH2"] if level >= 3 else styles["ReferatH1"]
-            paragraph = Paragraph(_markdown_inline_to_reportlab(heading_text), style)
-            paragraph._quiz_toc_level = 1 if level >= 3 else 0
-            story.append(paragraph)
-        elif kind == "bullet":
-            story.append(Paragraph("&#8226;&nbsp; " + _markdown_inline_to_reportlab(value), styles["ReferatBody"]))
-        elif kind == "number":
-            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
-        elif kind == "code":
-            story.append(Preformatted(escape(value), styles["ReferatCode"]))
-        else:
-            story.append(Paragraph(_markdown_inline_to_reportlab(value), styles["ReferatBody"]))
-
-    def _after_flowable(self, flowable):
-        level = getattr(flowable, "_quiz_toc_level", None)
-        if level is None:
-            return
-        heading_text = flowable.getPlainText()
-        key = "referat-%s-%s" % (self.page, abs(hash(heading_text)) % 100000000)
-        self.canv.bookmarkPage(key)
-        self.notify("TOCEntry", (level, heading_text, self.page, key))
-
-    doc.afterFlowable = _after_flowable.__get__(doc, type(doc))
-    doc.multiBuild(story, maxPasses=4)
-    return quiz_ai_branding.add_qr_to_pdf_bytes(output.getvalue(), feature="REFERAT")
-
-
-@app.get("/api/referat/usage")
-def api_referat_usage(request: Request, user_id: int):
-    if getattr(request.state, "telegram_user_id", None) != int(user_id):
-        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
-    if user_id <= 0:
-        raise HTTPException(status_code=400, detail="Noto'g'ri foydalanuvchi ID")
-    return _referat_usage_snapshot(user_id)
+        conn.rollback(); logging.exception("Referat bonusini boshqarishda xatolik | admin=%s | user=%s",admin_id,user_id); return False,"Ma'lumotlar bazasida xatolik."
+    finally: conn.close()
 
 
 @app.get("/api/referat/config")
 def api_referat_config():
-    return {"status": "ok", "enabled": REFERAT_ENABLED, "free_limit": REFERAT_FREE_LIMIT,
-            "tariff_limits": REFERAT_TARIFF_LIMITS}
+    return {"status":"ok", "enabled":REFERAT_ENABLED, "free_limit":None if REFERAT_FREE_LIMIT == -1 else REFERAT_FREE_LIMIT,
+            "free_limit_display":{lang:format_free_limit(REFERAT_FREE_LIMIT,lang) for lang in ("uz","ru","en")},
+            "tariff_limits":REFERAT_TARIFF_LIMITS, "max_file_mb":REFERAT_MAX_FILE_MB}
+
+
+@app.get("/api/referat/status")
+def api_referat_status(request: Request, user_id: int):
+    if getattr(request.state,"telegram_user_id",None) != int(user_id): raise HTTPException(status_code=403,detail="Telegram foydalanuvchi ID mos kelmadi")
+    cycle, limit, paid = _referat_cycle_and_limit(user_id)
+    conn=_connect_db()
+    try:
+        row=conn.execute("SELECT used_count FROM referat_usage WHERE user_id=? AND cycle_key=?",(int(user_id),cycle)).fetchone()
+        bonus=conn.execute("SELECT balance FROM referat_bonus_wallets WHERE user_id=?",(int(user_id),)).fetchone()
+        used=int(row[0] or 0) if row else 0; bonus_count=int(bonus[0] or 0) if bonus else 0
+        remaining=None if limit == -1 else max(0,limit-used)
+        return {"status":"ok","limit":limit,"used":used,"remaining":remaining,"bonus":bonus_count,"paid":paid,"total_available":None if remaining is None else remaining+bonus_count}
+    finally: conn.close()
+
+
+@app.post("/api/referat/generate")
+def api_generate_referat(request: Request, user_id: int = Form(...), topic: str = Form(""),
+                         student_name: str = Form(""), university: str = Form(""), faculty: str = Form(""),
+                         group: str = Form(""), subject: str = Form(""), reviewer: str = Form(""),
+                         file: Optional[UploadFile] = File(None)):
+    if getattr(request.state,"telegram_user_id",None) != int(user_id): raise HTTPException(status_code=403,detail="Telegram foydalanuvchi ID mos kelmadi")
+    if not REFERAT_ENABLED: raise HTTPException(status_code=503,detail="Referat xizmati vaqtincha o‘chirilgan.")
+    if not GOOGLE_API_KEYS: raise HTTPException(status_code=503,detail="AI xizmati sozlanmagan.")
+    topic=(topic or "").strip(); topic=topic[:REFERAT_MAX_TOPIC_CHARS]
+    fields={"student_name":student_name,"university":university,"faculty":faculty,"group":group,"subject":subject,"reviewer":reviewer}
+    fields={k:str(v or "").strip()[:180] for k,v in fields.items()}
+    source_text=""
+    if file is not None and file.filename:
+        raw=file.file.read()
+        if len(raw)>REFERAT_MAX_FILE_MB*1024*1024: raise HTTPException(status_code=413,detail=f"Fayl hajmi {REFERAT_MAX_FILE_MB} MB limitdan oshdi.")
+        try: source_text=extract_source_text(raw,Path(file.filename).name,REFERAT_MAX_PDF_PAGES,REFERAT_MAX_SOURCE_CHARS)
+        except ReferatError as exc: raise HTTPException(status_code=400,detail=str(exc))
+    if not topic and not source_text: raise HTTPException(status_code=400,detail="Referat mavzusini kiriting yoki PDF/DOCX fayl yuklang.")
+    job_id=uuid.uuid4().hex
+    reserved, info=_reserve_referat_job(user_id,job_id)
+    if not reserved:
+        if info.get("reason")=="limit_reached": raise HTTPException(status_code=402,detail=f"Referat limiti tugagan. Tarif limiti: {info.get('limit')}; ishlatilgan: {info.get('used')}; bonus: {info.get('bonus')}.")
+        raise HTTPException(status_code=500,detail="Referat limitini tekshirishda xatolik yuz berdi.")
+    logging.info("Referat yaratish boshlandi | foydalanuvchi=%s | ish=%s | mavzu_bor=%s | manba_bor=%s | manba_hajmi=%s",user_id,job_id,bool(topic),bool(source_text),len(source_text))
+    acquired=False
+    try:
+        acquired=gemini_semaphore.acquire(timeout=max(1,AI_REQUEST_TIMEOUT))
+        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        start=_next_generation_key_start(len(GOOGLE_API_KEYS)); content=None; last_error=None
+        for offset in range(len(GOOGLE_API_KEYS)):
+            key_index=(start+offset)%len(GOOGLE_API_KEYS)
+            try:
+                client=genai.Client(api_key=GOOGLE_API_KEYS[key_index],http_options=genai_types.HttpOptions(timeout=AI_REQUEST_TIMEOUT*1000))
+                content=generate_referat_content(client=client,model=REFERAT_AI_MODEL,topic=topic,source_text=source_text,**fields,max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS)
+                break
+            except Exception as exc:
+                last_error=exc; logging.warning("Referat AI urinish muvaffaqiyatsiz | foydalanuvchi=%s | ish=%s | kalit_tartib=%s | sabab=%s",user_id,job_id,key_index+1,_safe_ai_error_text(exc))
+        if content is None: raise RuntimeError(_safe_ai_error_text(last_error or "AI javob bermadi"))
+        meta=dict(fields)
+        docx_bytes=build_referat_docx(content,meta,quiz_ai_branding)
+        pdf_bytes=build_referat_pdf(content,meta,quiz_ai_branding)
+        safe_title=re.sub(r"[^A-Za-z0-9_-]+","_",content.get("title","referat")).strip("_")[:60] or "quiz_ai_referat"
+        token=secrets.token_urlsafe(32)
+        with _REFERAT_DOWNLOAD_LOCK:
+            now=time.time()
+            for old in [k for k,v in _REFERAT_DOWNLOAD_FILES.items() if v["expires_at"]<=now]: _REFERAT_DOWNLOAD_FILES.pop(old,None)
+            _REFERAT_DOWNLOAD_FILES[token]={"expires_at":now+_REFERAT_DOWNLOAD_TTL,
+                "docx":{"filename":safe_title+".docx","mime":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","data":docx_bytes},
+                "pdf":{"filename":safe_title+".pdf","mime":"application/pdf","data":pdf_bytes}}
+        _finish_referat_job(job_id,True,content.get("title",""))
+        logging.info("Referat muvaffaqiyatli yaratildi | foydalanuvchi=%s | ish=%s | sarlavha=%s | docx_bayt=%s | pdf_bayt=%s",user_id,job_id,content.get("title",""),len(docx_bytes),len(pdf_bytes))
+        return {"status":"ok","job_id":job_id,"title":content.get("title","Referat"),"files":{
+            "docx":{"filename":safe_title+".docx","url":f"/api/referat/download/{token}/docx"},
+            "pdf":{"filename":safe_title+".pdf","url":f"/api/referat/download/{token}/pdf"}}}
+    except Exception as exc:
+        _finish_referat_job(job_id,False)
+        logging.exception("Referat yaratishda xatolik | foydalanuvchi=%s | ish=%s | sabab=%s",user_id,job_id,_safe_ai_error_text(exc))
+        raise HTTPException(status_code=502,detail="Referat yaratilmadi. Sarflangan limit yoki bonus balansga qaytarildi.")
+    finally:
+        if acquired: gemini_semaphore.release()
 
 
 @app.get("/api/referat/download/{token}/{file_format}")
 def api_download_referat_file(token: str, file_format: str):
-    if file_format not in ("docx", "pdf"):
-        raise HTTPException(status_code=404, detail="Fayl topilmadi")
-    now = time.time()
+    if file_format not in ("pdf","docx"): raise HTTPException(status_code=404,detail="Fayl topilmadi")
     with _REFERAT_DOWNLOAD_LOCK:
-        for key in [k for k, value in _REFERAT_DOWNLOAD_FILES.items() if value["expires_at"] <= now]:
-            _REFERAT_DOWNLOAD_FILES.pop(key, None)
-        item = _REFERAT_DOWNLOAD_FILES.get(token, {}).get(file_format)
-    if not item:
-        raise HTTPException(status_code=404, detail="Referat fayli muddati tugagan yoki topilmadi")
-    return Response(
-        content=item["data"], media_type=item["mime"],
-        headers={"Content-Disposition": f'attachment; filename="{item["filename"].replace(chr(34), "")}"',
-                 "Cache-Control": "no-store"}
-    )
-
-
-@app.post("/api/referat/generate")
-def api_generate_referat(
-    request: Request,
-    user_id: int = Form(...),
-    topic: str = Form(""),
-    author: str = Form(""),
-    university: str = Form(""),
-    faculty: str = Form(""),
-    group_name: str = Form(""),
-    teacher: str = Form(""),
-    subject: str = Form(""),
-    lang: str = Form("uz"),
-    file: Optional[UploadFile] = File(None),
-):
-    if getattr(request.state, "telegram_user_id", None) != int(user_id):
-        raise HTTPException(status_code=403, detail="Telegram foydalanuvchi ID mos kelmadi")
-    if not REFERAT_ENABLED:
-        raise HTTPException(status_code=503, detail="Referat yaratish xizmati hozircha o'chirilgan")
-    if not GOOGLE_API_KEYS:
-        raise HTTPException(status_code=503, detail="AI xizmati sozlanmagan")
-
-    topic = (topic or "").strip()[:REFERAT_MAX_TOPIC_CHARS]
-    author = (author or "").strip()[:160]
-    university = (university or "").strip()[:220]
-    faculty = (faculty or "").strip()[:220]
-    group_name = (group_name or "").strip()[:100]
-    teacher = (teacher or "").strip()[:160]
-    subject = (subject or "").strip()[:160]
-    lang = lang if lang in ("uz", "ru", "en") else "uz"
-    output_language = {"uz": "o'zbek tilida", "ru": "rus tilida", "en": "ingliz tilida"}[lang]
-    source_text = ""
-    if file is not None:
-        raw = file.file.read()
-        if len(raw) > REFERAT_MAX_FILE_MB * 1024 * 1024:
-            raise HTTPException(status_code=413, detail=f"Fayl hajmi {REFERAT_MAX_FILE_MB} MB limitdan oshdi")
-        try:
-            source_text = _extract_slide_source(raw, Path(file.filename or "").name)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except Exception:
-            logging.exception("Referat manba faylini o'qishda xato")
-            raise HTTPException(status_code=400, detail="PDF/DOCX faylni o'qib bo'lmadi")
-    source_text = source_text[:REFERAT_MAX_SOURCE_CHARS]
-    if not topic and not source_text.strip():
-        raise HTTPException(status_code=400, detail="Referat mavzusini kiriting yoki PDF/DOCX manba yuklang")
-
-    reserved, period_key = _reserve_referat_quota(user_id)
-    if not reserved:
-        if period_key == "limit":
-            raise HTTPException(status_code=402, detail="Referat yaratish limitingiz tugagan. Tarifni faollashtiring.")
-        if period_key == "disabled":
-            raise HTTPException(status_code=503, detail="Referat yaratish o'chirilgan")
-        raise HTTPException(status_code=409, detail="Referat limitini tekshirib bo'lmadi")
-
-    prompt = (
-        "Siz oliy ta'lim uchun akademik referatlar yozuvchi tajribali ilmiy yordamchisiz. "
-        f"Referatni {output_language}, rasmiy-akademik uslubda yozing. Foydalanuvchi mavzusi va berilgan manbaga "
-        "tayaning; manbada bo'lmagan fakt, statistika, sana, iqtibos yoki bibliografik manbani to'qimang. "
-        "Agar manba yetarli bo'lmasa, umumiy tushuntirishlarni ehtiyotkorlik bilan yozing va foydalanilgan "
-        "adabiyotlar bo'limida faqat haqiqiyligi va bibliografik ma'lumoti ishonchli bo'lgan manbalarni kiriting. "
-        "Ma'lumot yetarli bo'lmasa, bibliografik ma'lumotni taxmin qilmang va izoh, uzr, eslatma yoki qavs ichidagi tushuntirish yozmang. "
-        "Markdown sarlavhalaridan foydalaning. Mundarijani AI yozmasin — dastur uni bob sarlavhalaridan avtomatik tuzadi. "
-        "Tarkib tartibi: KIRISH; 3-4 ta mantiqiy asosiy bob va kichik bo'limlari; XULOSA; "
-        "FOYDALANILGAN ADABIYOTLAR (faqat tekshiriladigan manbalar ro'yxati; tasdiqlanmagan manbalar o'rniga izoh yozma). "
-        "MUHIM: titul varag'ini, universitet/fakultet nomini, muallif, guruh, fan yoki tekshiruvchi ma'lumotlarini qayta yozmang. "
-        "AI javobi bevosita KIRISH sarlavhasidan boshlansin. Mundarija va titul varag'ini javobga kiritmang. "
-        "Referat yuzaki reja yoki qisqa konspekt bo'lmasin: kirishda mavzuning dolzarbligi, maqsadi va vazifalarini yoritib bering; "
-        "har bir bobda sabab-oqibat, tushuncha, jarayon va amaliy ahamiyatni izchil tahlil qiling; boblar orasida mantiqiy bog'lanish bo'lsin. "
-        "Asosiy matnni imkon qadar 1200-1600 so'z atrofida yozing; mazmunni takrorlash yoki fakt to'qish hisobiga hajmni oshirmang. "
-        "Har bir asosiy bo'lim sarlavhasini alohida Markdown sarlavhasi (# yoki ##) qilib yozing. Sarlavhalar aniq bo'lsin: # KIRISH, # 1. ..., # 2. ..., # 3. ..., # XULOSA, # FOYDALANILGAN ADABIYOTLAR. "
-        "Asosiy boblar kamida 3 ta bo'lsin. O'zini tekshirish savollari yoki test savollarini referat oxiriga qo'shmang. "
-        "Xulosa boblarda ko'rib chiqilgan fikrlarni umumlashtirsin. Referat izchil, mazmunli, takrorlarsiz va topshirishga mos bo'lsin. "
-        f"Mavzu: {topic or 'Yuklangan manba asosida'}\nFan: {subject}\n"
-        f"Muallif: {author}\nTa'lim muassasasi: {university}\nFakultet: {faculty}\n"
-        f"Guruh: {group_name}\nTekshiruvchi: {teacher}\nMANBA MATNI:\n{source_text}"
-    )
-    def _validate_referat_response(response):
-        raw_text = _require_gemini_text(response)
-        normalized = _clean_academic_markdown(raw_text, remove_cover=True)
-
-        # Majburiy bo'limlarni Markdown belgisi bo'lmasa ham mazmunidan aniqlaymiz.
-        heading_keys = set()
-        main_count = 0
-        for line in normalized.splitlines():
-            candidate = re.sub(r"^\s*#{1,6}\s*", "", line).strip().strip("*_ ")
-            key = _referat_heading_key(candidate)
-            if key in {
-                "kirish", "introduction", "xulosa", "conclusion", "заключение",
-                "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar",
-            }:
-                heading_keys.add(key)
-                continue
-            prefix = re.split(r"[:—–]", candidate, maxsplit=1)[0].strip()
-            prefix_key = _referat_heading_key(prefix)
-            if prefix_key in {
-                "kirish", "introduction", "xulosa", "conclusion", "заключение",
-                "foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar",
-            }:
-                heading_keys.add(prefix_key)
-            if re.match(r"^\d+\.\s+.{5,120}$", candidate) and len(candidate.split()) <= 16:
-                main_count += 1
-
-        required_groups = (
-            {"kirish", "introduction"},
-            {"xulosa", "conclusion", "заключение"},
-            {"foydalanilganadabiyotlar", "references", "bibliography", "adabiyotlar"},
-        )
-        if any(not (group & heading_keys) for group in required_groups):
-            raise ValueError("Referatda KIRISH, XULOSA va FOYDALANILGAN ADABIYOTLAR bo'limlari aniq sarlavha bilan bo'lishi kerak")
-
-        markdown_main = sum(
-            1 for line in normalized.splitlines()
-            if re.match(r"^#{1,2}\s+\d+\.\s+", line.strip())
-        )
-        if max(main_count, markdown_main) < 3:
-            raise ValueError("Referatda kamida 3 ta raqamlangan asosiy bob bo'lishi kerak")
-
-        word_count = len(re.findall(r"\b[\w'-]+\b", normalized, flags=re.UNICODE))
-        min_words = max(750, min(1200, int(os.getenv("REFERAT_MIN_WORDS", "900"))))
-        if not source_text.strip() and word_count < min_words:
-            raise ValueError(f"Referat juda qisqa: {word_count} so'z; kamida {min_words} so'z kerak")
-        if source_text.strip() and word_count < 500:
-            raise ValueError(f"Manbaga asoslangan referat juda qisqa: {word_count} so'z")
-        return raw_text
-
-    def _referat_quality_retry_prompt(original_text, validation_error):
-        return (
-            "Quyidagi referat loyihasini sifat talablariga moslab qayta yozing. "
-            "Mavjud mazmunni saqlang, mavzuni kengaytiring, lekin yangi tekshirilmagan fakt, sana, statistika yoki bibliografiya to'qimang. "
-            "Kamida 3 ta raqamlangan asosiy bob bo'lsin. Sarlavhalarni alohida Markdown ko'rinishida yozing: "
-            "# KIRISH, # 1. ..., # 2. ..., # 3. ..., # XULOSA, # FOYDALANILGAN ADABIYOTLAR. "
-            "Mundarija, titul varag'i, o'zini tekshirish savollari, izoh va uzr yozmang. "
-            "Manba matni bo'lmaganida umumiy ilmiy tushuntirish bilan 1000-1300 so'zga yetkazing; "
-            "manba berilgan bo'lsa, faqat undagi ma'lumotlarni batafsil oching. "
-            "Faqat yakuniy referatni qaytaring.\n\n"
-            f"Sifat tekshiruvida aniqlangan kamchilik: {validation_error}\n\n"
-            "QAYTA ISHLANADIGAN REFERAT:\n" + str(original_text or "")
-        )
-
-    try:
-        referat_timeout = max(60, min(900, int(os.getenv("REFERAT_GENERATION_TIMEOUT", "360"))))
-        referat_text = _run_gemini_generation(
-            feature_name="Referat",
-            prompt=prompt,
-            generation_config=genai_types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS,
-            ),
-            primary_model=os.getenv("REFERAT_AI_MODEL", GEMINI_MODEL),
-            fallback_model=os.getenv("REFERAT_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
-            total_timeout=referat_timeout,
-            response_validator=_validate_referat_response,
-            quality_retry_prompt_builder=_referat_quality_retry_prompt,
-        )
-        referat_text = _clean_academic_markdown(referat_text, remove_cover=True)
-        title = topic or (Path(file.filename).stem if file and file.filename else "Referat")
-        safe_title = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:55] or "quiz_ai_referat"
-        docx_bytes = _build_referat_docx(title, referat_text, author, university, faculty, group_name, teacher, subject)
-        pdf_bytes = _build_referat_pdf(title, referat_text, author, university, faculty, group_name, teacher, subject)
-        token = secrets.token_urlsafe(32)
-        now = time.time()
-        with _REFERAT_DOWNLOAD_LOCK:
-            for key in [k for k, value in _REFERAT_DOWNLOAD_FILES.items() if value["expires_at"] <= now]:
-                _REFERAT_DOWNLOAD_FILES.pop(key, None)
-            _REFERAT_DOWNLOAD_FILES[token] = {
-                "expires_at": now + _REFERAT_DOWNLOAD_TTL, "uses": 0,
-                "docx": {
-                    "filename": safe_title + ".docx",
-                    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "data": docx_bytes,
-                },
-                "pdf": {"filename": safe_title + ".pdf", "mime": "application/pdf", "data": pdf_bytes},
-            }
-        return JSONResponse({
-            "status": "ok", "title": title,
-            "download": {
-                "docx": {"url": f"/api/referat/download/{token}/docx", "filename": safe_title + ".docx"},
-                "pdf": {"url": f"/api/referat/download/{token}/pdf", "filename": safe_title + ".pdf"},
-            },
-            "usage": _referat_usage_snapshot(user_id),
-        })
-    except HTTPException:
-        _refund_referat_quota(user_id, period_key)
-        raise
-    except Exception as exc:
-        _refund_referat_quota(user_id, period_key)
-        logging.exception("Referat yaratishda xato | user_id=%s | sabab=%s", user_id, _safe_ai_error_text(exc))
-        raise HTTPException(status_code=502, detail="Referat yaratilmadi. Limit hisobingizga qaytarildi.")
+        item=_REFERAT_DOWNLOAD_FILES.get(token)
+        if not item or item["expires_at"]<=time.time(): _REFERAT_DOWNLOAD_FILES.pop(token,None); item=None
+        file_item=item.get(file_format) if item else None
+    if not file_item: raise HTTPException(status_code=404,detail="Referat fayli muddati tugagan yoki topilmadi")
+    return Response(content=file_item["data"],media_type=file_item["mime"],headers={"Content-Disposition":f'attachment; filename="{file_item["filename"]}"',"Cache-Control":"no-store"})
 
 
 # Slayd fayllari Telegram WebView'da barqaror yuklanishi uchun qisqa muddatli saqlanadi.
@@ -6058,7 +4740,8 @@ def api_generate_slides(
     prompt = (
         "Siz professional taqdimot muallifisiz. JSON sxemaga mos javob qaytaring.\n"
         f"Aynan {slide_count} ta slayd yarating. Birinchi element sarlavha/cover slaydi bo'lsin; uning sarlavhasi coverda ishlatiladi. "
-        "ENG OXIRGI SLAYD MAJBURIY XULOSA bo'lsin: sarlavhasi matn tiliga mos ravishda XULOSA/Conclusion/Заключение bo'lsin va unda 3-5 yakuniy fikr bo'lsin. "
+        "OXIRGI SLAYD albatta taqdimotning yakuniy XULOSA qismi bo'lsin: unda mavzuning asosiy fikrlari, muhim natijalari va kerak bo'lsa amaliy takliflari qisqa jamlansin. Oxirgi slaydni yangi mavzu yoki navbatdagi bob bilan tugatmang. Sarlavhani mazmunga va foydalanuvchi tiliga mos ravishda 'Xulosa', 'Xulosa va takliflar', 'Asosiy natijalar' kabi tanlang. "
+        "Birinchi cover slaydi va oxirgi xulosa slaydi foydalanuvchi so'ragan umumiy slaydlar soni ichida bo'lsin; qo'shimcha slayd yaratmang. "
         "Qolgan HAR BIR slaydda 2-5 ta aniq, qisqa bullet va mazmunga mos kamida BITTA vizual diagramma/sxema bo'lishi SHART. visual_type faqat bar, column, pie, line, process, timeline, cards, cycle, pyramid yoki funnel bo'lsin; none ishlatmang. "
         "Manbada aniq sonlar bo'lsa chart uchun visual_labels va visual_values ni to'ldiring; son bo'lmasa hech qanday raqam to'qimang va cards/process/timeline/cycle/pyramid/funnel kabi mazmuniy sxemalardan foydalaning. "
         "Diagramma turini ma'lumot tabiatiga qarab tanlang: ulushlar uchun pie, vaqt bo'yicha o'zgarish uchun line, toifalarni taqqoslash uchun bar yoki column; mavzu bosqichlari uchun process/timeline, tarkibiy qismlar uchun cards, davriy jarayon uchun cycle, darajalar uchun pyramid, ketma-ket kamayish uchun funnel. "
@@ -6073,55 +4756,32 @@ def api_generate_slides(
         "Agar titul ma'lumotlari berilgan bo'lsa, birinchi slayd subtitle qismiga ixcham va tartibli joylashtiring.\\n"
         f"Manba matni:\\n{source_text}"
     )
-    slide_timeout = max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
-
-    def _validate_slide_response(response):
-        deck_result = SlideDeckSchema.model_validate_json(response.text)
-        if len(deck_result.slides) != slide_count:
-            raise ValueError(f"Slaydlar soni mos emas: {len(deck_result.slides)}/{slide_count}")
-        if len(deck_result.slides) < 2:
-            raise ValueError("Taqdimotda titul va Xulosa slaydlari bo'lishi kerak")
-        final_title = re.sub(r"[^a-zа-яё]+", "", deck_result.slides[-1].title.lower())
-        if not any(marker in final_title for marker in ("xulosa", "conclusion", "заключение", "итог")):
-            raise ValueError("Oxirgi slayd XULOSA bo'lishi shart")
-        if not 3 <= len(deck_result.slides[-1].bullets) <= 5:
-            raise ValueError("Xulosa slaydida 3-5 ta yakuniy fikr bo'lishi shart")
-        if not source_text.strip():
-            # Faqat mavzu berilgan holatda AI statistik sonlarni taxminan to'ldirishi mumkin.
-            # Bunday slaydni butunlay rad etish o'rniga, chartni fakt to'qimaydigan
-            # mazmuniy sxemaga aylantiramiz. Natijada slaydlar yaratiladi, raqamlar esa
-            # manbada bo'lmaganda taqdimotga kiritilmaydi.
-            safe_flow_types = ("cards", "process", "timeline", "cycle", "pyramid", "funnel")
-            for index, item in enumerate(deck_result.slides):
-                if item.visual_type in {"bar", "column", "pie", "line"}:
-                    labels = [
-                        str(value).strip()[:90]
-                        for value in (item.bullets or [])
-                        if str(value).strip()
-                    ][:6]
-                    if len(labels) < 2:
-                        labels = [str(item.title).strip()[:90], "Asosiy jihatlar"]
-                    item.visual_type = safe_flow_types[index % len(safe_flow_types)]
-                    item.visual_title = (item.visual_title or item.title)[:120]
-                    item.visual_labels = labels
-                    item.visual_values = []
-        return deck_result
-
+    deadline = time.monotonic() + max(60, min(600, int(os.getenv("SLIDE_GENERATION_TIMEOUT", "180"))))
+    deck = None; last_error = None
+    start_index = _next_generation_key_start(len(GOOGLE_API_KEYS))
     try:
-        deck = _run_gemini_generation(
-            feature_name="Slayd",
-            prompt=prompt,
-            generation_config=genai_types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=SlideDeckSchema,
-                temperature=0.35,
-                max_output_tokens=12000,
-            ),
-            primary_model=os.getenv("SLIDE_AI_MODEL", GEMINI_MODEL),
-            fallback_model=os.getenv("SLIDE_FALLBACK_MODEL", GEMINI_FALLBACK_MODEL),
-            total_timeout=slide_timeout,
-            response_validator=_validate_slide_response,
-        )
+        acquired = gemini_semaphore.acquire(timeout=max(1, deadline-time.monotonic()))
+        if not acquired: raise RuntimeError("AI navbatida kutish vaqti tugadi")
+        try:
+            for offset in range(len(GOOGLE_API_KEYS)):
+                if time.monotonic() >= deadline: break
+                key_index = (start_index + offset) % len(GOOGLE_API_KEYS)
+                try:
+                    client = genai.Client(api_key=GOOGLE_API_KEYS[key_index], http_options=genai_types.HttpOptions(timeout=max(1000, int((deadline-time.monotonic())*1000))))
+                    response = client.models.generate_content(
+                        model=os.getenv("SLIDE_AI_MODEL", GEMINI_FALLBACK_MODEL), contents=prompt,
+                        config=genai_types.GenerateContentConfig(response_mime_type="application/json", response_schema=SlideDeckSchema, temperature=.35, max_output_tokens=12000),
+                    )
+                    if not response or not response.text: raise RuntimeError("AI bo'sh javob qaytardi")
+                    deck = SlideDeckSchema.model_validate_json(response.text)
+                    if len(deck.slides) != slide_count: raise RuntimeError(f"Slaydlar soni mos emas: {len(deck.slides)}/{slide_count}")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning("Slayd Gemini urinish muvaffaqiyatsiz | kalit_indeksi=%s | sabab=%s", key_index+1, _safe_ai_error_text(exc))
+        finally:
+            gemini_semaphore.release()
+        if deck is None: raise RuntimeError(_safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi"))
         deck = _ensure_slide_visuals(deck)
         allowed_slide_themes = ("modern", "minimal", "academic", "creative", "tech", "business", "infographic", "nature", "elegant")
         safe_theme = (deck.design_theme if deck.design_theme in allowed_slide_themes else "modern") if theme == "auto" else (theme if theme in allowed_slide_themes else "modern")
@@ -6757,11 +5417,11 @@ _ai_queue_last_alert_at = 0.0
 
 
 def _safe_ai_error_text(error):
-    """AI xatolaridan maxfiy kalitlarni olib tashlab, xavfsiz matn qaytaradi."""
+    """AI provider xatolaridan maxfiy kalitlarni olib tashlab, xavfsiz matn qaytaradi."""
     try:
         message = str(error or "Noma'lum AI xatosi")
     except Exception:
-        message = "AI xizmatida xatolik (tafsilotni o'qib bo'lmadi)"
+        message = "AI provider xatosi (tafsilotni o'qib bo'lmadi)"
 
     # API kalitlari log yoki /ai_monitor xabariga hech qachon chiqmasin.
     for secret in GOOGLE_API_KEYS:
@@ -6776,267 +5436,6 @@ def _safe_ai_error_text(error):
     )
     message = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [MAXFIY]", message)
     return message[:180]
-
-
-def _gemini_error_status(error):
-    """Gemini xatosidan HTTP holat kodini xavfsiz aniqlashga urinadi."""
-    for value in (
-        getattr(error, "code", None),
-        getattr(error, "status_code", None),
-        getattr(getattr(error, "response", None), "status_code", None),
-    ):
-        try:
-            if value is not None:
-                return int(value)
-        except (TypeError, ValueError):
-            pass
-    return None
-
-
-class _AIQualityValidationError(ValueError):
-    """Model javobi sifat tekshiruvidan o'tmagan; API kalitining xatosi emas."""
-
-
-def _run_gemini_generation(
-    feature_name,
-    prompt,
-    generation_config,
-    primary_model=None,
-    fallback_model=None,
-    total_timeout=None,
-    response_validator=None,
-    quality_retry_prompt_builder=None,
-):
-    """Barcha AI generatorlari uchun yagona navbat, retry, fallback va kalit rotatsiyasi."""
-    if not GOOGLE_API_KEYS:
-        raise RuntimeError("AI API kalitlari sozlanmagan")
-
-    feature = str(feature_name or "Noma'lum generator")[:40]
-    timeout_seconds = max(60, min(900, int(total_timeout or AI_TOTAL_TIMEOUT), AI_TOTAL_TIMEOUT))
-    queue_wait_limit = min(timeout_seconds, AI_QUEUE_WAIT_TIMEOUT)
-    deadline = time.monotonic() + timeout_seconds
-    started_at = time.monotonic()
-    queue_wait_started = started_at
-
-    models = []
-    for model_name in (primary_model or GEMINI_MODEL, fallback_model or GEMINI_FALLBACK_MODEL):
-        model_name = str(model_name or "").strip()
-        if model_name and model_name not in models:
-            models.append(model_name)
-    if not models:
-        raise RuntimeError("Gemini modellari sozlanmagan")
-
-    with _ai_monitor_lock:
-        _ai_monitor_state["waiting_for_queue"] += 1
-
-    queue_acquired = ai_queue_slots.acquire(timeout=max(0.0, min(queue_wait_limit, deadline - time.monotonic())))
-    with _ai_monitor_lock:
-        _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
-        if queue_acquired:
-            _ai_monitor_state["accepted_requests"] += 1
-            _ai_monitor_state["feature_requests"][feature] = _ai_monitor_state["feature_requests"].get(feature, 0) + 1
-
-    if not queue_acquired:
-        message = f"{feature}: AI navbatida kutish muddati tugadi"
-        with _ai_monitor_lock:
-            _ai_monitor_state["feature_failures"][feature] = _ai_monitor_state["feature_failures"].get(feature, 0) + 1
-            _ai_monitor_state["last_errors"].append({"time": time.time(), "message": message})
-            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
-        logging.error("%s | navbatni_kutish_limit=%s soniya", message, queue_wait_limit)
-        raise TimeoutError(message)
-
-    queue_wait_seconds = time.monotonic() - queue_wait_started
-    _maybe_alert_ai_queue_load()
-    if queue_wait_seconds >= 1.0:
-        logging.info("AI NAVBATI | generator=%s | navbatni_kutish=%.2f soniya", feature, queue_wait_seconds)
-
-    total_keys = len(GOOGLE_API_KEYS)
-    start_index = _next_generation_key_start(total_keys)
-    last_error = None
-    successful = False
-    attempts_this_request = 0
-
-    try:
-        # Har bir model uchun barcha kalitlar aylanadi. Asosiy modeldan natija
-        # olinmasa, zaxira modelga o'tiladi. Qayta urinishlar umumiy deadline ichida.
-        stop_retry_rounds = False
-        for retry_round in range(AI_RETRY_PER_KEY):
-            for model_index, model_name in enumerate(models):
-                model_failed = False
-                for offset in range(total_keys):
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        last_error = TimeoutError("AI yaratish uchun umumiy vaqt chegarasi tugadi")
-                        break
-
-                    key_index = (start_index + offset) % total_keys
-                    api_key = GOOGLE_API_KEYS[key_index].strip()
-                    if not api_key:
-                        continue
-
-                    semaphore_wait_started = time.monotonic()
-                    if not gemini_semaphore.acquire(timeout=remaining):
-                        last_error = TimeoutError("AI parallel so'rovlar chegarasida kutish muddati tugadi")
-                        model_failed = True
-                        break
-                    semaphore_wait = time.monotonic() - semaphore_wait_started
-                    attempt_started = time.monotonic()
-                    attempts_this_request += 1
-                    with _ai_monitor_lock:
-                        _ai_monitor_state["key_attempts"][key_index] = _ai_monitor_state["key_attempts"].get(key_index, 0) + 1
-
-                    try:
-                        remaining_for_api = deadline - time.monotonic()
-                        # Google GenAI SDK manually-set deadline uchun kamida 10 soniya talab qiladi.
-                        # Qolgan vaqt bundan kam bo'lsa, noto'g'ri timeout bilan so'rov yubormaymiz.
-                        if remaining_for_api < 10.0:
-                            last_error = TimeoutError(
-                                f"AI so'rovi uchun yetarli vaqt qolmadi ({max(0, remaining_for_api):.1f}s); "
-                                "yangi API so'rovi yuborilmadi"
-                            )
-                            model_failed = True
-                            stop_retry_rounds = True
-                            break
-                        request_timeout_ms = int(min(AI_REQUEST_TIMEOUT, remaining_for_api) * 1000)
-                        request_timeout_ms = max(10000, request_timeout_ms)
-                        client = genai.Client(
-                            api_key=api_key,
-                            http_options=genai_types.HttpOptions(timeout=request_timeout_ms),
-                        )
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=prompt,
-                            config=generation_config,
-                        )
-                        if not response or not getattr(response, "text", None):
-                            raise RuntimeError("Gemini bo'sh javob qaytardi")
-
-                        if response_validator:
-                            try:
-                                result = response_validator(response)
-                            except Exception as validation_exc:
-                                if not quality_retry_prompt_builder:
-                                    raise _AIQualityValidationError(str(validation_exc)) from validation_exc
-                                # Sifat xatosida boshqa API kalitlarini aylantirmaymiz:
-                                # ayni model va kalit bilan faqat bitta kengaytirish urinishini qilamiz.
-                                retry_prompt = quality_retry_prompt_builder(
-                                    _require_gemini_text(response), str(validation_exc)
-                                )
-                                retry_remaining = deadline - time.monotonic()
-                                if retry_remaining < 10.0:
-                                    raise _AIQualityValidationError(
-                                        f"{validation_exc}; sifatni tuzatish uchun 10 soniyadan kam vaqt qoldi"
-                                    ) from validation_exc
-                                retry_timeout_ms = max(
-                                    10000, int(min(AI_REQUEST_TIMEOUT, retry_remaining) * 1000)
-                                )
-                                retry_client = genai.Client(
-                                    api_key=api_key,
-                                    http_options=genai_types.HttpOptions(timeout=retry_timeout_ms),
-                                )
-                                retry_response = retry_client.models.generate_content(
-                                    model=model_name,
-                                    contents=retry_prompt,
-                                    config=generation_config,
-                                )
-                                if not retry_response or not getattr(retry_response, "text", None):
-                                    raise RuntimeError("Gemini sifatni tuzatish urinishida bo'sh javob qaytardi")
-                                try:
-                                    result = response_validator(retry_response)
-                                except Exception as retry_validation_exc:
-                                    raise _AIQualityValidationError(
-                                        f"Bir martalik sifatni tuzatish ham o'tmadi: {retry_validation_exc}"
-                                    ) from retry_validation_exc
-                                logging.info(
-                                    "AI SIFAT QAYTA ISHLASHI MUVAFFAQIYATLI | generator=%s | model=%s | kalit_indeksi=%s",
-                                    feature, model_name, key_index + 1
-                                )
-                        else:
-                            result = response
-                        elapsed = time.monotonic() - attempt_started
-                        with _ai_monitor_lock:
-                            _ai_monitor_state["key_success"][key_index] = _ai_monitor_state["key_success"].get(key_index, 0) + 1
-                            _ai_monitor_state["feature_success"][feature] = _ai_monitor_state["feature_success"].get(feature, 0) + 1
-                        successful = True
-                        logging.info(
-                            "AI YARATISH MUVAFFAQIYATLI | generator=%s | model=%s | kalit_indeksi=%s | qayta_urinish=%s/%s | model_urinishlari=%s | API_vaqti=%.2f soniya | navbat_kutishi=%.2f soniya | parallel_kutish=%.2f soniya | jami_vaqt=%.2f soniya",
-                            feature, model_name, key_index + 1, retry_round + 1,
-                            AI_RETRY_PER_KEY, attempts_this_request, elapsed,
-                            queue_wait_seconds, semaphore_wait, time.monotonic() - started_at,
-                        )
-                        return result
-
-                    except Exception as exc:
-                        last_error = exc
-                        model_failed = True
-                        safe_error = _safe_ai_error_text(exc)
-                        status_code = _gemini_error_status(exc)
-                        if isinstance(exc, _AIQualityValidationError):
-                            # Bu kalit/API xatosi emas. Javob sifati talabga javob bermadi.
-                            logging.warning(
-                                "AI JAVOBI SIFAT TEKSHIRUVIDAN O'TMADI | generator=%s | model=%s | kalit_indeksi=%s | sabab=%s",
-                                feature, model_name, key_index + 1, safe_error
-                            )
-                            stop_retry_rounds = True
-                            break
-                        with _ai_monitor_lock:
-                            _ai_monitor_state["key_failures"][key_index] = _ai_monitor_state["key_failures"].get(key_index, 0) + 1
-                            _ai_monitor_state["last_errors"].append({
-                                "time": time.time(),
-                                "message": f"{feature} | {model_name} | Kalit #{key_index + 1} | {type(exc).__name__}: {safe_error}",
-                            })
-                            _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
-                        logging.warning(
-                            "AI SO'ROVI BAJARILMADI | generator=%s | model=%s | kalit_indeksi=%s | qayta_urinish=%s/%s | HTTP_kod=%s | xato_turi=%s | sabab=%s",
-                            feature, model_name, key_index + 1, retry_round + 1,
-                            AI_RETRY_PER_KEY, status_code or "aniqlanmadi", type(exc).__name__, safe_error,
-                        )
-
-                        # Aniq noto'g'ri so'rovda shu model/kalitlarni qayta-qayta
-                        # urinish foydasiz; keyingi (zaxira) model tekshiriladi.
-                        if status_code in (400, 404, 422):
-                            model_failed = True
-                            stop_retry_rounds = True
-                            break
-                    finally:
-                        gemini_semaphore.release()
-
-                    if time.monotonic() >= deadline:
-                        break
-
-                if model_failed and model_index + 1 < len(models) and not stop_retry_rounds:
-                    logging.warning(
-                        "AI ZAXIRA MODELGA O'TMOQDA | generator=%s | oldingi_model=%s | zaxira_model=%s",
-                        feature, model_name, models[model_index + 1],
-                    )
-                if stop_retry_rounds or time.monotonic() >= deadline:
-                    break
-
-            if time.monotonic() >= deadline or stop_retry_rounds:
-                break
-            if retry_round + 1 < AI_RETRY_PER_KEY:
-                pause = min(2.0, 0.5 * (2 ** retry_round), max(0.0, deadline - time.monotonic()))
-                if pause > 0:
-                    time.sleep(pause)
-
-        safe_last_error = _safe_ai_error_text(last_error or "Gemini so'rovi bajarilmadi")
-        raise RuntimeError(f"{feature}: barcha model va API kalit urinishlari muvaffaqiyatsiz. Sabab: {safe_last_error}")
-
-    except Exception:
-        if not successful:
-            with _ai_monitor_lock:
-                _ai_monitor_state["feature_failures"][feature] = _ai_monitor_state["feature_failures"].get(feature, 0) + 1
-        raise
-    finally:
-        ai_queue_slots.release()
-
-
-def _require_gemini_text(response):
-    """Gemini javobida bo'sh bo'lmagan matn borligini tekshiradi."""
-    result = (getattr(response, "text", None) or "").strip()
-    if not result:
-        raise RuntimeError("Gemini bo'sh javob qaytardi")
-    return result
 
 
 def _maybe_alert_ai_queue_load():
@@ -7060,10 +5459,10 @@ def _maybe_alert_ai_queue_load():
 
         percent = min(100.0, queue_slots_used * 100.0 / max(1, AI_MAX_QUEUE))
         alert = (
-            "⚠️ <b>Quiz AI — AI navbati band</b>\n"
-            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\n"
-            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\n"
-            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /ai_monitor buyrug'idan foydalaning."
+            "⚠️ <b>Quiz AI — AI navbati band</b>\\n"
+            f"⏳ Navbat bandligi: <b>{queue_slots_used}/{AI_MAX_QUEUE} ({percent:.1f}%)</b>\\n"
+            f"🟢 Bo'sh joylar: <b>{queue_slots_free}</b>\\n"
+            "ℹ️ Bu avtomatik ogohlantirish. Holatni tekshirish uchun /monitor buyrug'idan foydalaning."
         )
         bot.send_message(ADMIN_ID, alert, parse_mode="HTML", disable_web_page_preview=True)
         logging.warning(
@@ -7072,7 +5471,7 @@ def _maybe_alert_ai_queue_load():
         )
     except Exception:
         # Monitoring xatosi test yaratish jarayoniga xalaqit bermasligi kerak.
-        logging.exception("AI navbati bo'yicha administrator ogohlantirishini yuborishda xatolik")
+        logging.exception("AI navbati bo'yicha admin ogohlantirishini yuborishda xatolik")
 
 
 def _generate_quiz_from_gemini_impl(extracted_text):
@@ -7141,7 +5540,7 @@ MUHIM QOIDALAR:
     queue_wait_started = request_started
     with _ai_monitor_lock:
         _ai_monitor_state["waiting_for_queue"] += 1
-    queue_remaining = max(0.0, min(AI_QUEUE_WAIT_TIMEOUT, deadline - time.monotonic()))
+    queue_remaining = max(0.0, deadline - time.monotonic())
     queue_acquired = ai_queue_slots.acquire(timeout=queue_remaining)
     with _ai_monitor_lock:
         _ai_monitor_state["waiting_for_queue"] = max(0, _ai_monitor_state["waiting_for_queue"] - 1)
@@ -7151,7 +5550,7 @@ MUHIM QOIDALAR:
             _ai_monitor_state["last_errors"].append({"time": time.time(), "message": "AI navbatida kutish muddati tugadi"})
             _ai_monitor_state["last_errors"] = _ai_monitor_state["last_errors"][-5:]
     if not queue_acquired:
-        logging.error("AI testlar navbatida kutish muddati tugadi | navbat_kutish_limit=%s soniya", AI_QUEUE_WAIT_TIMEOUT)
+        logging.error("AI testlar navbatida kutish muddati tugadi | umumiy_limit=%s soniya", AI_TOTAL_TIMEOUT)
         return None
     queue_wait_seconds = time.monotonic() - queue_wait_started
     _maybe_alert_ai_queue_load()
@@ -7375,9 +5774,6 @@ def admin_ai_monitor_command(message):
             key_attempts = dict(_ai_monitor_state["key_attempts"])
             key_success = dict(_ai_monitor_state["key_success"])
             key_failures = dict(_ai_monitor_state["key_failures"])
-            feature_requests = dict(_ai_monitor_state.get("feature_requests", {}))
-            feature_success = dict(_ai_monitor_state.get("feature_success", {}))
-            feature_failures = dict(_ai_monitor_state.get("feature_failures", {}))
             recent_errors = list(_ai_monitor_state["last_errors"])
 
         with _ai_stats_lock:
@@ -7390,13 +5786,11 @@ def admin_ai_monitor_command(message):
             "⚙️ <b>Joriy yuklama</b>\n"
             f"🔄 Ishlayotgan AI so‘rovlari: <b>{ai_slots_busy}/{AI_MAX_CONCURRENT}</b>\n"
             f"⏳ Navbat slotlari band: <b>{queue_slots_used}/{AI_MAX_QUEUE}</b>\n"
-            f"🕰 Navbatga kirishni kutayotgan so‘rovlar: <b>{waiting}</b>\n"
+            f"🕰 Navbat joyini kutayotgan so‘rovlar: <b>{waiting}</b>\n"
             f"🟢 Bo‘sh navbat slotlari: <b>{queue_slots_free}</b>\n\n"
-            "📊 <b>Generatorlar natijalari (server ishga tushganidan beri)</b>\n"
-            f"📝 Test: muvaffaqiyatli <b>{successful_generations}</b>, xato <b>{failed_generations}</b>\n"
-            f"📚 Konspekt: so‘rov <b>{feature_requests.get('Konspekt', 0)}</b>, muvaffaqiyat <b>{feature_success.get('Konspekt', 0)}</b>, xato <b>{feature_failures.get('Konspekt', 0)}</b>\n"
-            f"📄 Referat: so‘rov <b>{feature_requests.get('Referat', 0)}</b>, muvaffaqiyat <b>{feature_success.get('Referat', 0)}</b>, xato <b>{feature_failures.get('Referat', 0)}</b>\n"
-            f"🖥 Slayd: so‘rov <b>{feature_requests.get('Slayd', 0)}</b>, muvaffaqiyat <b>{feature_success.get('Slayd', 0)}</b>, xato <b>{feature_failures.get('Slayd', 0)}</b>\n"
+            "📊 <b>Test yaratish natijalari (server ishga tushganidan beri)</b>\n"
+            f"✅ Muvaffaqiyatli: <b>{successful_generations}</b>\n"
+            f"❌ Muvaffaqiyatsiz: <b>{failed_generations}</b>\n"
             f"📥 Navbatga qabul qilingan jami so‘rovlar: <b>{accepted}</b>\n\n"
             "🔑 <b>API kalitlari statistikasi</b>\n"
             f"Jami sozlangan kalitlar: <b>{len(GOOGLE_API_KEYS)}</b>\n"
@@ -9429,12 +7823,9 @@ def _admin_panel_bonus_markup():
         telebot.types.InlineKeyboardButton("🎁 Oddiy Premium bonus", callback_data="adminpanel:guide:bonus"),
         telebot.types.InlineKeyboardButton("👨‍🏫 O‘qituvchi bonusi", callback_data="adminpanel:guide:bonus_teacher"),
         telebot.types.InlineKeyboardButton("💎 Slayd kreditlari bonusi", callback_data="adminpanel:guide:bonus_credits"),
-        telebot.types.InlineKeyboardButton("📚 Konspekt bonusi", callback_data="adminpanel:guide:bonus_summary"),
-        telebot.types.InlineKeyboardButton("📄 Referat bonusi", callback_data="adminpanel:guide:bonus_referat"),
-        telebot.types.InlineKeyboardButton("🗑 Referat bonusini bekor qilish", callback_data="adminpanel:guide:bonus_referat_revoke"),
-        telebot.types.InlineKeyboardButton("🗑 Slayd kredit bonusini bekor qilish", callback_data="adminpanel:guide:bonus_credits_revoke"),
-        telebot.types.InlineKeyboardButton("🗑 Konspekt bonusini bekor qilish", callback_data="adminpanel:guide:bonus_summary_revoke"),
-        telebot.types.InlineKeyboardButton("🗑 Premium bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
+        telebot.types.InlineKeyboardButton("📄 Referat bonusi — berish", callback_data="adminpanel:guide:referat_bonus"),
+        telebot.types.InlineKeyboardButton("📄 Referat bonusi — bekor qilish", callback_data="adminpanel:guide:referat_bonus_revoke"),
+        telebot.types.InlineKeyboardButton("🗑 Bonusni bekor qilish", callback_data="adminpanel:guide:bonus_revoke"),
         telebot.types.InlineKeyboardButton("⬅️ Asosiy menyu", callback_data="adminpanel:home"),
     )
     return markup
@@ -9454,7 +7845,7 @@ def admin_help_panel_command(message):
         "🖥 Monitoring — AI navbati sozlamalari va SQLite ulanishi.\n"
         "🗄 Baza — SQLite holati yoki backup yuklab olish.\n"
         "📢 Ommaviy xabar — matnni tayyorlash, ko‘rish va tasdiqlash.\n"
-        "🎁 Bonuslar — Premium, Teacher, Slayd kreditlari, Konspekt va Referat bonuslarini boshqarish.\n\n"
+        "🎁 Bonuslar — Premium, Teacher, Slayd kreditlari va Referat bonuslarini alohida boshqarish.\n\n"
         "🔐 Ushbu menyu faqat administrator uchun ochiq."
     )
     bot.send_message(message.chat.id, text, parse_mode="HTML", reply_markup=_admin_panel_main_markup())
@@ -9496,12 +7887,9 @@ def admin_help_panel_callback(call):
             "bonus": "🎁 <b>Oddiy Premium bonus</b>\nFormat: <code>/bonus USER_ID KUN</code>\nMisol: <code>/bonus 123456789 30</code>",
             "bonus_teacher": "👨‍🏫 <b>O‘qituvchi bonusi</b>\nFormat: <code>/bonus_teacher USER_ID KUN</code>\nMisol: <code>/bonus_teacher 123456789 30</code>",
             "bonus_credits": "💎 <b>Slayd kreditlari bonusi</b>\nFormat: <code>/bonus_credits USER_ID KREDIT</code>\nMisol: <code>/bonus_credits 123456789 50</code>\nBu bonus Premium va test limitlaridan alohida hisoblanadi.",
-            "bonus_credits_revoke": "🗑 <b>Slayd kredit bonusini bekor qilish</b>\nFormat: <code>/bonus_credits_revoke USER_ID</code>\nMisol: <code>/bonus_credits_revoke 123456789</code>\nFaqat ishlatilmay qolgan administrator bonusi bekor qilinadi; sotib olingan va tarif kreditlari saqlanadi.",
-            "bonus_summary": "📚 <b>Konspekt bonusi</b>\nFormat: <code>/bonus_summary USER_ID MIQDOR</code>\nMisol: <code>/bonus_summary 123456789 5</code>\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
-            "bonus_summary_revoke": "🗑 <b>Konspekt bonusini bekor qilish</b>\nFormat: <code>/bonus_summary_revoke USER_ID</code>\nMisol: <code>/bonus_summary_revoke 123456789</code>\nFoydalanuvchining qolgan konspekt bonuslari bekor qilinadi.",
-            "bonus_referat": "📄 <b>Referat bonusi</b>\nFormat: <code>/bonus_referat USER_ID MIQDOR</code>\nMisol: <code>/bonus_referat 123456789 5</code>\nTarif/bepul limit tugagach, alohida bonus ishlatiladi.",
-            "bonus_referat_revoke": "🗑 <b>Referat bonusini bekor qilish</b>\nFormat: <code>/bonus_referat_revoke USER_ID</code>\nMisol: <code>/bonus_referat_revoke 123456789</code>\nFoydalanuvchining qolgan referat bonuslari bekor qilinadi.",
-            "bonus_revoke": "🗑 <b>Premium bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
+            "bonus_revoke": "🗑 <b>Bonusni bekor qilish</b>\nFormat: <code>/bonus_revoke USER_ID</code>\nMisol: <code>/bonus_revoke 123456789</code>",
+            "referat_bonus": "📄 <b>Referat bonusini berish</b>\nFormat: <code>/referat_bonus USER_ID MIQDOR</code>\nMisol: <code>/referat_bonus 123456789 3</code>",
+            "referat_bonus_revoke": "🗑 <b>Referat bonusini bekor qilish</b>\nFormat: <code>/referat_bonus_revoke USER_ID MIQDOR</code>\nMisol: <code>/referat_bonus_revoke 123456789 1</code>",
         }
         bot.answer_callback_query(call.id)
         bot.send_message(call.message.chat.id, guide_texts.get(value, "Buyruq topilmadi."), parse_mode="HTML", reply_markup=telebot.types.InlineKeyboardMarkup().add(telebot.types.InlineKeyboardButton("⬅️ Admin Panel", callback_data="adminpanel:home")))
