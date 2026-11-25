@@ -66,7 +66,10 @@ Javobni faqat quyidagi JSON sxemasida qaytaring:
 MAZMUN VA TUZILMA TALABLARI:
 - Kirish, kamida 3 ta bob, har bir bobda kamida 2 ta kichik bo'lim, xulosa va foydalanilgan adabiyotlar bo'lsin.
 - Har bir bob mavzuning alohida jihatini ochsin; boblar va bo'limlar bir-birini takrorlamasin.
-- Har bir kichik bo'limni mazmunan keng yorit: ta'rif, izoh, sabab-oqibat, amaliy qo'llanish va mavzuga mos misollarni keltir. Har bir bo'lim odatda kamida 250-350 so'z bo'lsin; mazmunni sun'iy takror bilan cho'zma.
+- Har bir kichik bo'limni batafsil va mazmunan mustaqil yoz: ta'rif, nazariy asos, sabab-oqibat, amaliy qo'llanish va mavzuga mos misol bo'lsin.
+- Har bir kichik bo'lim taxminan 300-400 so'zdan iborat bo'lsin; qisqa ta'riflar yoki umumiy gaplar bilan cheklanma.
+- Har bir bo'limda bir necha izchil paragraf bo'lsin. Bob sarlavhasidan keyin bo'limlarni chuqur och, oldingi bo'limdagi fikrlarni takrorlama.
+- Hajmni sun'iy takrorlash bilan emas, tushuntirish, tahlil, misol va amaliy ahamiyat bilan kengaytir.
 - Kirishda dolzarblik, maqsad, vazifalar, obyekt va predmetni izchil yorit.
 - Xulosada boblarni ko'chirmasdan, asosiy natijalar va amaliy takliflarni jamla.
 - Tilni mavzu va manbaga mos tanla. O'zbekcha mavzu bo'lsa o'zbekcha yoz.
@@ -78,11 +81,13 @@ MAZMUN VA TUZILMA TALABLARI:
 
 MANBALAR VA ADABIYOTLAR HALOLligi:
 - Manba berilgan bo'lsa, faktlarni avvalo shu manbaga tayantir; manbada yo'q ma'lumotni undan olingandek ko'rsatma.
-- Faqat bibliografik ma'lumoti ishonchli ma'lum bo'lgan asarlarni references ro'yxatiga kirit. Muallif, nom, nashriyot, yil, DOI yoki URLni taxmin qilib to'qima.
-- Imkon bo'lsa kamida 3 ta mavzuga mos, haqiqiy va taniqli manbani ko'rsat; kitob yoki rasmiy tashkilot hujjatining ma'lum bo'lgan nomi va tashkilotini yoz. Nashr yili yoki nashriyotiga ishonching komil bo'lmasa, ularni uydirma qilma.
-- Foydalanuvchi manba bermaganida umumiy placeholderni birinchi tanlov sifatida ishlatma; avval mavzuga mos, ishonchli manbalarni esla. Faqat aniq manbani bilmasang, bibliografik tekshiruv kerakligini ochiq yoz.
-- Manba matnida bibliografiya bo'lsa, undagi yozuvlarni saqla. To'liq bo'lmagan yozuvni bor ma'lumot doirasida ber.
-- Mavzu bo'yicha ishonchli manbani aniq identifikatsiya qila olmasang, soxta bibliografiya yaratish o'rniga references ichida "Foydalanuvchi taqdim etgan mavzu bo'yicha umumiy bilimlar; aniq bibliografik manbalar qo'shimcha tekshiruvni talab qiladi" deb yoz.
+- "references" ro'yxatiga faqat real ekaniga ishonching komil bo'lgan kitoblar, ilmiy asarlar yoki rasmiy tashkilot hujjatlarini kirit.
+- Kamida 3 ta mavzuga bevosita mos manba keltir. Har bir yozuvda mavjud va ishonchli bilgan muallif/tashkilot hamda asar/hujjat nomi bo'lsin.
+- Nashr yili, nashriyot, DOI yoki URLni faqat aniq bilsang yoz; noma'lum bibliografik maydonlarni taxmin bilan to'ldirma.
+- Agar foydalanuvchi yuklagan manbada adabiyotlar ro'yxati bo'lsa, avvalo o'sha yozuvlarni saqla va mavzuga mos, ishonchli qo'shimcha manbalar bilan to'ldir.
+- "Foydalanilgan adabiyotlar", "qo'shimcha tekshirish kerak", "ishonchli manbalar" kabi umumiy jumlalarni alohida adabiyot sifatida kiritma.
+- Hech qanday aniq, haqiqiy manbani ishonch bilan keltira olmasang, bibliografik ma'lumotni uydirma qilma: references ro'yxatida faqat "Bibliografik manbalarni mavzu bo'yicha ishonchli aniqlash imkoni bo'lmadi; manbalar qo'shimcha tekshiruvdan so'ng kiritilishi kerak." degan ochiq ogohlantirishni ber. Uni adabiyot yoki haqiqiy manba deb ko'rsatma.
+- Adabiyotlar ro'yxatini matndagi asosiy mavzu va tushunchalarga mos tanla; mavzuga aloqasiz mashhur kitoblarni faqat sonni to'ldirish uchun kiritma.
 - Statistik raqamlar, qonunlar, tajriba natijalari va iqtiboslarni manbasiz uydirma.
 
 FOYDALANUVCHI MA'LUMOTLARI:
@@ -149,8 +154,8 @@ def _validate_referat(data: Any) -> list[str]:
             errors.append(f"{key} kaliti yo'q.")
     if not isinstance(data.get("title"), str) or len(data.get("title", "").strip()) < 4:
         errors.append("title matni bo'sh yoki juda qisqa.")
-    if not isinstance(data.get("introduction"), str) or len(data.get("introduction", "").strip()) < 250:
-        errors.append("Kirish kamida 250 belgidan iborat bo'lishi kerak.")
+    if not isinstance(data.get("introduction"), str) or len(data.get("introduction", "").strip()) < 450:
+        errors.append("Kirish kamida 450 belgidan iborat bo'lishi kerak.")
     chapters = data.get("chapters")
     if not isinstance(chapters, list) or len(chapters) < 3:
         errors.append("Kamida 3 ta bob bo'lishi shart.")
@@ -169,13 +174,49 @@ def _validate_referat(data: Any) -> list[str]:
                     continue
                 if not isinstance(section.get("heading"), str) or not section["heading"].strip():
                     errors.append(f"{ci}-bob, {si}-bo'lim sarlavhasi yo'q.")
-                if not isinstance(section.get("body"), str) or len(section.get("body", "").strip()) < 500:
-                    errors.append(f"{ci}-bob, {si}-bo'lim matni yetarlicha batafsil emas (kamida 500 belgi).")
-    if not isinstance(data.get("conclusion"), str) or len(data.get("conclusion", "").strip()) < 200:
-        errors.append("Xulosa kamida 200 belgidan iborat bo'lishi kerak.")
+                body = section.get("body", "").strip() if isinstance(section.get("body"), str) else ""
+                word_count = len(re.findall(r"\b[\wʻ’'-]+\b", body, flags=re.UNICODE))
+                if word_count < 220 or len(body) < 1300:
+                    errors.append(
+                        f"{ci}-bob, {si}-bo'lim qisqa: {word_count} so'z. "
+                        "Bo'limni kamida 220 so'z va 1300 belgi darajasida mazmunan kengaytir."
+                    )
+    if not isinstance(data.get("conclusion"), str) or len(data.get("conclusion", "").strip()) < 350:
+        errors.append("Xulosa kamida 350 belgidan iborat bo'lishi kerak.")
     refs = data.get("references")
     if not isinstance(refs, list) or not refs or any(not isinstance(x, str) or not x.strip() for x in refs):
         errors.append("Foydalanilgan adabiyotlar ro'yxati bo'sh yoki noto'g'ri.")
+    else:
+        cleaned_refs = [x.strip() for x in refs if isinstance(x, str) and x.strip()]
+        placeholder_patterns = (
+            r"foydalanuvchi taqdim etgan mavzu",
+            r"aniq bibliografik manbalar.*tekshir",
+            r"bibliografik tekshiruv.*talab",
+            r"umumiy bilimlar.*manbalar",
+            r"manbalar.*qo'shimcha tekshir",
+            r"ishonchli manbalar",
+            r"adabiyotlar ro'yxati",
+        )
+        placeholder_refs = [
+            item for item in cleaned_refs
+            if any(re.search(pattern, item, flags=re.IGNORECASE) for pattern in placeholder_patterns)
+        ]
+        if placeholder_refs:
+            errors.append("Adabiyotlar ichida umumiy placeholder jumla bor; uni haqiqiy bibliografik manbalar bilan almashtir.")
+        credible_entries = [
+            item for item in cleaned_refs
+            if len(re.findall(r"\b[\wʻ’'-]+\b", item, flags=re.UNICODE)) >= 4
+            and not any(re.search(pattern, item, flags=re.IGNORECASE) for pattern in placeholder_patterns)
+        ]
+        transparent_no_source_notice = (
+            len(cleaned_refs) == 1
+            and "bibliografik manbalarni mavzu bo'yicha ishonchli aniqlash imkoni bo'lmadi" in cleaned_refs[0].lower()
+        )
+        if len(credible_entries) < 3 and not transparent_no_source_notice:
+            errors.append(
+                f"Kamida 3 ta alohida, mavzuga mos bibliografik manba kerak; "
+                f"hozir {len(credible_entries)} ta yaroqli yozuv bor."
+            )
     if "abstract" in data and not isinstance(data["abstract"], str):
         errors.append("abstract matn bo'lishi kerak.")
     if "keywords" in data and not isinstance(data["keywords"], list):
