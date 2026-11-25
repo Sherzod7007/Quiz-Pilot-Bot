@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -70,11 +71,16 @@ MAZMUN VA TUZILMA TALABLARI:
 - Xulosada boblarni ko'chirmasdan, asosiy natijalar va amaliy takliflarni jamla.
 - Tilni mavzu va manbaga mos tanla. O'zbekcha mavzu bo'lsa o'zbekcha yoz.
 - JSON kalitlari to'liq bo'lsin; chapters ichidagi har bir bo'limda heading va mazmunli body bo'lishi shart.
+- JSONni yuborishdan oldin matnni ichki imlo va grammatik tekshiruvdan o'tkaz: o'zbekcha so'zlarni bo'lib yuborma, buzilgan so'z birikmalarini tuzat, apostrof va qo'shimchalarni to'g'ri yoz.
+- "yo'lga qo mehanizmi", "buutli", "prinitsipal", "million lab", "mehnating xavfsizligini", "kompyuteriy ko'rish" kabi xato shakllar bo'lmasin; ravon va tabiiy o'zbek tilida yoz.
+- Mazmunni o'zgartirmasdan imlo xatolarini tuzat; noaniq terminni taxminiy fakt bilan almashtirma.
 - Markdown, izoh, kod bloki yoki JSON tashqarisida matn qaytarma.
 
 MANBALAR VA ADABIYOTLAR HALOLligi:
 - Manba berilgan bo'lsa, faktlarni avvalo shu manbaga tayantir; manbada yo'q ma'lumotni undan olingandek ko'rsatma.
 - Faqat bibliografik ma'lumoti ishonchli ma'lum bo'lgan asarlarni references ro'yxatiga kirit. Muallif, nom, nashriyot, yil, DOI yoki URLni taxmin qilib to'qima.
+- Imkon bo'lsa kamida 3 ta mavzuga mos, haqiqiy va taniqli manbani ko'rsat; kitob yoki rasmiy tashkilot hujjatining ma'lum bo'lgan nomi va tashkilotini yoz. Nashr yili yoki nashriyotiga ishonching komil bo'lmasa, ularni uydirma qilma.
+- Foydalanuvchi manba bermaganida umumiy placeholderni birinchi tanlov sifatida ishlatma; avval mavzuga mos, ishonchli manbalarni esla. Faqat aniq manbani bilmasang, bibliografik tekshiruv kerakligini ochiq yoz.
 - Manba matnida bibliografiya bo'lsa, undagi yozuvlarni saqla. To'liq bo'lmagan yozuvni bor ma'lumot doirasida ber.
 - Mavzu bo'yicha ishonchli manbani aniq identifikatsiya qila olmasang, soxta bibliografiya yaratish o'rniga references ichida "Foydalanuvchi taqdim etgan mavzu bo'yicha umumiy bilimlar; aniq bibliografik manbalar qo'shimcha tekshiruvni talab qiladi" deb yoz.
 - Statistik raqamlar, qonunlar, tajriba natijalari va iqtiboslarni manbasiz uydirma.
@@ -93,6 +99,45 @@ MANBA MATNI:
 QAYTA TUZATISH TALABI:
 {validation_feedback or 'Birinchi urinish: barcha talablarni to‘liq bajaring.'}
 """
+
+
+# Faqat ko'p uchragan, aniq tanilgan buzilgan shakllar uchun ehtiyotkor tuzatishlar.
+_KNOWN_TEXT_FIXES = (
+    ("yo\'lga qo mehanizmi", "yo\'lga qo\'yilishi"),
+    ("buutli", "bulutli"),
+    ("prinitsipal ravishda", "prinsipial jihatdan"),
+    ("prinitsipal", "prinsipial"),
+    ("million lab", "millionlab"),
+    ("mehnating xavfsizligini", "mehnat xavfsizligini"),
+    ("kompyuteriy ko\'rish", "kompyuter ko\'rishi"),
+    ("de-ruhsizlantirish", "mehnat jarayonini avtomatlashtirish"),
+    ("fizik o mezonlari", "fizik o\'lchamlari"),
+    (" o mezonlari", " o\'lchamlari"),
+)
+
+
+def _correct_known_text_errors(value: Any) -> Any:
+    """JSON ichidagi matnlarni formatga tegmasdan, faqat aniq ma'lum typo'lar bo'yicha tuzatadi."""
+    if isinstance(value, str):
+        result = value
+        for wrong, right in _KNOWN_TEXT_FIXES:
+            result = re.sub(re.escape(wrong), right, result, flags=re.IGNORECASE)
+        return result
+    if isinstance(value, list):
+        return [_correct_known_text_errors(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _correct_known_text_errors(item) for key, item in value.items()}
+    return value
+
+
+def _known_language_quality_issues(data: Any) -> list[str]:
+    """Qayta urinish kerak bo'lgan aniq, ma'lum buzilgan iboralarni tekshiradi."""
+    serialized = json.dumps(data, ensure_ascii=False) if isinstance(data, (dict, list)) else str(data or "")
+    issues = []
+    for wrong, _right in _KNOWN_TEXT_FIXES:
+        if re.search(re.escape(wrong), serialized, flags=re.IGNORECASE):
+            issues.append(f"Matnda buzilgan ibora bor: {wrong}")
+    return issues
 
 
 def _validate_referat(data: Any) -> list[str]:
@@ -143,7 +188,7 @@ def generate_referat_content(*, client: Any, model: str, topic: str,
                              university: str = "", faculty: str = "", group: str = "",
                              subject: str = "", reviewer: str = "",
                              max_output_tokens: int = 16000,
-                             max_attempts: int = 3) -> dict:
+                             max_attempts: int = 2) -> dict:
     """Gemini javobini sxema va mazmun bo'yicha tekshiradi, xato bo'lsa qayta yaratadi."""
     if not topic.strip() and not source_text.strip():
         raise ReferatError("Referat yaratish uchun mavzu kiriting yoki PDF/DOCX yuklang.")
@@ -151,7 +196,7 @@ def generate_referat_content(*, client: Any, model: str, topic: str,
 
     feedback = ""
     last_errors = []
-    attempts = max(1, min(int(max_attempts), 3))
+    attempts = max(1, min(int(max_attempts), 2))
     for attempt in range(1, attempts + 1):
         prompt = build_referat_prompt(
             topic=topic.strip(), source_text=source_text,
@@ -179,7 +224,8 @@ def generate_referat_content(*, client: Any, model: str, topic: str,
                 if raw.lower().startswith("json"):
                     raw = raw[4:].strip()
             data = json.loads(raw)
-            errors = _validate_referat(data)
+            data = _correct_known_text_errors(data)
+            errors = _validate_referat(data) + _known_language_quality_issues(data)
             if not errors:
                 data["title"] = data["title"].strip()[:240]
                 data["language"] = data.get("language") if data.get("language") in {"uz", "ru", "en"} else "uz"
