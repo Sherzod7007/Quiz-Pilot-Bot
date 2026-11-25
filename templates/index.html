@@ -16721,4 +16721,25 @@ body.slides-generation-active #ai-generation-overlay .ai-loader-orbit{animation:
     #slides-count-options.slides-count-options{gap:4px !important;}
     #slides-count-options .slides-count-option{font-size:13px !important;padding-left:1px !important;padding-right:1px !important;}
 }
-</style>
+
+        /* Quiz AI: test va flashcard yaratish oynalarini biroz pastroq,
+           umumiy teal fon bilan uyg'unroq joylashtirish. */
+        #test-create-screen,
+        #flashcard-create-screen {
+            padding-top: 16px;
+            box-sizing: border-box;
+        }
+        #test-create-screen > .test-create-panel,
+        #flashcard-create-screen > .test-create-panel {
+            margin-top: 4px;
+            background: linear-gradient(145deg,
+                rgba(20, 67, 83, .82) 0%,
+                rgba(10, 31, 48, .88) 58%,
+                rgba(7, 24, 38, .90) 100%);
+            border-color: rgba(99, 205, 215, .28);
+            box-shadow:
+                0 16px 34px rgba(0, 0, 0, .24),
+                inset 0 1px 0 rgba(255, 255, 255, .12);
+        }
+
+    </style>
