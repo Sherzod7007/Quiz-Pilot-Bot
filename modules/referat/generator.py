@@ -77,6 +77,7 @@ MAZMUN VA TUZILMA TALABLARI:
 - JSONni yuborishdan oldin matnni ichki imlo va grammatik tekshiruvdan o'tkaz: o'zbekcha so'zlarni bo'lib yuborma, buzilgan so'z birikmalarini tuzat, apostrof va qo'shimchalarni to'g'ri yoz.
 - Yakuniy tekshiruvda ayniqsa "organik-inorgaik", "algeritmlari" kabi buzilgan shakllar qolmaganini tekshir; ularni kontekstga mos ravon o'zbekcha shaklga kelt.
 - "yo'lga qo mehanizmi", "buutli", "prinitsipal", "million lab", "mehnating xavfsizligini", "kompyuteriy ko'rish" kabi xato shakllar bo'lmasin; ravon va tabiiy o'zbek tilida yoz.
+- "mezon" so'zini gap ichiga tasodifan qo'shib yuborma. "bo mezonlanadi", "sho mezon", "bog mezon", "o mezonlashtirib", "ANTROPOGEN TA MEZON" kabi buzilgan iboralar mutlaqo bo'lmasin; bunday joylarni mazmunga mos ravon o'zbekcha qayta tuz.
 - Mazmunni o'zgartirmasdan imlo xatolarini tuzat; noaniq terminni taxminiy fakt bilan almashtirma.
 - Markdown, izoh, kod bloki yoki JSON tashqarisida matn qaytarma.
 
@@ -139,12 +140,26 @@ def _correct_known_text_errors(value: Any) -> Any:
 
 
 def _known_language_quality_issues(data: Any) -> list[str]:
-    """Qayta urinish kerak bo'lgan aniq, ma'lum buzilgan iboralarni tekshiradi."""
+    """Aniq typo va avval kuzatilgan buzilgan 'mezon' birikmalarini tekshiradi."""
     serialized = json.dumps(data, ensure_ascii=False) if isinstance(data, (dict, list)) else str(data or "")
     issues = []
     for wrong, _right in _KNOWN_TEXT_FIXES:
         if re.search(re.escape(wrong), serialized, flags=re.IGNORECASE):
             issues.append(f"Matnda buzilgan ibora bor: {wrong}")
+
+    # "mezon" o'zbek tilida to'g'ri so'z; faqat ma'lum buzilgan kontekstlarni
+    # flag qilamiz. Uni global almashtirish matn mazmunini buzishi mumkin.
+    suspicious_mezon_patterns = (
+        r"\bbo\s+mezonlanadi\b",
+        r"\bsho\s+mezon\b",
+        r"\bbog\s+mezon\b",
+        r"\bo\s+mezonlashtirib\b",
+        r"\bANTROPOGEN\s+TA\s+MEZON\b",
+    )
+    for pattern in suspicious_mezon_patterns:
+        if re.search(pattern, serialized, flags=re.IGNORECASE):
+            issues.append("Matnda noto'g'ri 'mezon' birikmasi bor; ushbu gapni qayta tuz.")
+            break
     return issues
 
 
