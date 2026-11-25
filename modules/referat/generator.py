@@ -75,6 +75,7 @@ MAZMUN VA TUZILMA TALABLARI:
 - Tilni mavzu va manbaga mos tanla. O'zbekcha mavzu bo'lsa o'zbekcha yoz.
 - JSON kalitlari to'liq bo'lsin; chapters ichidagi har bir bo'limda heading va mazmunli body bo'lishi shart.
 - JSONni yuborishdan oldin matnni ichki imlo va grammatik tekshiruvdan o'tkaz: o'zbekcha so'zlarni bo'lib yuborma, buzilgan so'z birikmalarini tuzat, apostrof va qo'shimchalarni to'g'ri yoz.
+- Yakuniy tekshiruvda ayniqsa "organik-inorgaik", "algeritmlari" kabi buzilgan shakllar qolmaganini tekshir; ularni kontekstga mos ravon o'zbekcha shaklga kelt.
 - "yo'lga qo mehanizmi", "buutli", "prinitsipal", "million lab", "mehnating xavfsizligini", "kompyuteriy ko'rish" kabi xato shakllar bo'lmasin; ravon va tabiiy o'zbek tilida yoz.
 - Mazmunni o'zgartirmasdan imlo xatolarini tuzat; noaniq terminni taxminiy fakt bilan almashtirma.
 - Markdown, izoh, kod bloki yoki JSON tashqarisida matn qaytarma.
@@ -82,7 +83,7 @@ MAZMUN VA TUZILMA TALABLARI:
 MANBALAR VA ADABIYOTLAR HALOLligi:
 - Manba berilgan bo'lsa, faktlarni avvalo shu manbaga tayantir; manbada yo'q ma'lumotni undan olingandek ko'rsatma.
 - "references" ro'yxatiga faqat real ekaniga ishonching komil bo'lgan kitoblar, ilmiy asarlar yoki rasmiy tashkilot hujjatlarini kirit.
-- Kamida 3 ta mavzuga bevosita mos manba keltir. Har bir yozuvda mavjud va ishonchli bilgan muallif/tashkilot hamda asar/hujjat nomi bo'lsin.
+- Kamida 3 ta mavzuga bevosita mos, alohida bibliografik manba keltir. Har bir yozuvda mavjud va ishonchli bilgan muallif/tashkilot hamda asar/hujjat nomi bo'lsin; bitta manbani bir necha yozuvga bo'lib ko'rsatma.
 - Nashr yili, nashriyot, DOI yoki URLni faqat aniq bilsang yoz; noma'lum bibliografik maydonlarni taxmin bilan to'ldirma.
 - Agar foydalanuvchi yuklagan manbada adabiyotlar ro'yxati bo'lsa, avvalo o'sha yozuvlarni saqla va mavzuga mos, ishonchli qo'shimcha manbalar bilan to'ldir.
 - "Foydalanilgan adabiyotlar", "qo'shimcha tekshirish kerak", "ishonchli manbalar" kabi umumiy jumlalarni alohida adabiyot sifatida kiritma.
@@ -118,6 +119,8 @@ _KNOWN_TEXT_FIXES = (
     ("de-ruhsizlantirish", "mehnat jarayonini avtomatlashtirish"),
     ("fizik o mezonlari", "fizik o\'lchamlari"),
     (" o mezonlari", " o\'lchamlari"),
+    ("organik-inorgaik", "organik va noorganik"),
+    ("algeritmlari", "algoritmlari"),
 )
 
 
@@ -212,9 +215,10 @@ def _validate_referat(data: Any) -> list[str]:
             len(cleaned_refs) == 1
             and "bibliografik manbalarni mavzu bo'yicha ishonchli aniqlash imkoni bo'lmadi" in cleaned_refs[0].lower()
         )
-        if len(credible_entries) < 1 and not transparent_no_source_notice:
+        if len(credible_entries) < 3 and not transparent_no_source_notice:
             errors.append(
-                "Kamida 1 ta bibliografik manba yoki manbani aniqlab bo'lmagani haqidagi ochiq ogohlantirish kerak."
+                f"Kamida 3 ta alohida bibliografik manba kerak; hozir {len(credible_entries)} ta mos yozuv bor. "
+                "Mavzuga bevosita mos, mavjudligiga ishonchli manbalarni keltir; manbalarni uydirma."
             )
     if "abstract" in data and not isinstance(data["abstract"], str):
         errors.append("abstract matn bo'lishi kerak.")
