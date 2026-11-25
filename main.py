@@ -4705,25 +4705,44 @@ def api_generate_referat(request: Request, user_id: int = Form(...), topic: str 
         if not acquired: raise RuntimeError("AI parallel so'rov o'rnini kutish vaqti tugadi")
         start=_next_generation_key_start(len(GOOGLE_API_KEYS)); content=None; last_error=None
         model_chain = list(dict.fromkeys((GEMINI_MODEL, GEMINI_FALLBACK_MODEL)))
-        # Avval asosiy model, zarurat tug'ilgandagina zaxira model ishlatiladi.
-        for model_name in model_chain:
+        # Asosiy modelda provider-wide 5xx bo'lsa, kalitlarni bekorga aylantirmay zaxiraga o'tamiz.
+        for model_pos, model_name in enumerate(model_chain):
+            key_attempts = 0
+            provider_503_count = 0
             for offset in range(len(GOOGLE_API_KEYS)):
                 key_index=(start+offset)%len(GOOGLE_API_KEYS)
+                key_attempts += 1
                 try:
                     client=genai.Client(api_key=GOOGLE_API_KEYS[key_index],http_options=genai_types.HttpOptions(timeout=AI_REQUEST_TIMEOUT*1000))
-                    content=generate_referat_content(client=client,model=model_name,topic=topic,source_text=source_text,**fields,max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS)
+                    content=generate_referat_content(client=client,model=model_name,topic=topic,source_text=source_text,**fields,max_output_tokens=REFERAT_MAX_OUTPUT_TOKENS,max_attempts=2)
                     logging.info("Referat AI modeli muvaffaqiyatli ishladi | ish=%s | model=%s | kalit_tartib=%s",job_id,model_name,key_index+1)
                     break
                 except ReferatError as exc:
-                    # JSON/tuzilma tekshiruvi tugadi; keyingi model bilan bir marta imkon beramiz.
+                    # JSON/tuzilma xatosi kalit xatosi emas; keyingi modelga bir marta imkon beramiz.
                     last_error=exc
                     logging.warning("Referat javobi talabga mos kelmadi | ish=%s | model=%s | sabab=%s",job_id,model_name,_safe_ai_error_text(exc))
                     break
                 except Exception as exc:
                     last_error=exc
-                    logging.warning("Referat AI so'rovi bajarilmadi | ish=%s | model=%s | kalit_tartib=%s | sabab=%s",job_id,model_name,key_index+1,_safe_ai_error_text(exc))
+                    status_code=_ai_http_status_code(exc)
+                    logging.warning("Referat AI so'rovi bajarilmadi | ish=%s | model=%s | kalit_tartib=%s | http=%s | sabab=%s",job_id,model_name,key_index+1,status_code,_safe_ai_error_text(exc))
+                    if status_code in (500,502,503,504):
+                        provider_503_count += 1
+                        # 5xx ko'pincha model/server yuklamasi; bir model uchun ko'pi bilan 2 urinish.
+                        if provider_503_count >= 2 or key_attempts >= 2:
+                            logging.warning("Gemini modelida vaqtinchalik server yuklamasi aniqlandi; keyingi modelga o'tilmoqda | ish=%s | model=%s | http=%s",job_id,model_name,status_code)
+                            break
+                        time.sleep(1.0)
+                        continue
+                    # 429/401 kabi kalitga bog'liq xatolarda keyingi kalitni tekshirish mumkin.
+                    if status_code == 429:
+                        continue
+                    # Noma'lum xatolarda barcha kalitlarni ketma-ket urmasdan modelni almashtiramiz.
+                    break
             if content is not None:
                 break
+            if model_pos == len(model_chain)-1:
+                logging.error("Asosiy va zaxira Gemini modellari bilan natija olinmadi | ish=%s",job_id)
         if content is None: raise RuntimeError(_safe_ai_error_text(last_error or "AI javob bermadi"))
         meta=dict(fields)
         # PDF sahifalanishi mundarija uchun asosiy manba; Word'ga tayyor raqamlar beriladi.
@@ -5573,6 +5592,22 @@ def _safe_ai_error_text(error):
     )
     message = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [MAXFIY]", message)
     return message[:180]
+
+
+def _ai_http_status_code(error):
+    """Gemini exceptiondan HTTP holat kodini xavfsiz ajratadi."""
+    for attr in ("code", "status_code", "http_status"):
+        value = getattr(error, attr, None)
+        try:
+            if value is not None:
+                number = int(value)
+                if 400 <= number <= 599:
+                    return number
+        except (TypeError, ValueError):
+            pass
+    message = _safe_ai_error_text(error)
+    match = re.search(r"\b(429|500|502|503|504)\b", message)
+    return int(match.group(1)) if match else None
 
 
 def _maybe_alert_ai_queue_load():
