@@ -78,6 +78,8 @@ MAZMUN VA TUZILMA TALABLARI:
 - Yakuniy tekshiruvda ayniqsa "organik-inorgaik", "algeritmlari" kabi buzilgan shakllar qolmaganini tekshir; ularni kontekstga mos ravon o'zbekcha shaklga kelt.
 - "yo'lga qo mehanizmi", "buutli", "prinitsipal", "million lab", "mehnating xavfsizligini", "kompyuteriy ko'rish" kabi xato shakllar bo'lmasin; ravon va tabiiy o'zbek tilida yoz.
 - "mezon" so'zini gap ichiga tasodifan qo'shib yuborma. "bo mezonlanadi", "sho mezon", "bog mezon", "o mezonlashtirib", "ANTROPOGEN TA MEZON" kabi buzilgan iboralar mutlaqo bo'lmasin; bunday joylarni mazmunga mos ravon o'zbekcha qayta tuz.
+- Har bir gapni tabiiy o'zbekcha grammatikasi bilan tekshir. "yaqin yashil o'pkasi" kabi g'alati birikma yoki "beqiyos o'ynaydi" kabi noto'g'ri birikma ishlatma; mazmunni saqlab, tabiiy shaklda qayta yoz.
+- So'zlar orasiga tasodifiy bo'lak, ortiqcha so'z yoki noto'g'ri qo'shimcha kirib qolmaganini tekshir. Grammatik jihatdan shubhali jumlani avtomatik ravishda qabul qilma: uni qayta tuz.
 - Mazmunni o'zgartirmasdan imlo xatolarini tuzat; noaniq terminni taxminiy fakt bilan almashtirma.
 - Markdown, izoh, kod bloki yoki JSON tashqarisida matn qaytarma.
 
@@ -122,6 +124,8 @@ _KNOWN_TEXT_FIXES = (
     (" o mezonlari", " o\'lchamlari"),
     ("organik-inorgaik", "organik va noorganik"),
     ("algeritmlari", "algoritmlari"),
+    ("beqiyos o'ynaydi", "beqiyos rol o'ynaydi"),
+    ("asosiy 'yaqin yashil o'pkasi'", "sayyoraning 'yashil o'pkasi'"),
 )
 
 
@@ -155,10 +159,13 @@ def _known_language_quality_issues(data: Any) -> list[str]:
         r"\bbog\s+mezon\b",
         r"\bo\s+mezonlashtirib\b",
         r"\bANTROPOGEN\s+TA\s+MEZON\b",
+        r"\byaqin\s+yashil\s+o[ʻ’']pkasi\b",
+        r"\bbeqiyos\s+o[ʻ’']ynaydi\b",
+        r"\bquruqlik\s+turlarining\s+yarmidan\s+ko[ʻ’']pi\b",
     )
     for pattern in suspicious_mezon_patterns:
         if re.search(pattern, serialized, flags=re.IGNORECASE):
-            issues.append("Matnda noto'g'ri 'mezon' birikmasi bor; ushbu gapni qayta tuz.")
+            issues.append("Matnda grammatik yoki mazmunan shubhali birikma bor; tegishli gapni tabiiy o'zbekcha qayta tuz.")
             break
     return issues
 
