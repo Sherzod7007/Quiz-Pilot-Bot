@@ -67,7 +67,7 @@ MAZMUN VA TUZILMA TALABLARI:
 - Kirish, kamida 3 ta bob, har bir bobda kamida 2 ta kichik bo'lim, xulosa va foydalanilgan adabiyotlar bo'lsin.
 - Har bir bob mavzuning alohida jihatini ochsin; boblar va bo'limlar bir-birini takrorlamasin.
 - Har bir kichik bo'limni batafsil va mazmunan mustaqil yoz: ta'rif, nazariy asos, sabab-oqibat, amaliy qo'llanish va mavzuga mos misol bo'lsin.
-- Har bir kichik bo'lim taxminan 300-400 so'zdan iborat bo'lsin; qisqa ta'riflar yoki umumiy gaplar bilan cheklanma.
+- Har bir kichik bo'limni odatda 180-250 so'z atrofida yoz; mavzuni yetarli och, lekin JSON javobini haddan tashqari uzaytirma.
 - Har bir bo'limda bir necha izchil paragraf bo'lsin. Bob sarlavhasidan keyin bo'limlarni chuqur och, oldingi bo'limdagi fikrlarni takrorlama.
 - Hajmni sun'iy takrorlash bilan emas, tushuntirish, tahlil, misol va amaliy ahamiyat bilan kengaytir.
 - Kirishda dolzarblik, maqsad, vazifalar, obyekt va predmetni izchil yorit.
@@ -154,8 +154,8 @@ def _validate_referat(data: Any) -> list[str]:
             errors.append(f"{key} kaliti yo'q.")
     if not isinstance(data.get("title"), str) or len(data.get("title", "").strip()) < 4:
         errors.append("title matni bo'sh yoki juda qisqa.")
-    if not isinstance(data.get("introduction"), str) or len(data.get("introduction", "").strip()) < 450:
-        errors.append("Kirish kamida 450 belgidan iborat bo'lishi kerak.")
+    if not isinstance(data.get("introduction"), str) or len(data.get("introduction", "").strip()) < 250:
+        errors.append("Kirish kamida 250 belgidan iborat bo'lishi kerak.")
     chapters = data.get("chapters")
     if not isinstance(chapters, list) or len(chapters) < 3:
         errors.append("Kamida 3 ta bob bo'lishi shart.")
@@ -176,13 +176,13 @@ def _validate_referat(data: Any) -> list[str]:
                     errors.append(f"{ci}-bob, {si}-bo'lim sarlavhasi yo'q.")
                 body = section.get("body", "").strip() if isinstance(section.get("body"), str) else ""
                 word_count = len(re.findall(r"\b[\wʻ’'-]+\b", body, flags=re.UNICODE))
-                if word_count < 220 or len(body) < 1300:
+                if word_count < 100 or len(body) < 600:
                     errors.append(
-                        f"{ci}-bob, {si}-bo'lim qisqa: {word_count} so'z. "
-                        "Bo'limni kamida 220 so'z va 1300 belgi darajasida mazmunan kengaytir."
+                        f"{ci}-bob, {si}-bo'lim juda qisqa: {word_count} so'z. "
+                        "Kamida 100 so'z va 600 belgi bilan mazmunan to'ldir."
                     )
-    if not isinstance(data.get("conclusion"), str) or len(data.get("conclusion", "").strip()) < 350:
-        errors.append("Xulosa kamida 350 belgidan iborat bo'lishi kerak.")
+    if not isinstance(data.get("conclusion"), str) or len(data.get("conclusion", "").strip()) < 200:
+        errors.append("Xulosa kamida 200 belgidan iborat bo'lishi kerak.")
     refs = data.get("references")
     if not isinstance(refs, list) or not refs or any(not isinstance(x, str) or not x.strip() for x in refs):
         errors.append("Foydalanilgan adabiyotlar ro'yxati bo'sh yoki noto'g'ri.")
@@ -212,10 +212,9 @@ def _validate_referat(data: Any) -> list[str]:
             len(cleaned_refs) == 1
             and "bibliografik manbalarni mavzu bo'yicha ishonchli aniqlash imkoni bo'lmadi" in cleaned_refs[0].lower()
         )
-        if len(credible_entries) < 3 and not transparent_no_source_notice:
+        if len(credible_entries) < 1 and not transparent_no_source_notice:
             errors.append(
-                f"Kamida 3 ta alohida, mavzuga mos bibliografik manba kerak; "
-                f"hozir {len(credible_entries)} ta yaroqli yozuv bor."
+                "Kamida 1 ta bibliografik manba yoki manbani aniqlab bo'lmagani haqidagi ochiq ogohlantirish kerak."
             )
     if "abstract" in data and not isinstance(data["abstract"], str):
         errors.append("abstract matn bo'lishi kerak.")
@@ -264,7 +263,13 @@ def generate_referat_content(*, client: Any, model: str, topic: str,
                 raw = raw.strip("`")
                 if raw.lower().startswith("json"):
                     raw = raw[4:].strip()
-            data = json.loads(raw)
+            # Model ba'zan JSONdan keyin ortiqcha matn yoki ikkinchi JSON bo'lagini qo'shadi.
+            # Birinchi to'liq JSON obyektini ajratib olamiz; noto'g'ri JSON baribir validation'dan o'tmaydi.
+            decoder = json.JSONDecoder()
+            start = raw.find("{")
+            if start < 0:
+                raise ValueError("Javob ichida JSON obyekt topilmadi.")
+            data, _json_end = decoder.raw_decode(raw[start:])
             data = _correct_known_text_errors(data)
             errors = _validate_referat(data) + _known_language_quality_issues(data)
             if not errors:
