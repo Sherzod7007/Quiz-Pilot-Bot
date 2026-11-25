@@ -14213,8 +14213,11 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
         // ===== Yengil rejim — kuchsizroq qurilmalar uchun =====
         const PERFORMANCE_STORAGE_KEY = `quizpilot_performance_${userId}`;
         let performanceLite = (() => {
-            try { return localStorage.getItem(PERFORMANCE_STORAGE_KEY) === 'lite'; }
-            catch(e) { return false; }
+            try {
+                const savedMode = localStorage.getItem(PERFORMANCE_STORAGE_KEY);
+                return savedMode === null ? true : savedMode === 'lite';
+            }
+            catch(e) { return true; }
         })();
 
         function updatePerformanceToggle() {
@@ -14240,7 +14243,7 @@ html[data-quiz-theme] #create-promo-carousel .create-promo-slide:nth-child(5) { 
             applyPerformanceMode(true);
         }
 
-        applyPerformanceMode(false);
+        applyPerformanceMode(true);
 
         // ===== Ovoz sozlamasi =====
         const SOUND_STORAGE_KEY = `quizpilot_sound_${userId}`;
